@@ -106,6 +106,15 @@ export function l2Distance(query: Float32Array, target: Float32Array): number {
 }
 
 /**
+ * 方式ごとのスコア計算です。
+ */
+const SCORERS: Record<VectorMetric, (left: Float32Array, right: Float32Array) => number> = {
+  l2: (left, right) => -l2Distance(left, right),
+  dot: dotProduct,
+  cosine: cosineSimilarity,
+};
+
+/**
  * 指定した方式でスコアを求めます。降順で並べ替えられることを想定します。
  *
  * @param metric ベクトル類似度の計算方式です。
@@ -119,11 +128,5 @@ export function scoreVector(
   query: Float32Array,
   target: Float32Array,
 ): number {
-  const scorers: Record<VectorMetric, (left: Float32Array, right: Float32Array) => number> = {
-    l2: (left, right) => -l2Distance(left, right),
-    dot: dotProduct,
-    cosine: cosineSimilarity,
-  };
-
-  return scorers[metric](query, target);
+  return SCORERS[metric](query, target);
 }

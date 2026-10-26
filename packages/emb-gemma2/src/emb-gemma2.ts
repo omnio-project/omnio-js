@@ -171,31 +171,15 @@ export class Gemma2Embedder implements IEmbedder {
 
     if (c.input.kind === "text") {
       const vectors = await this.#embedBatch([c.input.text], c.signal);
-      const vector = vectors[0];
 
-      if (vector === undefined) {
-        throw new EmbedFailedError({
-          kind: "text",
-          cause: new Error("Empty embedding result"),
-        });
-      }
-
-      return vector;
+      return this.#requireVector(vectors[0], "text");
     }
 
     if (c.input.kind === "image") {
       const rawImage = await this.#decodeImage(c.input.data, c.input.mimeType, c.signal);
       const vectors = await this.#embedImages([rawImage], c.signal);
-      const vector = vectors[0];
 
-      if (vector === undefined) {
-        throw new EmbedFailedError({
-          kind: "image",
-          cause: new Error("Empty embedding result"),
-        });
-      }
-
-      return vector;
+      return this.#requireVector(vectors[0], "image");
     }
 
     const kind: string = (c.input as { kind: string }).kind;
@@ -275,29 +259,11 @@ export class Gemma2Embedder implements IEmbedder {
     const vectors: Float32Array[] = [];
 
     for (const [position, entry] of texts.entries()) {
-      const vector = textVectors[position];
-
-      if (vector === undefined) {
-        throw new EmbedFailedError({
-          kind: "text",
-          cause: new Error("Empty embedding result"),
-        });
-      }
-
-      vectors[entry.index] = vector;
+      vectors[entry.index] = this.#requireVector(textVectors[position], "text");
     }
 
     for (const [position, entry] of images.entries()) {
-      const vector = imageVectors[position];
-
-      if (vector === undefined) {
-        throw new EmbedFailedError({
-          kind: "image",
-          cause: new Error("Empty embedding result"),
-        });
-      }
-
-      vectors[entry.index] = vector;
+      vectors[entry.index] = this.#requireVector(imageVectors[position], "image");
     }
 
     return vectors;
@@ -316,16 +282,8 @@ export class Gemma2Embedder implements IEmbedder {
     using _lock = await asyncmux(this, c.signal);
 
     const vectors = await this.#embedBatch([c.text], c.signal);
-    const vector = vectors[0];
 
-    if (vector === undefined) {
-      throw new EmbedFailedError({
-        kind: "text",
-        cause: new Error("Empty embedding result"),
-      });
-    }
-
-    return vector;
+    return this.#requireVector(vectors[0], "text");
   }
 
   /**
@@ -351,6 +309,32 @@ export class Gemma2Embedder implements IEmbedder {
   }
 
   /**
+   * モデルの読み込み設定を作ります。
+   *
+   * @returns dtype、device、subfolder を含む読み込み設定です。
+   */
+  #modelLoadOptions(): {
+    dtype: DataType;
+    device?: DeviceType;
+    subfolder: string;
+  } {
+    const options: {
+      dtype: DataType;
+      device?: DeviceType;
+      subfolder: string;
+    } = {
+      dtype: this.#dtype,
+      subfolder: this.#subfolder,
+    };
+
+    if (this.#device !== undefined) {
+      options.device = this.#device;
+    }
+
+    return options;
+  }
+
+  /**
    * モデルを読み込んで推論器を作ります。
    *
    * @returns 推論器を解決する Promise です。
@@ -358,20 +342,8 @@ export class Gemma2Embedder implements IEmbedder {
   async #loadExtractor(): Promise<FeatureExtractionPipeline> {
     try {
       const { pipeline } = await import("@huggingface/transformers");
-      const options: {
-        dtype: DataType;
-        device?: DeviceType;
-        subfolder: string;
-      } = {
-        dtype: this.#dtype,
-        subfolder: this.#subfolder,
-      };
 
-      if (this.#device !== undefined) {
-        options.device = this.#device;
-      }
-
-      return await pipeline("feature-extraction", this.#model, options);
+      return await pipeline("feature-extraction", this.#model, this.#modelLoadOptions());
     } catch (ex) {
       this.#loading = undefined;
       throw new ModelLoadError({
@@ -392,19 +364,7 @@ export class Gemma2Embedder implements IEmbedder {
   async #loadImageBackend(): Promise<ImageBackend> {
     try {
       const { AutoModel, AutoProcessor } = await import("@huggingface/transformers");
-      const options: {
-        dtype: DataType;
-        device?: DeviceType;
-        subfolder: string;
-      } = {
-        dtype: this.#dtype,
-        subfolder: this.#subfolder,
-      };
-
-      if (this.#device !== undefined) {
-        options.device = this.#device;
-      }
-
+      const options = this.#modelLoadOptions();
       const processor = await AutoProcessor.from_pretrained(this.#model, options);
       const model = await AutoModel.from_pretrained(this.#model, options);
 
@@ -561,6 +521,25 @@ export class Gemma2Embedder implements IEmbedder {
     }
 
     return vectors;
+  }
+
+  /**
+   * 単一の埋め込み結果を検証します。
+   *
+   * @param vector 埋め込み結果です。
+   * @param kind 埋め込んだ入力の種類です。
+   *
+   * @returns 検証済みの埋め込みベクトルです。
+   */
+  #requireVector(vector: Float32Array | undefined, kind: string): Float32Array {
+    if (vector === undefined) {
+      throw new EmbedFailedError({
+        kind,
+        cause: new Error("Empty embedding result"),
+      });
+    }
+
+    return vector;
   }
 
   /**

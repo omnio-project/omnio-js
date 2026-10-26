@@ -192,8 +192,19 @@ class SqliteWasmDriver implements Driver {
 
   /**
    * ドライバーを初期化します。
+   *
+   * 外部キー制約を有効にし、参照の削除をカスケードさせます。
    */
-  public async init(): Promise<void> {}
+  public async init(): Promise<void> {
+    try {
+      this.#db.exec("PRAGMA foreign_keys = ON");
+    } catch (ex) {
+      throw new DbQueryError({
+        cause: ex,
+        operation: "open",
+      });
+    }
+  }
 
   /**
    * 単一の共有接続を取得します。

@@ -2,46 +2,63 @@ import { type IEmbedder, OmnioKey, DbNotOpenError, InvalidOmnioKeyError } from "
 import { SqliteWasmIndex } from "@omniojs/idx-sqlite.wasm";
 import { Memory } from "@unikvs/memory";
 import { type Value, UniKvs } from "unikvs";
-import { test, describe } from "vite-plus/test";
+import { vi, test, describe } from "vite-plus/test";
 
+import type { OmnioEntity } from "../src/entity.js";
 import { Omnio } from "../src/omnio.js";
 
 /**
  * 検証用の埋め込み器です。
  *
  * "cat" を含む文は [1, 0]、"dog" を含む文は [0, 1]、それ以外は正規化した中間値にします。
- * 外部への問い合わせはしないため、決定的に動作します。
+ * 画像はすべて [1, 0] にします。外部への問い合わせはしないため、決定的に動作します。
  */
 class FakeEmbedder implements IEmbedder {
   public readonly info = {
     dims: 2,
     name: "fake-model",
-    modalities: ["text"],
+    modalities: ["text", "image"],
     normalized: true,
     multilingual: false,
   } as const;
 
   public supports(c: IEmbedder.SupportsContext): boolean {
-    return c.modality === "text";
+    return c.modality === "text" || c.modality === "image";
   }
 
   public async embed(c: IEmbedder.EmbedContext): Promise<Float32Array> {
-    if (c.input.kind !== "text") {
-      throw new Error(`unsupported: ${c.input.kind}`);
+    if (c.input.kind === "text") {
+      return this.#vectorFor(c.input.text);
     }
 
-    return this.#vectorFor(c.input.text);
+    if (c.input.kind === "image") {
+      return new Float32Array([1, 0]);
+    }
+
+    const kind: string = (c.input as { kind: string }).kind;
+
+    throw new Error(`unsupported: ${kind}`);
   }
 
   public async embedMany(c: IEmbedder.EmbedManyContext): Promise<Float32Array[]> {
     const vectors: Float32Array[] = [];
 
     for (const input of c.inputs) {
-      if (input.kind !== "text") {
-        throw new Error(`unsupported: ${input.kind}`);
+      if (input.kind === "text") {
+        vectors.push(this.#vectorFor(input.text));
+
+        continue;
       }
 
-      vectors.push(this.#vectorFor(input.text));
+      if (input.kind === "image") {
+        vectors.push(new Float32Array([1, 0]));
+
+        continue;
+      }
+
+      const kind: string = (input as { kind: string }).kind;
+
+      throw new Error(`unsupported: ${kind}`);
     }
 
     return vectors;
@@ -74,17 +91,32 @@ class FakeEmbedder implements IEmbedder {
 type TestMapping = Record<string, Value<Uint8Array>>;
 
 /**
+ * 検証用の実体ストレージーを作ります。
+ *
+ * メモリー上にバイト列を保存します。
+ *
+ * @returns 開く前の実体ストレージーです。
+ */
+function createTestEntity(): OmnioEntity {
+  return UniKvs.config<TestMapping>().appendStorage(new Memory()).create();
+}
+
+/**
  * 検証用の Omnio を作ります。
  *
  * メモリー実体とメモリー索引、検証用埋め込み器を組み合わせます。
  *
  * @param signal 処理を中断するための中断シグナルです。
+ * @param index 検証に使うインデックスです。省略時は新しい索引を作ります。
+ * @param entity 検証に使う実体ストレージーです。省略時は新しい実体ストレージーを作ります。
  *
  * @returns 開いた状態の Omnio です。
  */
-async function createTestOmnio(signal: AbortSignal): Promise<Omnio> {
-  const entity = UniKvs.config<TestMapping>().appendStorage(new Memory()).create();
-  const index = new SqliteWasmIndex();
+async function createTestOmnio(
+  signal: AbortSignal,
+  index: SqliteWasmIndex = new SqliteWasmIndex(),
+  entity: OmnioEntity = createTestEntity(),
+): Promise<Omnio> {
   const omnio = new Omnio({
     index,
     entity,
@@ -186,6 +218,10 @@ describe("putObject と getObject", () => {
     expect(head?.embedding).toStrictEqual(new Float32Array([1, 0]));
     expect(head?.embeddingModel).toBe("fake-model");
     expect(head?.embeddingDims).toBe(2);
+    expect(head?.embeddingSource).toStrictEqual({
+      kind: "description",
+      model: "fake-model",
+    });
 
     // 後始末：
     await omnio.close(signal);
@@ -272,6 +308,92 @@ describe("putObject と getObject", () => {
     // 検証：
     expect(second.system.createdAt).toBe(first.system.createdAt);
     expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([1, 2]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("上書きの索引保存に失敗したら既存の実体とメタデータを残す", async ({ expect, signal }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index);
+    await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1, 2, 3]),
+      contentType: "text/plain",
+      description: "cat on the mat",
+      userMetadata: { version: 1 },
+    });
+
+    const failure = new Error("upsert failed");
+    using _upsert = vi.spyOn(index, "upsert").mockRejectedValueOnce(failure);
+
+    // 実行と検証：
+    await expect(
+      omnio.putObject({
+        key: "k",
+        data: new Uint8Array([9]),
+        contentType: "application/octet-stream",
+        description: "dog in the park",
+        userMetadata: { version: 2 },
+      }),
+    ).rejects.toBe(failure);
+
+    expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([1, 2, 3]));
+
+    const head = await omnio.headObject("k", signal);
+    expect(head?.description).toBe("cat on the mat");
+    expect(head?.system.contentType).toBe("text/plain");
+    expect(head?.userMetadata).toStrictEqual({ version: 1 });
+    expect(head?.embedding).toStrictEqual(new Float32Array([1, 0]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("索引にない既存実体の上書きに失敗しても実体を残す", async ({ expect, signal }) => {
+    // 準備：
+    const entity = createTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, entity);
+    await entity.set("orphan", new Uint8Array([1, 2, 3]));
+
+    const failure = new Error("upsert failed");
+    using _upsert = vi.spyOn(index, "upsert").mockRejectedValueOnce(failure);
+
+    // 実行と検証：
+    await expect(
+      omnio.putObject({
+        key: "orphan",
+        data: new Uint8Array([9]),
+        contentType: "text/plain",
+      }),
+    ).rejects.toBe(failure);
+
+    expect(await omnio.getObject("orphan", signal)).toStrictEqual(new Uint8Array([1, 2, 3]));
+    expect(await omnio.headObject("orphan", signal)).toBeNull();
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("新規キーの索引保存に失敗したら実体を残さない", async ({ expect, signal }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index);
+    const failure = new Error("upsert failed");
+    using _upsert = vi.spyOn(index, "upsert").mockRejectedValueOnce(failure);
+
+    // 実行と検証：
+    await expect(
+      omnio.putObject({
+        key: "fresh",
+        data: new Uint8Array([1]),
+        contentType: "text/plain",
+      }),
+    ).rejects.toBe(failure);
+    expect(await omnio.getObject("fresh", signal)).toBeNull();
+    expect(await omnio.headObject("fresh", signal)).toBeNull();
 
     // 後始末：
     await omnio.close(signal);
@@ -495,6 +617,40 @@ describe("searchObjects", () => {
     await omnio.close(signal);
   });
 
+  test("画像検索でも同じ埋め込みモデルの結果だけを返す", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    await omnio.putObject({
+      key: "described",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+      description: "cat on the mat",
+    });
+    await omnio.putObject({
+      key: "explicit",
+      data: new Uint8Array([2]),
+      embedding: new Float32Array([1, 0]),
+      contentType: "text/plain",
+    });
+
+    // 実行：
+    const actual = await omnio.searchObjects({
+      topK: 10,
+      query: {
+        image: new Uint8Array([1]),
+        mimeType: "image/png",
+      },
+      signal,
+    });
+
+    // 検証：
+    expect(actual.map((item) => item.key.key)).toStrictEqual(["described"]);
+    expect(actual[0]?.embeddingModel).toBe("fake-model");
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
   test("includeEmbedding を無効にすると埋め込みを省く", async ({ expect, signal }) => {
     // 準備：
     const omnio = await createTestOmnio(signal);
@@ -563,6 +719,10 @@ describe("reindexObject", () => {
     // 検証：
     expect(actual?.embedding).toStrictEqual(new Float32Array([1, 0]));
     expect(actual?.embeddingModel).toBe("fake-model");
+    expect(actual?.embeddingSource).toStrictEqual({
+      kind: "description",
+      model: "fake-model",
+    });
     expect(head?.embedding).toStrictEqual(new Float32Array([1, 0]));
 
     // 後始末：

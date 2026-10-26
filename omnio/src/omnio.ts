@@ -137,7 +137,9 @@ function copiedBytes(data: Uint8Array): Uint8Array<ArrayBuffer> {
  *
  * @returns ArrayBuffer に裏打ちされたバイト列の複製です。
  */
-async function toBytes(data: Uint8Array | Blob | ReadableStream<Uint8Array>): Promise<Uint8Array> {
+async function toBytes(
+  data: Uint8Array | Blob | ReadableStream<Uint8Array>,
+): Promise<Uint8Array<ArrayBuffer>> {
   if (data instanceof Uint8Array) {
     return new Uint8Array(data);
   }
@@ -185,13 +187,29 @@ async function toBytes(data: Uint8Array | Blob | ReadableStream<Uint8Array>): Pr
  *
  * @returns 16 進数 64 文字のハッシュ値です。
  */
-async function sha256Hex(data: Uint8Array): Promise<string> {
-  const view = new Uint8Array(data.byteLength);
-  view.set(data);
-
-  const digest = await crypto.subtle.digest("SHA-256", view);
+async function sha256Hex(data: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", data);
 
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * キーが見つからない例外を null に変換します。
+ *
+ * @param load 実行する取得処理です。
+ *
+ * @returns 取得した値、キーが存在しない場合は null です。
+ */
+async function nullIfKeyNotFound<T>(load: () => Promise<T>): Promise<T | null> {
+  try {
+    return await load();
+  } catch (ex) {
+    if (ex instanceof KeyNotFoundError) {
+      return null;
+    }
+
+    throw ex;
+  }
 }
 
 /**
@@ -317,16 +335,10 @@ export class Omnio {
     if (input.embedding !== undefined) {
       embedding = input.embedding;
     } else if ((input.embed ?? true) && input.description !== undefined) {
-      embedding = await this.#embedder.embedText({
-        text: input.description,
-        action: "embedText",
-        signal: active,
-      });
-      embeddingModel = this.#embedder.info.name;
-      embeddingSource = {
-        kind: "description",
-        model: this.#embedder.info.name,
-      };
+      const embedded = await this.#embedDescription(input.description, active);
+      embedding = embedded.embedding;
+      embeddingModel = embedded.embeddingModel;
+      embeddingSource = embedded.embeddingSource;
     }
 
     const object: OmnioObject<TUserMetadata> = {
@@ -346,17 +358,18 @@ export class Omnio {
       embeddingModel,
       embeddingSource,
     };
-
-    await this.#entity.set(keyString, bytes, { signal: active });
+    const previousBytes =
+      (await nullIfKeyNotFound(() => this.#entity.get(keyString, { signal: active }))) ?? undefined;
 
     try {
+      await this.#entity.set(keyString, bytes, { signal: active });
       await this.#index.upsert({
         action: "upsert",
         object,
         signal: active,
       });
     } catch (ex) {
-      await this.#entity.delete(keyString, { signal: active }).catch(() => undefined);
+      await this.#restoreEntity(keyString, previousBytes).catch(() => undefined);
       throw ex;
     }
 
@@ -379,15 +392,7 @@ export class Omnio {
 
     this.#requireOpen("getObject");
 
-    try {
-      return await this.#entity.get(toOmnioKey(key).key, { signal: active });
-    } catch (ex) {
-      if (ex instanceof KeyNotFoundError) {
-        return null;
-      }
-
-      throw ex;
-    }
+    return await nullIfKeyNotFound(() => this.#entity.get(toOmnioKey(key).key, { signal: active }));
   }
 
   /**
@@ -411,15 +416,9 @@ export class Omnio {
 
     this.#requireOpen("streamObject");
 
-    try {
-      return await this.#entity.stream(toOmnioKey(key).key, { signal: active });
-    } catch (ex) {
-      if (ex instanceof KeyNotFoundError) {
-        return null;
-      }
-
-      throw ex;
-    }
+    return await nullIfKeyNotFound(() =>
+      this.#entity.stream(toOmnioKey(key).key, { signal: active }),
+    );
   }
 
   /**
@@ -549,6 +548,8 @@ export class Omnio {
         action: "embed",
         signal: active,
       });
+
+      embeddingModel = this.#embedder.info.name;
     }
 
     const results = await this.#index.search<TUserMetadata>({
@@ -600,20 +601,13 @@ export class Omnio {
       return object;
     }
 
-    const embedding = await this.#embedder.embedText({
-      text: object.description,
-      action: "embedText",
-      signal: active,
-    });
+    const embedded = await this.#embedDescription(object.description, active);
     const reindexed: OmnioObject<TUserMetadata> = {
       ...object,
-      embedding,
-      embeddingDims: embedding.length,
-      embeddingModel: this.#embedder.info.name,
-      embeddingSource: {
-        kind: "description",
-        model: this.#embedder.info.name,
-      },
+      embedding: embedded.embedding,
+      embeddingDims: embedded.embedding.length,
+      embeddingModel: embedded.embeddingModel,
+      embeddingSource: embedded.embeddingSource,
       system: {
         ...object.system,
         updatedAt: new Date().toISOString(),
@@ -626,6 +620,57 @@ export class Omnio {
     });
 
     return reindexed;
+  }
+
+  /**
+   * 説明文の埋め込みと、その由来のメタデータを作ります。
+   *
+   * @param text 埋め込む説明文です。
+   * @param signal 処理を中断するための中断シグナルです。
+   *
+   * @returns 埋め込みベクトルとモデル名、由来です。
+   */
+  async #embedDescription(
+    text: string,
+    signal: AbortSignal,
+  ): Promise<{
+    embedding: Float32Array;
+    embeddingModel: string;
+    embeddingSource: EmbedSource;
+  }> {
+    const embedding = await this.#embedder.embedText({
+      text,
+      action: "embedText",
+      signal,
+    });
+
+    return {
+      embedding,
+      embeddingModel: this.#embedder.info.name,
+      embeddingSource: {
+        kind: "description",
+        model: this.#embedder.info.name,
+      },
+    };
+  }
+
+  /**
+   * 失敗した保存の実体を元の状態に戻します。
+   *
+   * 保存前のバイト列があればそれを書き戻し、ない場合は削除します。
+   * 中断シグナルは使わず、補償処理が中断で失敗しないようにします。
+   *
+   * @param key 復元するキーです。
+   * @param previousBytes 保存前のバイト列です。存在しない場合もあります。
+   */
+  async #restoreEntity(key: string, previousBytes: Uint8Array | undefined): Promise<void> {
+    if (previousBytes !== undefined) {
+      await this.#entity.set(key, previousBytes, { signal: NEVER_ABORTED });
+
+      return;
+    }
+
+    await this.#entity.delete(key, { signal: NEVER_ABORTED });
   }
 
   /**

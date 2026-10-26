@@ -1,11 +1,14 @@
 import {
   type OmnioObject,
   OmnioKey,
+  DbQueryError,
   DbNotOpenError,
   VectorDimensionMismatchError,
 } from "@omniojs/core";
-import { test, describe } from "vite-plus/test";
+import type { Migration } from "kysely/migration";
+import { vi, test, describe } from "vite-plus/test";
 
+import { SqliteWasmMigrationProvider } from "../src/migrations.js";
 import { SqliteWasmIndex } from "../src/sqlite-index.js";
 
 /**
@@ -258,6 +261,68 @@ describe("lifecycle", () => {
     // 検証：
     expect(name).toBe("AbortError");
     expect(index.isOpen).toBe(false);
+  });
+
+  test("Error 以外のマイグレーション失敗でも開き直せる", async ({ expect, signal }) => {
+    // 準備：
+    const failed: Migration = {
+      up: () => Promise.reject("migration failed"),
+    };
+    using _getMigrations = vi
+      .spyOn(SqliteWasmMigrationProvider.prototype, "getMigrations")
+      .mockResolvedValueOnce({ failed });
+    const index = new SqliteWasmIndex();
+
+    // 実行と検証：
+    await expect(
+      index.open({
+        action: "open",
+        signal,
+      }),
+    ).rejects.toBeInstanceOf(DbQueryError);
+    expect(index.isOpen).toBe(false);
+    await index.open({
+      action: "open",
+      signal,
+    });
+    expect(index.isOpen).toBe(true);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("マイグレーションが undefined で失敗しても開き直せる", async ({ expect, signal }) => {
+    // 準備：
+    const failed: Migration = {
+      up: () => Promise.reject(undefined),
+    };
+    using _getMigrations = vi
+      .spyOn(SqliteWasmMigrationProvider.prototype, "getMigrations")
+      .mockResolvedValueOnce({ failed });
+    const index = new SqliteWasmIndex();
+
+    // 実行と検証：
+    await expect(
+      index.open({
+        action: "open",
+        signal,
+      }),
+    ).rejects.toBeInstanceOf(DbQueryError);
+    expect(index.isOpen).toBe(false);
+    await index.open({
+      action: "open",
+      signal,
+    });
+    expect(index.isOpen).toBe(true);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
   });
 });
 
@@ -650,6 +715,71 @@ describe("list", () => {
       signal,
     });
   });
+
+  test("利用者メタデータの絞り込みでページ分けする", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    // 実行：
+    const first = await index.list({
+      limit: 1,
+      action: "list",
+      filter: { userMetadata: { color: "red" } },
+      signal,
+    });
+    const second = await index.list({
+      limit: 1,
+      action: "list",
+      cursor: first.nextCursor,
+      filter: { userMetadata: { color: "red" } },
+      signal,
+    });
+
+    // 検証：
+    expect(keysOf(first.items)).toStrictEqual(["k1"]);
+    expect(first.nextCursor).not.toBeNull();
+    expect(keysOf(second.items)).toStrictEqual(["k3"]);
+    expect(second.nextCursor).toBeNull();
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("利用者メタデータが null の記録は例外なく除外する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    const object: OmnioObject<null> = {
+      ...createObject("null-metadata"),
+      userMetadata: null,
+    };
+    await index.upsert({
+      action: "upsert",
+      object,
+      signal,
+    });
+
+    // 実行：
+    const actual = await index.list({
+      action: "list",
+      filter: { userMetadata: { color: "red" } },
+      signal,
+    });
+
+    // 検証：
+    expect(keysOf(actual.items)).toStrictEqual(["k1", "k3"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
 });
 
 describe("search", () => {
@@ -678,6 +808,7 @@ describe("search", () => {
     // 検証：
     expect(keysOf(actual)).toStrictEqual(["a", "b"]);
     expect(actual[0]?.score).toBeCloseTo(1);
+    expect(actual[0]?.embedding).toStrictEqual(new Float32Array([1, 0]));
 
     // 後始末：
     await index.close({

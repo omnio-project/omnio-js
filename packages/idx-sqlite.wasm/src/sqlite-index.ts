@@ -85,6 +85,36 @@ function escapeLikePattern(value: string): string {
 }
 
 /**
+ * 開いているデータベースハンドルを閉じます。
+ *
+ * Kysely の `destroy()` はドライバーの初期化に失敗していると接続を破棄しないため、後始末のフォールバックとして使います。
+ *
+ * @param handle 閉じるデータベースハンドルです。
+ */
+function closeHandle(handle: SqliteWasmHandle): void {
+  if (!handle.isOpen()) {
+    return;
+  }
+
+  try {
+    handle.close();
+  } catch {
+    // 元のエラーを優先するため、後始末の失敗は無視します。
+  }
+}
+
+/**
+ * 非 null のオブジェクトかを確認します。
+ *
+ * @param value 確認する値です。
+ *
+ * @returns 非 null のオブジェクトの場合は true、そうでない場合は false です。
+ */
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
  * 2 つの値が深く等しいかを確認します。
  *
  * @param left 比較する値です。
@@ -117,7 +147,7 @@ function deepEqual(left: unknown, right: unknown): boolean {
     leftEntries.length === rightEntries.length &&
     leftEntries.every(
       ([name, value]) =>
-        name in right && deepEqual(value, (right as Record<string, unknown>)[name]),
+        Object.hasOwn(right, name) && deepEqual(value, (right as Record<string, unknown>)[name]),
     )
   );
 }
@@ -130,12 +160,21 @@ function deepEqual(left: unknown, right: unknown): boolean {
  *
  * @returns 一致する場合は true、そうでない場合は false です。
  */
-function matchesUserMetadata(
-  record: Record<string, unknown>,
-  filter: Record<string, unknown> | undefined,
-): boolean {
+function matchesUserMetadata(record: unknown, filter: unknown): boolean {
   if (filter === undefined) {
     return true;
+  }
+
+  if (!isObjectRecord(filter)) {
+    return false;
+  }
+
+  if (Object.keys(filter).length === 0) {
+    return true;
+  }
+
+  if (!isObjectRecord(record)) {
+    return false;
   }
 
   return Object.entries(filter).every(([name, expected]) => deepEqual(record[name], expected));
@@ -281,15 +320,28 @@ export class SqliteWasmIndex implements IObjectIndex {
     }
 
     const kysely = new Kysely<SqliteWasmDatabase>({ dialect: new SqliteWasmDialect(handle) });
-    const { error } = await new Migrator({
-      db: kysely,
-      provider: new SqliteWasmMigrationProvider(),
-    }).migrateToLatest();
+    let migrationFailed = false;
+    let migrationError: unknown;
 
-    if (error instanceof Error) {
-      handle.close();
+    try {
+      const { error, results } = await new Migrator({
+        db: kysely,
+        provider: new SqliteWasmMigrationProvider(),
+      }).migrateToLatest();
+      migrationError = error;
+      migrationFailed =
+        error !== undefined || results?.some((result) => result.status === "Error") === true;
+    } catch (ex) {
+      // `undefined` を throw するマイグレーションでも失敗として扱います。
+      migrationFailed = true;
+      migrationError = ex;
+    }
+
+    if (migrationFailed) {
+      await kysely.destroy().catch(() => undefined);
+      closeHandle(handle);
       throw new DbQueryError({
-        cause: error,
+        cause: migrationError ?? new Error("Migration failed"),
         operation: "open",
       });
     }
@@ -483,47 +535,25 @@ export class SqliteWasmIndex implements IObjectIndex {
     const userMetadataFilter = c.filter?.userMetadata;
 
     if (userMetadataFilter !== undefined) {
-      const candidates = await withMetadataFilter(
-        kysely.selectFrom("objects").selectAll(),
-        c.filter,
-      )
+      const matched = await withMetadataFilter(kysely.selectFrom("objects").selectAll(), c.filter)
         .orderBy("key")
         .execute();
-      const matched = candidates.filter((row) =>
-        matchesUserMetadata(
-          parseJson(row.user_metadata, "list") as Record<string, unknown>,
-          userMetadataFilter,
-        ),
-      );
-      const page = matched.slice(offset, offset + limit);
-      const tags = await this.#loadTags(
-        kysely,
-        page.map((row) => row.key),
-      );
+      const candidates = matched
+        .filter((row) =>
+          matchesUserMetadata(parseJson(row.user_metadata, "list"), userMetadataFilter),
+        )
+        .slice(offset);
 
-      return {
-        items: page.map((row) =>
-          this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "list"),
-        ),
-        nextCursor: offset + page.length < matched.length ? String(offset + page.length) : null,
-      };
+      return await this.#toListResult<TUserMetadata>(kysely, candidates, limit, offset);
     }
 
-    const rows = await withMetadataFilter(kysely.selectFrom("objects").selectAll(), c.filter)
+    const candidates = await withMetadataFilter(kysely.selectFrom("objects").selectAll(), c.filter)
       .orderBy("key")
       .limit(limit + 1)
       .offset(offset)
       .execute();
-    const page = rows.slice(0, limit);
-    const tags = await this.#loadTags(
-      kysely,
-      page.map((row) => row.key),
-    );
 
-    return {
-      items: page.map((row) => this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "list")),
-      nextCursor: rows.length > limit ? String(offset + limit) : null,
-    };
+    return await this.#toListResult<TUserMetadata>(kysely, candidates, limit, offset);
   }
 
   /**
@@ -546,9 +576,15 @@ export class SqliteWasmIndex implements IObjectIndex {
       return [];
     }
 
-    const rows = await withMetadataFilter(
-      kysely.selectFrom("objects").selectAll(),
-      c.filter,
+    const candidates = withMetadataFilter(kysely.selectFrom("objects").selectAll(), c.filter).where(
+      "objects.embedding",
+      "is not",
+      null,
+    );
+    const rows = await (
+      c.embeddingModel === undefined
+        ? candidates
+        : candidates.where("objects.embedding_model", "=", c.embeddingModel)
     ).execute();
     const metric = c.metric ?? "cosine";
     const scored: {
@@ -565,13 +601,10 @@ export class SqliteWasmIndex implements IObjectIndex {
         continue;
       }
 
-      const vector = decodeEmbedding(row.embedding);
+      const vector = this.#decodeRowEmbedding(row);
 
-      if (row.embedding_dims !== null && row.embedding_dims !== vector.length) {
-        throw new VectorDimensionMismatchError({
-          actual: vector.length,
-          expected: row.embedding_dims,
-        });
+      if (vector === undefined) {
+        continue;
       }
 
       if (vector.length !== c.vector.length) {
@@ -586,10 +619,7 @@ export class SqliteWasmIndex implements IObjectIndex {
 
       if (
         c.filter?.userMetadata !== undefined &&
-        !matchesUserMetadata(
-          parseJson(row.user_metadata, "search") as Record<string, unknown>,
-          c.filter.userMetadata,
-        )
+        !matchesUserMetadata(parseJson(row.user_metadata, "search"), c.filter.userMetadata)
       ) {
         continue;
       }
@@ -608,10 +638,14 @@ export class SqliteWasmIndex implements IObjectIndex {
       top.map(({ row }) => row.key),
     );
 
-    return top.map(({ row, score }) => ({
-      ...this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "search"),
-      score,
-    }));
+    return top.map(({ row, score }) => {
+      const vector = this.#decodeRowEmbedding(row);
+
+      return {
+        ...this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "search", vector),
+        score,
+      };
+    });
   }
 
   /**
@@ -667,19 +701,41 @@ export class SqliteWasmIndex implements IObjectIndex {
   }
 
   /**
-   * 行をオブジェクトに変換します。
+   * 候補行を一覧結果に変換します。
+   *
+   * @param kysely kysely のインスタンスです。
+   * @param candidates 現在位置以降の候補行です。
+   * @param limit 取得する最大件数です。
+   * @param offset 先頭からの件数です。
+   *
+   * @returns 一覧結果です。
+   */
+  async #toListResult<TUserMetadata>(
+    kysely: Kysely<SqliteWasmDatabase>,
+    candidates: readonly ObjectRow[],
+    limit: number,
+    offset: number,
+  ): Promise<IObjectIndex.ListResult<TUserMetadata>> {
+    const page = candidates.slice(0, limit);
+    const tags = await this.#loadTags(
+      kysely,
+      page.map((row) => row.key),
+    );
+
+    return {
+      items: page.map((row) => this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "list")),
+      nextCursor: candidates.length > limit ? String(offset + page.length) : null,
+    };
+  }
+
+  /**
+   * 行の埋め込みを復号し、次元数を検証します。
    *
    * @param row `objects` テーブルの行です。
-   * @param tags タグの一覧です。
-   * @param operation 実行中の操作名です。
    *
-   * @returns 変換したオブジェクトです。
+   * @returns 復号した埋め込みベクトル、埋め込みがない場合は undefined です。
    */
-  #toObject<TUserMetadata>(
-    row: ObjectRow,
-    tags: readonly string[],
-    operation: string,
-  ): OmnioObject<TUserMetadata> {
+  #decodeRowEmbedding(row: ObjectRow): Float32Array | undefined {
     const embedding = row.embedding === null ? undefined : decodeEmbedding(row.embedding);
 
     if (
@@ -693,6 +749,27 @@ export class SqliteWasmIndex implements IObjectIndex {
       });
     }
 
+    return embedding;
+  }
+
+  /**
+   * 行をオブジェクトに変換します。
+   *
+   * @param row `objects` テーブルの行です。
+   * @param tags タグの一覧です。
+   * @param operation 実行中の操作名です。
+   * @param embedding 事前に復号した埋め込みベクトルです。省略時は行から復号します。
+   *
+   * @returns 変換したオブジェクトです。
+   */
+  #toObject<TUserMetadata>(
+    row: ObjectRow,
+    tags: readonly string[],
+    operation: string,
+    embedding?: Float32Array,
+  ): OmnioObject<TUserMetadata> {
+    const decoded = embedding ?? this.#decodeRowEmbedding(row);
+
     return {
       key: OmnioKey.parse(row.key),
       tags: [...tags],
@@ -703,7 +780,7 @@ export class SqliteWasmIndex implements IObjectIndex {
         updatedAt: row.updated_at,
         contentType: row.content_type,
       },
-      embedding,
+      embedding: decoded,
       description: row.description ?? undefined,
       userMetadata: parseJson(row.user_metadata, operation) as TUserMetadata,
       embeddingDims: row.embedding_dims ?? undefined,
