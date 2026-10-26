@@ -39,6 +39,7 @@ strictDepBuilds: true
 onlyBuiltDependencies: []
 allowBuilds:
   esbuild: true
+  onnxruntime-node: true
 
 update:
   ignoreDeps:

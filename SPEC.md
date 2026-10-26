@@ -167,14 +167,16 @@ const entity = UniKvs.config({
 ### 6.4 埋め込み: EmbeddingGemma 2
 
 `@omniojs/emb-gemma2` は、Google DeepMind が 2026 年 10 月 6 日に公開した軽量かつオープンなマルチモーダル埋め込みモデルである EmbeddingGemma 2 を使用します。
+具体的には Transformers.js 用の ONNX 版である `onnx-community/embeddinggemma-2-ONNX` を読み込みます。
 
 実装要件は次のとおりです。
 
-- Hugging Face Transformers.js（`@huggingface/transformers`）による ONNX と WASM 推論であること。
+- Hugging Face Transformers.js（`@huggingface/transformers`）による ONNX 推論であること。
+- 既定の量子化形式は q4 とし、次元数は 768 とします。`dims` オプションで先頭からの切り詰めに対応し、切り詰め後は L2 再正規化します。
 - 日本語と英語の検索品質を優先し、多言語対応を明示すること。
 - 次元数、量子化方式、最大トークン長、正規化の有無を `EmbedderInfo` として公開すること。
 - モデル取得元、ライセンス、キャッシュ方法を文書化すること。
-- ブラウザーでは Cache Storage による永続化と、進捗コールバックを提供すること。
+- v1 ではテキスト埋め込みのみに対応し、画像などの modalities は将来対応とします。
 
 次元数は実装で固定値とせず、モデルの定義値を使います。
 DB 側のカラム定義は `EmbedderInfo.dims` と一致させ、モデル名と次元数をレコードごとに保存します。
