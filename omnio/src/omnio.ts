@@ -10,9 +10,9 @@ import {
   OperationAbortedError,
 } from "@omniojs/core";
 import { asyncmux } from "asyncmux";
-import { type ValueStream, KeyNotFoundError } from "unikvs";
+import { type IValueStream, KeyNotFoundError } from "unikvs";
 
-import type { OmnioEntity } from "./entity.js";
+import type { IOmnioEntity } from "./entity.js";
 
 /** `open` と `close` の既定タイムアウトです。ミリ秒単位で表します。 */
 const DEFAULT_LIFECYCLE_TIMEOUT_MS = 30_000;
@@ -33,7 +33,7 @@ function withLifecycleTimeout(signal: AbortSignal | undefined): AbortSignal {
  */
 export type OmnioOptions = {
   /** 実体を保存するストレージーです。 */
-  readonly entity: OmnioEntity;
+  readonly entity: IOmnioEntity;
 
   /** メタデータとベクトルを保存するインデックスです。 */
   readonly index: IObjectIndex;
@@ -237,7 +237,7 @@ async function nullIfKeyNotFound<T>(load: () => Promise<T>): Promise<T | null> {
  * シグナルを省略した場合はライフサイクルシグナルを使います。
  */
 export class Omnio {
-  readonly #entity: OmnioEntity;
+  readonly #entity: IOmnioEntity;
 
   readonly #index: IObjectIndex;
 
@@ -434,7 +434,7 @@ export class Omnio {
   public async streamObject(
     key: OmnioKey | string,
     signal?: AbortSignal,
-  ): Promise<ValueStream<Uint8Array> | null> {
+  ): Promise<IValueStream<Uint8Array> | null> {
     this.#requireOpen("streamObject");
 
     const active = this.#activeSignal(signal);

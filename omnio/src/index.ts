@@ -1,4 +1,4 @@
-export type { OmnioEntity } from "./entity.js";
+export type { IOmnioEntity } from "./entity.js";
 
 export type {
   OmnioOptions,

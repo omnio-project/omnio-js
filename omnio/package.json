@@ -28,11 +28,11 @@
   "dependencies": {
     "@omniojs/core": "workspace:*",
     "asyncmux": "^0.0.12",
-    "unikvs": "^0.0.12"
+    "unikvs": "^0.0.13"
   },
   "devDependencies": {
     "@omniojs/idx-sqlite.wasm": "workspace:*",
-    "@unikvs/memory": "^0.0.12",
+    "@unikvs/memory": "^0.0.13",
     "@vitest/browser-playwright": "catalog:",
     "@vitest/coverage-istanbul": "catalog:",
     "@vitest/coverage-v8": "catalog:",

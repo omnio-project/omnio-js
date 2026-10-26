@@ -1,4 +1,4 @@
-import type { ValueStream } from "unikvs";
+import type { IValueStream } from "unikvs";
 
 /**
  * `Omnio` が実体の保存に使うストレージーの JavaScript インターフェースです。
@@ -6,7 +6,7 @@ import type { ValueStream } from "unikvs";
  * unikvs の `UniKvs` インスタンスがこの形を満たします。
  * キーは文字列であり、値はバイト列です。
  */
-export interface OmnioEntity {
+export interface IOmnioEntity {
   /**
    * ストレージーを開きます。
    *
@@ -70,5 +70,5 @@ export interface OmnioEntity {
    *
    * @returns バイト列のストリームを解決する Promise です。
    */
-  stream(key: string, options?: { signal?: AbortSignal }): Promise<ValueStream<Uint8Array>>;
+  stream(key: string, options?: { signal?: AbortSignal }): Promise<IValueStream<Uint8Array>>;
 }

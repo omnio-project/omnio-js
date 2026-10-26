@@ -7,10 +7,10 @@ import {
 } from "@omniojs/core";
 import { SqliteWasmIndex } from "@omniojs/idx-sqlite.wasm";
 import { Memory } from "@unikvs/memory";
-import { type Value, UniKvs } from "unikvs";
+import { type Value, Builder } from "unikvs";
 import { vi, test, describe } from "vite-plus/test";
 
-import type { OmnioEntity } from "../src/entity.js";
+import type { IOmnioEntity } from "../src/entity.js";
 import { Omnio } from "../src/omnio.js";
 
 /**
@@ -103,8 +103,8 @@ type TestMapping = Record<string, Value<Uint8Array>>;
  *
  * @returns 開く前の実体ストレージーです。
  */
-function createTestEntity(): OmnioEntity {
-  return UniKvs.config<TestMapping>().appendStorage(new Memory()).create();
+function createTestEntity(): IOmnioEntity {
+  return new Builder<TestMapping>().persist(new Memory()).build();
 }
 
 /**
@@ -121,7 +121,7 @@ function createTestEntity(): OmnioEntity {
 async function createTestOmnio(
   signal: AbortSignal,
   index: SqliteWasmIndex = new SqliteWasmIndex(),
-  entity: OmnioEntity = createTestEntity(),
+  entity: IOmnioEntity = createTestEntity(),
 ): Promise<Omnio> {
   const omnio = new Omnio({
     index,
@@ -168,7 +168,7 @@ async function readAll(source: AsyncIterable<Uint8Array> | null): Promise<Uint8A
 describe("open と close", () => {
   test("開くと利用可能になり閉じると操作できない", async ({ expect, signal }) => {
     // 準備：
-    const entity = UniKvs.config<TestMapping>().appendStorage(new Memory()).create();
+    const entity = new Builder<TestMapping>().persist(new Memory()).build();
     const omnio = new Omnio({
       index: new SqliteWasmIndex(),
       entity,
