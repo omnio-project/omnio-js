@@ -27,6 +27,7 @@
     "build": "vp -C .config pack"
   },
   "dependencies": {
+    "fast-utf8": "^0.0.9",
     "i18n-error-base": "^0.0.8",
     "maypromise": "^0.0.4",
     "valibot": "^1.0.0"

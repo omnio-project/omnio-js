@@ -2,15 +2,13 @@ import { safeParse } from "valibot";
 
 import { InvalidOmnioKeyError } from "./errors/errors.js";
 import { ObjectKeySchema } from "./schemas.js";
+import utf8 from "./utf8.js";
 
 /** "." の UTF-8 コードポイントです。 */
 const DOT = 46;
 
 /** "/" の UTF-8 コードポイントです。 */
 const SLASH = 47;
-
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
 
 /**
  * オブジェクトキーを解析するためのクラスです。
@@ -67,7 +65,7 @@ export class OmnioKey {
       throw new InvalidOmnioKeyError({ input: objectKey });
     }
 
-    this.#buffer = textEncoder.encode(parsed.output);
+    this.#buffer = utf8.encode(parsed.output);
     this.#string = parsed.output;
   }
 
@@ -137,12 +135,12 @@ export class OmnioKey {
 
       for (let index = 0; index < bytes.length; index += 1) {
         if ((bytes[index] ?? 0) === SLASH) {
-          segments.push(textDecoder.decode(bytes.subarray(start, index)));
+          segments.push(utf8.decode(bytes.subarray(start, index)));
           start = index + 1;
         }
       }
 
-      segments.push(textDecoder.decode(bytes.subarray(start)));
+      segments.push(utf8.decode(bytes.subarray(start)));
       this.#basebuff = bytes.subarray(start);
       this.#segments = segments;
     }
@@ -207,12 +205,12 @@ export class OmnioKey {
 
       if (lastDotIndex === -1 || lastDotIndex === 0) {
         // 例えば拡張子なしの Makefile や隠しファイルの .bashrc などです。
-        filename = textDecoder.decode(basebuff);
+        filename = utf8.decode(basebuff);
         extname = "";
       } else {
         // ドットの前後でファイル名と拡張子を分割してデコードします。
-        filename = textDecoder.decode(basebuff.subarray(0, lastDotIndex));
-        extname = textDecoder.decode(basebuff.subarray(lastDotIndex));
+        filename = utf8.decode(basebuff.subarray(0, lastDotIndex));
+        extname = utf8.decode(basebuff.subarray(lastDotIndex));
       }
 
       this.#filename = filename;

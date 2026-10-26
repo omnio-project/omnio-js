@@ -74,6 +74,9 @@ importers:
 
   packages/core:
     dependencies:
+      fast-utf8:
+        specifier: ^0.0.9
+        version: 0.0.9(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))
       i18n-error-base:
         specifier: ^0.0.8
         version: 0.0.8(valibot@1.5.0(typescript@7.0.2))
@@ -907,6 +910,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@logtape/logtape@2.4.2':
+    resolution: {integrity: sha512-YJyC1gEMgWmTqJTRtKkjgasEbi8/0gP7Dj8n6bL46gQIAhpTY8uXJ+1QYMOgF5asotlGMvy3G7ejXUe45Yd1MQ==}
 
   '@mapbox/node-pre-gyp@2.0.3':
     resolution: {integrity: sha512-uwPAhccfFJlsfCxMYTwOdVfOz3xqyj8xYL3zJj8f0pb30tLohnnFPhLuqp4/qoEz8sNxe4SESZedcBojRefIzg==}
@@ -3341,6 +3347,12 @@ packages:
 
   fast-uri@3.1.8:
     resolution: {integrity: sha512-GZMtZUTNRpOVIECoXwLNZS5xUGE+mVNbTB8h/7Rwh2TFWcBQiPzTgyZi05BF9UMZKkLJv8XBRJTlU7zg8+ZfMg==}
+
+  fast-utf8@0.0.9:
+    resolution: {integrity: sha512-BpQ//zAuVL0m66/3w4wkzMaf/ptBNcTuDNHuupEC16WK04N3RJASsEQ1i56w/KjyGr0+kf7GCGgz6nWiObcsLw==}
+    peerDependencies:
+      '@logtape/logtape': ^2.0.0
+      valibot: ^1.0.0
 
   fast-wrap-ansi@0.2.2:
     resolution: {integrity: sha512-7F2Fl+TjRSenLqlU3UjSH0iyqopqoZIu7eZVpEirP2g1GtWa2G/ecEmBdgz31+Mxr+ELclgg6sokpSFIQiZ02Q==}
@@ -5952,6 +5964,8 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
+  '@logtape/logtape@2.4.2': {}
+
   '@mapbox/node-pre-gyp@2.0.3(supports-color@7.2.0)':
     dependencies:
       consola: 3.4.2
@@ -8265,6 +8279,11 @@ snapshots:
       fast-string-truncated-width: 3.0.3
 
   fast-uri@3.1.8: {}
+
+  fast-utf8@0.0.9(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2)):
+    dependencies:
+      '@logtape/logtape': 2.4.2
+      valibot: 1.5.0(typescript@7.0.2)
 
   fast-wrap-ansi@0.2.2:
     dependencies:

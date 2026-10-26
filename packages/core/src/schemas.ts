@@ -17,6 +17,8 @@ import {
 } from "valibot";
 import type { Brand, GenericSchema } from "valibot";
 
+import utf8 from "./utf8.js";
+
 /** オブジェクトキーの最大文字数です。 */
 export const MAX_OBJECT_KEY_LENGTH = 1024;
 
@@ -43,7 +45,7 @@ export const MAX_OBJECT_SIZE = 5_497_558_138_880;
  * @returns UTF-8 バイト数です。
  */
 function getUtf8ByteLength(input: string): number {
-  return new TextEncoder().encode(input).byteLength;
+  return utf8.countBytes(input);
 }
 
 /**
@@ -54,7 +56,7 @@ function getUtf8ByteLength(input: string): number {
  * @returns 正しい UTF-8 である場合は true、そうでない場合は false です。
  */
 function isWellFormedUtf8(input: string): boolean {
-  return new TextDecoder().decode(new TextEncoder().encode(input)) === input;
+  return utf8.decode(utf8.encode(input)) === input;
 }
 
 /** オブジェクトキーの文字列表現の入力型です。 */
