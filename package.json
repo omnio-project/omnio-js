@@ -5,8 +5,8 @@
   "workspaces": [
     "omnio",
     "packages/core",
-    "packages/db-pglite",
     "packages/emb-gemma2",
+    "packages/idx-pglite",
     "packages/idx-sqlite.wasm",
     "website"
   ],

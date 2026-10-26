@@ -2,11 +2,11 @@
 import { test, describe, expectTypeOf } from "vite-plus/test";
 
 import * as contextTypes from "../src/context.types.js";
-import * as dbTypes from "../src/db.types.js";
 import * as embTypes from "../src/emb.types.js";
 import * as dbErrors from "../src/errors/db-errors.js";
 import * as embErrors from "../src/errors/emb-errors.js";
 import * as errors from "../src/errors/errors.js";
+import * as dbTypes from "../src/idx.types.js";
 import * as core from "../src/index.js";
 import * as objectTypes from "../src/object.types.js";
 

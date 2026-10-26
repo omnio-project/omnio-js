@@ -34,7 +34,7 @@ export {
 
 export type * from "./context.types.js";
 
-export type * from "./db.types.js";
+export type * from "./idx.types.js";
 
 export type * from "./emb.types.js";
 

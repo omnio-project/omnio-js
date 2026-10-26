@@ -1,12 +1,12 @@
 {
-  "name": "@omniojs/db-pglite",
+  "name": "@omniojs/idx-pglite",
   "version": "0.0.0",
   "description": "",
   "homepage": "https://omnio-project.github.io/omnio-js/",
   "license": "MIT",
   "repository": {
     "url": "https://github.com/omnio-project/omnio-js",
-    "directory": "packages/db-pglite"
+    "directory": "packages/idx-pglite"
   },
   "files": [
     "dist",

@@ -10,8 +10,8 @@
       "path": "packages/core",
     },
     {
-      "name": "@omniojs/db-pglite",
-      "path": "packages/db-pglite",
+      "name": "@omniojs/idx-pglite",
+      "path": "packages/idx-pglite",
     },
     {
       "name": "@omniojs/idx-sqlite.wasm",
