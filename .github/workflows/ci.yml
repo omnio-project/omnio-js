@@ -133,9 +133,21 @@ jobs:
           done
 
       - name: "依存関係をインストール（パッケージ）"
+        timeout-minutes: 28
         run: |
           if grep -q "playwright" package.json; then
-            npx playwright install --with-deps
+            # apt 処理の停止に備えて、制限時間付きで再試行します。
+            for attempt in 1 2 3; do
+              code=0
+              timeout 9m npx playwright install --with-deps || code=$?
+              if [ "$code" -eq 0 ]; then
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                exit "$code"
+              fi
+              sleep 10
+            done
           fi
         working-directory: ${{ matrix.package.directory }}
 
