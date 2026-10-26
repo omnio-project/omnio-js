@@ -6,19 +6,19 @@
       "path": "omnio",
     },
     {
-      "name": "core",
+      "name": "@omniojs/core",
       "path": "packages/core",
     },
     {
-      "name": "db-pglite",
+      "name": "@omniojs/db-pglite",
       "path": "packages/db-pglite",
     },
     {
-      "name": "db-sqlite",
+      "name": "@omniojs/db-sqlite",
       "path": "packages/db-sqlite",
     },
     {
-      "name": "emb-gemma2",
+      "name": "@omniojs/emb-gemma2",
       "path": "packages/emb-gemma2",
     },
     { "name": "website", "path": "website" },
