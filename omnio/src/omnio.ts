@@ -17,16 +17,14 @@ import type { OmnioEntity } from "./entity.js";
 const DEFAULT_LIFECYCLE_TIMEOUT_MS = 30_000;
 
 /**
- * ライフサイクル操作で使う中断シグナルを作ります。
+ * ライフサイクル操作で使う中断シグナルを返します。
  *
  * @param signal 呼び出し側が指定した中断シグナルです。
  *
- * @returns 指定されたシグナルと既定タイムアウトを組み合わせたシグナルです。
+ * @returns 指定されたシグナル、省略時は既定タイムアウトのシグナルです。
  */
 function withLifecycleTimeout(signal: AbortSignal | undefined): AbortSignal {
-  const timeout = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
-
-  return signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+  return signal ?? AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
 }
 
 /**
@@ -71,7 +69,7 @@ export type PutObjectInput<TUserMetadata = Record<string, unknown>> = {
   /** 埋め込みを生成するかです。既定では説明文がある場合に生成します。 */
   readonly embed?: boolean | undefined;
 
-  /** 処理を中断するための中断シグナルです。省略時は close 時に中断されます。 */
+  /** 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。 */
   readonly signal?: AbortSignal | undefined;
 };
 
@@ -114,7 +112,7 @@ export type SearchObjectsInput = {
   /** 埋め込みベクトルを結果に含めるかです。既定は含めます。 */
   readonly includeEmbedding?: boolean | undefined;
 
-  /** 処理を中断するための中断シグナルです。省略時は close 時に中断されます。 */
+  /** 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。 */
   readonly signal?: AbortSignal | undefined;
 };
 
@@ -233,8 +231,9 @@ async function nullIfKeyNotFound<T>(load: () => Promise<T>): Promise<T | null> {
  * すべての非同期メソッドは `asyncmux` によりインスタンス単位で排他します。
  * データの整合性のためではなく、`open` や `close` などのライフサイクルと操作が同時実行されないためです。
  *
- * `open` と `close` は既定で 30 秒のタイムアウトを持ちます。
- * それ以外のメソッドは、`close` の呼び出しで中断されるライフサイクルシグナルを既定で使います。
+ * `open` と `close` は、シグナルを省略した場合に 30 秒でタイムアウトします。指定した場合はそのシグナルに従います。
+ * それ以外のメソッドは、呼び出し側のシグナルと `close` 時に中断されるライフサイクルシグナルを合成し、先に中断された方に従います。
+ * シグナルを省略した場合はライフサイクルシグナルを使います。
  */
 export class Omnio {
   readonly #entity: OmnioEntity;
@@ -268,7 +267,7 @@ export class Omnio {
   /**
    * 実体とインデックスを開きます。
    *
-   * @param signal 処理を中断するための中断シグナルです。省略時は 30 秒でタイムアウトし、指定時も 30 秒の上限を持ちます。
+   * @param signal 処理を中断するための中断シグナルです。省略時は 30 秒でタイムアウトします。
    */
   public async open(signal?: AbortSignal): Promise<void> {
     const active = withLifecycleTimeout(signal);
@@ -300,7 +299,7 @@ export class Omnio {
   /**
    * 実体とインデックスを閉じます。
    *
-   * @param signal 処理を中断するための中断シグナルです。省略時は 30 秒でタイムアウトし、指定時も 30 秒の上限を持ちます。
+   * @param signal 処理を中断するための中断シグナルです。省略時は 30 秒でタイムアウトします。
    */
   public async close(signal?: AbortSignal): Promise<void> {
     const active = withLifecycleTimeout(signal);
@@ -406,7 +405,7 @@ export class Omnio {
    * 実体のバイト列を取得します。
    *
    * @param key 取得するキーです。
-   * @param signal 処理を中断するための中断シグナルです。省略時は close 時に中断されます。
+   * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
    *
    * @returns バイト列、存在しない場合は null です。
    */
@@ -427,7 +426,7 @@ export class Omnio {
    * 取得したストリームは呼び出し側で破棄してください。
    *
    * @param key 取得するキーです。
-   * @param signal 処理を中断するための中断シグナルです。省略時は close 時に中断されます。
+   * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
    *
    * @returns バイト列のストリーム、存在しない場合は null です。
    */
@@ -451,7 +450,7 @@ export class Omnio {
    * メタデータを取得します。
    *
    * @param key 取得するキーです。
-   * @param signal 処理を中断するための中断シグナルです。省略時は close 時に中断されます。
+   * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
    *
    * @returns メタデータ、存在しない場合は null です。
    */
@@ -477,7 +476,7 @@ export class Omnio {
    * オブジェクトを削除します。
    *
    * @param key 削除するキーです。
-   * @param signal 処理を中断するための中断シグナルです。省略時は close 時に中断されます。
+   * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
    *
    * @returns 削除した場合は true、存在しなかった場合は false です。
    */
@@ -506,7 +505,7 @@ export class Omnio {
    * オブジェクトを一覧します。
    *
    * @param options 絞り込み条件とページ指定です。
-   * @param signal 処理を中断するための中断シグナルです。省略時は close 時に中断されます。
+   * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
    *
    * @returns 一覧結果です。
    */
@@ -603,7 +602,7 @@ export class Omnio {
    * 既存オブジェクトの埋め込みを作り直します。
    *
    * @param key 作り直すキーです。
-   * @param signal 処理を中断するための中断シグナルです。省略時は close 時に中断されます。
+   * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
    *
    * @returns 更新したオブジェクト、存在しない場合は null です。
    */
@@ -687,10 +686,12 @@ export class Omnio {
    *
    * @param signal 呼び出し側が指定した中断シグナルです。
    *
-   * @returns 指定されたシグナル、省略時は close 時に中断されるシグナルです。
+   * @returns 指定されたシグナルと close 時のライフサイクルシグナルを合成したシグナルです。指定がない場合はライフサイクルシグナルです。
    */
   #activeSignal(signal: AbortSignal | undefined): AbortSignal {
-    return signal ?? this.#lifecycle.signal;
+    return signal === undefined
+      ? this.#lifecycle.signal
+      : AbortSignal.any([signal, this.#lifecycle.signal]);
   }
 
   /**
