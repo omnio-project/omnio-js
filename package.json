@@ -6,8 +6,8 @@
     "omnio",
     "packages/core",
     "packages/db-pglite",
-    "packages/db-sqlite",
     "packages/emb-gemma2",
+    "packages/idx-sqlite.wasm",
     "website"
   ],
   "type": "module",

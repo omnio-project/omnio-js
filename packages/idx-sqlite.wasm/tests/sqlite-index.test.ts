@@ -1,0 +1,880 @@
+import { type OmnioObject, DbNotOpenError, VectorDimensionMismatchError } from "@omniojs/core";
+import { test, describe } from "vite-plus/test";
+
+import { SqliteWasmIndex } from "../src/sqlite-index.js";
+
+/**
+ * 開いた状態のインデックスを作ります。
+ *
+ * 各テストの IObjectIndex 操作の検証に使用します。
+ *
+ * @param signal 処理を中断するための中断シグナルです。
+ *
+ * @returns 開いた状態のインデックスです。
+ */
+async function createOpenedIndex(signal: AbortSignal): Promise<SqliteWasmIndex> {
+  const index = new SqliteWasmIndex();
+  await index.open({
+    action: "open",
+    signal,
+  });
+
+  return index;
+}
+
+/**
+ * テスト用のオブジェクトを作ります。
+ *
+ * 保存と取得の roundtrip 検証の基準値として使用します。
+ *
+ * @param key オブジェクトのキーです。
+ * @param tags 付与するタグの一覧です。
+ *
+ * @returns テスト用のオブジェクトです。
+ */
+function createObject(key: string, tags: readonly string[] = []): OmnioObject {
+  return {
+    key,
+    tags: [...tags],
+    system: {
+      hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b786",
+      size: 3,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-02T00:00:00Z",
+      contentType: "text/plain",
+    },
+    embedding: new Float32Array([1, 0, 0]),
+    description: `${key} の説明文`,
+    userMetadata: { genre: "test" },
+    embeddingDims: 3,
+    embeddingModel: "test-model",
+    embeddingSource: {
+      kind: "description",
+      model: "test-model",
+    },
+  };
+}
+
+/**
+ * 指定したベクトルを持つテスト用のオブジェクトを作ります。
+ *
+ * ベクトル検索の検証に使用します。
+ *
+ * @param key オブジェクトのキーです。
+ * @param vector 埋め込みベクトルです。
+ * @param tags 付与するタグの一覧です。
+ *
+ * @returns テスト用のオブジェクトです。
+ */
+function createVectorObject(
+  key: string,
+  vector: Float32Array,
+  tags: readonly string[] = [],
+): OmnioObject {
+  return {
+    ...createObject(key, tags),
+    embedding: vector,
+    embeddingDims: vector.length,
+  };
+}
+
+/**
+ * 一覧と検索の検証用に 3 件を保存します。
+ *
+ * タグ絞り込み、日付絞り込み、全文検索の検証に使用します。
+ *
+ * @param index 保存先のインデックスです。
+ * @param signal 処理を中断するための中断シグナルです。
+ */
+async function seedThree(index: SqliteWasmIndex, signal: AbortSignal): Promise<void> {
+  const objects: OmnioObject[] = [
+    {
+      ...createObject("k1", ["red", "round"]),
+      description: "赤い丸",
+      system: {
+        ...createObject("k1").system,
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+      userMetadata: { color: "red" },
+    },
+    {
+      ...createObject("k2", ["blue", "round"]),
+      description: "青い丸",
+      system: {
+        ...createObject("k2").system,
+        contentType: "image/png",
+        createdAt: "2026-02-01T00:00:00Z",
+      },
+      userMetadata: { color: "blue" },
+    },
+    {
+      ...createObject("k3", ["red", "square"]),
+      description: "赤い四角",
+      system: {
+        ...createObject("k3").system,
+        createdAt: "2026-03-01T00:00:00Z",
+      },
+      userMetadata: { color: "red" },
+    },
+  ];
+
+  for (const object of objects) {
+    await index.upsert({
+      action: "upsert",
+      object,
+      signal,
+    });
+  }
+}
+
+/**
+ * 一覧結果のキーを取り出します。
+ *
+ * 検証文を短くするために使用します。
+ *
+ * @param items 一覧結果の項目です。
+ *
+ * @returns キーの一覧です。
+ */
+function keysOf(items: readonly { key: string }[]): string[] {
+  return items.map((item) => item.key);
+}
+
+describe("lifecycle", () => {
+  test("初期状態では開いていない", ({ expect }) => {
+    // 実行と検証：
+    expect(new SqliteWasmIndex().isOpen).toBe(false);
+  });
+
+  test("open すると開いた状態になる", async ({ expect, signal }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+
+    // 実行：
+    await index.open({
+      action: "open",
+      signal,
+    });
+
+    // 検証：
+    expect(index.isOpen).toBe(true);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("二重の open は成功する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+
+    // 実行：
+    await index.open({
+      action: "open",
+      signal,
+    });
+
+    // 検証：
+    expect(index.isOpen).toBe(true);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("close すると閉じた状態になる", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+
+    // 実行：
+    await index.close({
+      action: "close",
+      signal,
+    });
+
+    // 検証：
+    expect(index.isOpen).toBe(false);
+  });
+
+  test("二重の close は成功する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.close({
+      action: "close",
+      signal,
+    });
+
+    // 実行と検証：
+    await expect(
+      index.close({
+        action: "close",
+        signal,
+      }),
+    ).resolves.toBeUndefined();
+    expect(index.isOpen).toBe(false);
+  });
+
+  test("閉じた状態での get は DbNotOpenError を投げる", async ({ expect, signal }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+
+    // 実行と検証：
+    await expect(
+      index.get({
+        key: "missing",
+        action: "get",
+        signal,
+      }),
+    ).rejects.toBeInstanceOf(DbNotOpenError);
+  });
+
+  test("中断済みのシグナルでの open は中断する", async ({ expect }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    const controller = new AbortController();
+    controller.abort();
+
+    let name = "";
+
+    // 実行：
+    try {
+      await index.open({
+        action: "open",
+        signal: controller.signal,
+      });
+    } catch (error) {
+      name = (error as Error).name;
+    }
+
+    // 検証：
+    expect(name).toBe("AbortError");
+    expect(index.isOpen).toBe(false);
+  });
+});
+
+describe("upsert と get", () => {
+  test("保存したオブジェクトをそのまま取得する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const object = createObject("k1", ["photo", "sea"]);
+
+    // 実行：
+    await index.upsert({
+      action: "upsert",
+      object,
+      signal,
+    });
+
+    const actual = await index.get({
+      key: "k1",
+      action: "get",
+      signal,
+    });
+
+    // 検証：
+    expect(actual).toStrictEqual(object);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("同じキーの保存は上書きしタグを置き換える", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: createObject("k1", ["old"]),
+      signal,
+    });
+
+    const overwritten = {
+      ...createObject("k1", ["new"]),
+      description: "新しい説明",
+    };
+
+    // 実行：
+    await index.upsert({
+      action: "upsert",
+      object: overwritten,
+      signal,
+    });
+
+    const actual = await index.get({
+      key: "k1",
+      action: "get",
+      signal,
+    });
+    const byOldTag = await index.list({
+      action: "list",
+      filter: { tagsAny: ["old"] },
+      signal,
+    });
+
+    // 検証：
+    expect(actual).toStrictEqual(overwritten);
+    expect(byOldTag.items).toStrictEqual([]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("存在しないキーの取得は null である", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+
+    // 実行：
+    const actual = await index.get({
+      key: "missing",
+      action: "get",
+      signal,
+    });
+
+    // 検証：
+    expect(actual).toBeNull();
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("埋め込みなしのオブジェクトを保存と取得する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const object: OmnioObject = {
+      ...createObject("k1"),
+      embedding: undefined,
+    };
+
+    // 実行：
+    await index.upsert({
+      action: "upsert",
+      object,
+      signal,
+    });
+
+    const actual = await index.get({
+      key: "k1",
+      action: "get",
+      signal,
+    });
+
+    // 検証：
+    expect(actual).toStrictEqual({
+      ...object,
+      embeddingDims: undefined,
+      embeddingModel: undefined,
+      embeddingSource: undefined,
+    });
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("次元数が一致しない埋め込みの保存はエラーを投げる", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const object = {
+      ...createObject("k1"),
+      embeddingDims: 2,
+    };
+
+    // 実行と検証：
+    await expect(
+      index.upsert({
+        action: "upsert",
+        object,
+        signal,
+      }),
+    ).rejects.toBeInstanceOf(VectorDimensionMismatchError);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+});
+
+describe("delete", () => {
+  test("削除すると取得できなくなりタグも消える", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: createObject("k1", ["gone"]),
+      signal,
+    });
+
+    // 実行：
+    const deleted = await index.delete({
+      key: "k1",
+      action: "delete",
+      signal,
+    });
+    const actual = await index.get({
+      key: "k1",
+      action: "get",
+      signal,
+    });
+    const byTag = await index.list({
+      action: "list",
+      filter: { tagsAny: ["gone"] },
+      signal,
+    });
+
+    // 検証：
+    expect(deleted).toBe(true);
+    expect(actual).toBeNull();
+    expect(byTag.items).toStrictEqual([]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("存在しないキーの削除は false である", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+
+    // 実行：
+    const actual = await index.delete({
+      key: "missing",
+      action: "delete",
+      signal,
+    });
+
+    // 検証：
+    expect(actual).toBe(false);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+});
+
+describe("list", () => {
+  test("キー順にページ分けして取得する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    // 実行：
+    const first = await index.list({
+      limit: 2,
+      action: "list",
+      signal,
+    });
+    const second = await index.list({
+      limit: 2,
+      action: "list",
+      cursor: first.nextCursor,
+      signal,
+    });
+
+    // 検証：
+    expect(keysOf(first.items)).toStrictEqual(["k1", "k2"]);
+    expect(first.nextCursor).not.toBeNull();
+    expect(keysOf(second.items)).toStrictEqual(["k3"]);
+    expect(second.nextCursor).toBeNull();
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("limit が 0 以下では空の一覧を返す", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    // 実行：
+    const actual = await index.list({
+      limit: 0,
+      action: "list",
+      signal,
+    });
+
+    // 検証：
+    expect(actual).toStrictEqual({
+      items: [],
+      nextCursor: null,
+    });
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("タグで絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    // 実行：
+    const all = await index.list({
+      action: "list",
+      filter: { tagsAll: ["red", "round"] },
+      signal,
+    });
+    const any = await index.list({
+      action: "list",
+      filter: { tagsAny: ["square", "blue"] },
+      signal,
+    });
+
+    // 検証：
+    expect(keysOf(all.items)).toStrictEqual(["k1"]);
+    expect(keysOf(any.items)).toStrictEqual(["k2", "k3"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("コンテンツタイプと作成時刻で絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    // 実行：
+    const byType = await index.list({
+      action: "list",
+      filter: { contentTypes: ["image/png"] },
+      signal,
+    });
+    const after = await index.list({
+      action: "list",
+      filter: { createdAfter: "2026-02-01T00:00:00Z" },
+      signal,
+    });
+    const before = await index.list({
+      action: "list",
+      filter: { createdBefore: "2026-01-15T00:00:00Z" },
+      signal,
+    });
+
+    // 検証：
+    expect(keysOf(byType.items)).toStrictEqual(["k2"]);
+    expect(keysOf(after.items)).toStrictEqual(["k2", "k3"]);
+    expect(keysOf(before.items)).toStrictEqual(["k1"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("全文で絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    // 実行：
+    const actual = await index.list({
+      action: "list",
+      filter: { fullText: "赤い" },
+      signal,
+    });
+
+    // 検証：
+    expect(keysOf(actual.items)).toStrictEqual(["k1", "k3"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("利用者メタデータで絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    // 実行：
+    const actual = await index.list({
+      action: "list",
+      filter: { userMetadata: { color: "red" } },
+      signal,
+    });
+
+    // 検証：
+    expect(keysOf(actual.items)).toStrictEqual(["k1", "k3"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+});
+
+describe("search", () => {
+  test("類似度の降順で返す", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: createVectorObject("a", new Float32Array([1, 0])),
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: createVectorObject("b", new Float32Array([0, 1])),
+      signal,
+    });
+
+    // 実行：
+    const actual = await index.search({
+      topK: 10,
+      action: "search",
+      signal,
+      vector: new Float32Array([1, 0]),
+    });
+
+    // 検証：
+    expect(keysOf(actual)).toStrictEqual(["a", "b"]);
+    expect(actual[0]?.score).toBeCloseTo(1);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("topK で件数を制限する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: createVectorObject("a", new Float32Array([1, 0])),
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: createVectorObject("b", new Float32Array([0, 1])),
+      signal,
+    });
+
+    // 実行：
+    const actual = await index.search({
+      topK: 1,
+      action: "search",
+      signal,
+      vector: new Float32Array([1, 0]),
+    });
+
+    // 検証：
+    expect(keysOf(actual)).toStrictEqual(["a"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("最小スコア未満を除外する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: createVectorObject("a", new Float32Array([1, 0])),
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: createVectorObject("b", new Float32Array([0, 1])),
+      signal,
+    });
+
+    // 実行：
+    const actual = await index.search({
+      topK: 10,
+      action: "search",
+      signal,
+      vector: new Float32Array([1, 0]),
+      minScore: 0.5,
+    });
+
+    // 検証：
+    expect(keysOf(actual)).toStrictEqual(["a"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("タグで候補を絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: createVectorObject("a", new Float32Array([1, 0]), ["wanted"]),
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: createVectorObject("b", new Float32Array([1, 0]), ["other"]),
+      signal,
+    });
+
+    // 実行：
+    const actual = await index.search({
+      topK: 10,
+      action: "search",
+      filter: { tagsAny: ["wanted"] },
+      signal,
+      vector: new Float32Array([1, 0]),
+    });
+
+    // 検証：
+    expect(keysOf(actual)).toStrictEqual(["a"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("モデル名が異なる記録と埋め込みなしの記録を除外する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: createVectorObject("a", new Float32Array([1, 0])),
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: {
+        ...createVectorObject("b", new Float32Array([1, 0])),
+        embeddingModel: "other-model",
+      },
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: {
+        ...createObject("c"),
+        embedding: undefined,
+      },
+      signal,
+    });
+
+    // 実行：
+    const actual = await index.search({
+      topK: 10,
+      action: "search",
+      signal,
+      vector: new Float32Array([1, 0]),
+      embeddingModel: "test-model",
+    });
+
+    // 検証：
+    expect(keysOf(actual)).toStrictEqual(["a"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("topK が 0 以下または空ベクトルでは空の一覧を返す", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: createObject("a"),
+      signal,
+    });
+
+    // 実行：
+    const byZeroTopK = await index.search({
+      topK: 0,
+      action: "search",
+      signal,
+      vector: new Float32Array([1, 0]),
+    });
+    const byEmptyVector = await index.search({
+      topK: 10,
+      action: "search",
+      signal,
+      vector: new Float32Array([]),
+    });
+
+    // 検証：
+    expect(byZeroTopK).toStrictEqual([]);
+    expect(byEmptyVector).toStrictEqual([]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("l2 距離では近い順に返す", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: createVectorObject("a", new Float32Array([1, 0])),
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: createVectorObject("b", new Float32Array([0, 2])),
+      signal,
+    });
+
+    // 実行：
+    const actual = await index.search({
+      topK: 10,
+      action: "search",
+      metric: "l2",
+      signal,
+      vector: new Float32Array([0, 0]),
+    });
+
+    // 検証：
+    expect(keysOf(actual)).toStrictEqual(["a", "b"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+});

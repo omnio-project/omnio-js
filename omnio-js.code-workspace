@@ -14,8 +14,8 @@
       "path": "packages/db-pglite",
     },
     {
-      "name": "@omniojs/db-sqlite",
-      "path": "packages/db-sqlite",
+      "name": "@omniojs/idx-sqlite.wasm",
+      "path": "packages/idx-sqlite.wasm",
     },
     {
       "name": "@omniojs/emb-gemma2",

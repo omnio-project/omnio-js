@@ -21,4 +21,5 @@ export default defineConfig({
       reportsDirectory: "./coverage/client",
     },
   },
+  optimizeDeps: { exclude: ["@sqlite.org/sqlite-wasm"] },
 });

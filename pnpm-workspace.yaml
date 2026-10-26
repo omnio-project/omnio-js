@@ -3,7 +3,7 @@ packages:
     "omnio",
     "packages/core",
     "packages/db-pglite",
-    "packages/db-sqlite",
+    "packages/idx-sqlite.wasm",
     "packages/emb-gemma2",
     "website",
   ]
