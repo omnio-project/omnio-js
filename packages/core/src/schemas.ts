@@ -174,7 +174,8 @@ export const ContentTypeSchema: GenericSchema<ContentTypeLike, ContentType> = pi
 );
 
 /** SHA-256 ハッシュの正規表現です。 */
-export const SHA256_HEX_REGEX = /^[0-9a-f]{64}$/u;
+// oxlint-disable-next-line no-inferrable-types
+export const SHA256_HEX_REGEX: RegExp = /^[0-9a-f]{64}$/u;
 
 /** ハッシュ値の入力型です。 */
 export type HashLike = string;

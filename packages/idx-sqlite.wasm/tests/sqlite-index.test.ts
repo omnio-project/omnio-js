@@ -1,4 +1,9 @@
-import { type OmnioObject, DbNotOpenError, VectorDimensionMismatchError } from "@omniojs/core";
+import {
+  type OmnioObject,
+  OmnioKey,
+  DbNotOpenError,
+  VectorDimensionMismatchError,
+} from "@omniojs/core";
 import { test, describe } from "vite-plus/test";
 
 import { SqliteWasmIndex } from "../src/sqlite-index.js";
@@ -34,10 +39,10 @@ async function createOpenedIndex(signal: AbortSignal): Promise<SqliteWasmIndex> 
  */
 function createObject(key: string, tags: readonly string[] = []): OmnioObject {
   return {
-    key,
+    key: OmnioKey.parse(key),
     tags: [...tags],
     system: {
-      hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b786",
+      hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       size: 3,
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-02T00:00:00Z",
@@ -136,8 +141,8 @@ async function seedThree(index: SqliteWasmIndex, signal: AbortSignal): Promise<v
  *
  * @returns キーの一覧です。
  */
-function keysOf(items: readonly { key: string }[]): string[] {
-  return items.map((item) => item.key);
+function keysOf(items: readonly { key: OmnioKey }[]): string[] {
+  return items.map((item) => item.key.key);
 }
 
 describe("lifecycle", () => {
@@ -225,7 +230,7 @@ describe("lifecycle", () => {
     // 実行と検証：
     await expect(
       index.get({
-        key: "missing",
+        key: OmnioKey.parse("missing"),
         action: "get",
         signal,
       }),
@@ -270,13 +275,22 @@ describe("upsert と get", () => {
     });
 
     const actual = await index.get({
-      key: "k1",
+      key: OmnioKey.parse("k1"),
       action: "get",
       signal,
     });
 
     // 検証：
-    expect(actual).toStrictEqual(object);
+    expect(actual?.key).toBeInstanceOf(OmnioKey);
+    expect(actual?.key.key).toBe("k1");
+    expect(actual?.description).toBe(object.description);
+    expect(actual?.embedding).toStrictEqual(object.embedding);
+    expect(actual?.embeddingDims).toBe(object.embeddingDims);
+    expect(actual?.embeddingModel).toBe(object.embeddingModel);
+    expect(actual?.embeddingSource).toStrictEqual(object.embeddingSource);
+    expect(actual?.system).toStrictEqual(object.system);
+    expect(actual?.tags).toStrictEqual(object.tags);
+    expect(actual?.userMetadata).toStrictEqual(object.userMetadata);
 
     // 後始末：
     await index.close({
@@ -307,7 +321,7 @@ describe("upsert と get", () => {
     });
 
     const actual = await index.get({
-      key: "k1",
+      key: OmnioKey.parse("k1"),
       action: "get",
       signal,
     });
@@ -318,7 +332,10 @@ describe("upsert と get", () => {
     });
 
     // 検証：
-    expect(actual).toStrictEqual(overwritten);
+    expect(actual?.key).toBeInstanceOf(OmnioKey);
+    expect(actual?.key.key).toBe("k1");
+    expect(actual?.description).toBe(overwritten.description);
+    expect(actual?.tags).toStrictEqual(overwritten.tags);
     expect(byOldTag.items).toStrictEqual([]);
 
     // 後始末：
@@ -334,7 +351,7 @@ describe("upsert と get", () => {
 
     // 実行：
     const actual = await index.get({
-      key: "missing",
+      key: OmnioKey.parse("missing"),
       action: "get",
       signal,
     });
@@ -365,7 +382,7 @@ describe("upsert と get", () => {
     });
 
     const actual = await index.get({
-      key: "k1",
+      key: OmnioKey.parse("k1"),
       action: "get",
       signal,
     });
@@ -422,12 +439,12 @@ describe("delete", () => {
 
     // 実行：
     const deleted = await index.delete({
-      key: "k1",
+      key: OmnioKey.parse("k1"),
       action: "delete",
       signal,
     });
     const actual = await index.get({
-      key: "k1",
+      key: OmnioKey.parse("k1"),
       action: "get",
       signal,
     });
@@ -455,7 +472,7 @@ describe("delete", () => {
 
     // 実行：
     const actual = await index.delete({
-      key: "missing",
+      key: OmnioKey.parse("missing"),
       action: "delete",
       signal,
     });

@@ -1,7 +1,8 @@
 import type { MaybePromise } from "maypromise";
 
 import type { IOpenContext, ICloseContext, IActionContext } from "./context.types.js";
-import type { OmnioKey, OmnioObject, MetadataFilter } from "./object.types.js";
+import type { OmnioKey } from "./object-key.js";
+import type { OmnioObject, MetadataFilter } from "./object.types.js";
 
 /**
  * ベクトル類似度の計算方式です。

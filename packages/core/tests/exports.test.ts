@@ -8,6 +8,7 @@ import * as embErrors from "../src/errors/emb-errors.js";
 import * as errors from "../src/errors/errors.js";
 import * as dbTypes from "../src/idx.types.js";
 import * as core from "../src/index.js";
+import * as objectKey from "../src/object-key.js";
 import * as objectTypes from "../src/object.types.js";
 import * as schemas from "../src/schemas.js";
 
@@ -37,6 +38,7 @@ describe("exports", () => {
       "MAX_TAG_LENGTH",
       "ModelLoadError",
       "ObjectKeySchema",
+      "OmnioKey",
       "SHA256_HEX_REGEX",
       "SizeSchema",
       "TagSchema",
@@ -77,6 +79,7 @@ describe("exports", () => {
     expect(core.EmbeddingDimsSchema).toBe(schemas.EmbeddingDimsSchema);
     expect(core.EmbeddingModelSchema).toBe(schemas.EmbeddingModelSchema);
     expect(core.UserMetadataSchema).toBe(schemas.UserMetadataSchema);
+    expect(core.OmnioKey).toBe(objectKey.OmnioKey);
   });
 
   test("型のみのモジュールは実行時の値を公開しない", ({ expect }) => {
@@ -120,9 +123,13 @@ describe("exports", () => {
     expectTypeOf<embTypes.EmbedModality>().toEqualTypeOf<core.EmbedModality>();
   });
 
+  test("object-key の型はエントリーポイントから同一に解決される", () => {
+    // 実行と検証：
+    expectTypeOf<objectKey.OmnioKey>().toEqualTypeOf<core.OmnioKey>();
+  });
+
   test("object の型はエントリーポイントから同一に解決される", () => {
     // 実行と検証：
-    expectTypeOf<objectTypes.OmnioKey>().toEqualTypeOf<core.OmnioKey>();
     expectTypeOf<objectTypes.OmnioObject>().toEqualTypeOf<core.OmnioObject>();
     expectTypeOf<objectTypes.OmnioSystemMetadata>().toEqualTypeOf<core.OmnioSystemMetadata>();
     expectTypeOf<objectTypes.EmbedSource>().toEqualTypeOf<core.EmbedSource>();

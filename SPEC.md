@@ -190,7 +190,16 @@ Valibot の `lang` 設定と連動し、`message` の読み取り時に日本語
 ### 7.1 オブジェクトレコード
 
 ```ts
-type OmnioKey = string;
+class OmnioKey {
+  static parse(objectKey: string): OmnioKey;
+  static check(objectKey: string): boolean;
+  get key(): string;
+  get segments(): [...string[], string];
+  get prefix(): string;
+  get basename(): string;
+  get filename(): string;
+  get extname(): string;
+}
 
 interface OmnioSystemMetadata {
   size: number;
@@ -221,6 +230,7 @@ type EmbedSource =
 
 設計上の注意は次のとおりです。
 
+- `OmnioKey` は z-rack の `ObjectKey` を参考にしたクラスです。`key` には文字列ではなくインスタンスを持ちます。1 文字以上 1024 文字以下であり、正しい UTF-8 で 1024 バイト以下です。無効な値は `InvalidOmnioKeyError` となります。
 - `description` は任意項目です。指定された場合のみ埋め込み対象にできます。
 - `tags` と `userMetadata` は既定では埋め込み対象ではありません。タグは絞り込みに使います。
 - `hash` は既定で SHA-256 とし、重複検出と完全性確認に使います。

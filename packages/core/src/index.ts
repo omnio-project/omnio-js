@@ -41,6 +41,8 @@ export type * from "./idx.types.js";
 
 export type * from "./emb.types.js";
 
+export { OmnioKey } from "./object-key.js";
+
 export type * from "./object.types.js";
 
 export type {

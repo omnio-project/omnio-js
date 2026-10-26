@@ -4,6 +4,7 @@ import {
   type IObjectIndex,
   type IndexedObject,
   type MetadataFilter,
+  OmnioKey,
   DbQueryError,
   DbNotOpenError,
   VectorDimensionMismatchError,
@@ -330,7 +331,7 @@ export class SqliteWasmIndex implements IObjectIndex {
       }
     }
 
-    const key = object.key;
+    const key = object.key.key;
     const tags = [...new Set(object.tags)];
     const row = {
       key,
@@ -398,7 +399,7 @@ export class SqliteWasmIndex implements IObjectIndex {
     const row = await kysely
       .selectFrom("objects")
       .selectAll()
-      .where("key", "=", c.key)
+      .where("key", "=", c.key.key)
       .executeTakeFirst();
 
     if (row === undefined) {
@@ -421,7 +422,10 @@ export class SqliteWasmIndex implements IObjectIndex {
     c.signal.throwIfAborted();
 
     const kysely = this.requireOpen("delete");
-    const result = await kysely.deleteFrom("objects").where("key", "=", c.key).executeTakeFirst();
+    const result = await kysely
+      .deleteFrom("objects")
+      .where("key", "=", c.key.key)
+      .executeTakeFirst();
     const deleted = result.numDeletedRows;
 
     return typeof deleted === "bigint" ? deleted > 0n : (deleted ?? 0) > 0;
@@ -662,7 +666,7 @@ export class SqliteWasmIndex implements IObjectIndex {
     }
 
     return {
-      key: row.key,
+      key: OmnioKey.parse(row.key),
       tags: [...tags],
       system: {
         hash: row.hash ?? undefined,

@@ -1,7 +1,4 @@
-/**
- * オブジェクトを一意に識別するキーです。
- */
-export type OmnioKey = string;
+import type { OmnioKey } from "./object-key.js";
 
 /**
  * オブジェクトのシステムメタデータです。
