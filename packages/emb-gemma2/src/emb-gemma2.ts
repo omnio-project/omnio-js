@@ -2,7 +2,10 @@
 import type {
   Tensor,
   DataType,
+  RawImage,
   DeviceType,
+  EmbeddingGemma2Model,
+  EmbeddingGemma2Processor,
   FeatureExtractionPipeline,
 } from "@huggingface/transformers";
 import {
@@ -90,9 +93,17 @@ const Gemma2EmbedderOptionsSchema = v.object({
 });
 
 /**
+ * 画像埋め込みに使うプロセッサーとモデルの組です。
+ */
+interface ImageBackend {
+  readonly processor: EmbeddingGemma2Processor;
+  readonly model: EmbeddingGemma2Model;
+}
+
+/**
  * EmbeddingGemma 2 による `IEmbedder` の実装です。
  *
- * テキスト埋め込みに対応します。画像などの modalities は将来対応します。
+ * テキストと画像の埋め込みに対応します。両者は共有の埋め込み空間に写像します。
  *
  * すべての非同期メソッドは `asyncmux` によりインスタンス単位で排他します。
  * データの整合性のためではなく、推論器の初期化と埋め込み操作が同時実行されないためです。
@@ -102,6 +113,8 @@ export class Gemma2Embedder implements IEmbedder {
   public readonly info: EmbedderInfo;
 
   #loading: Promise<FeatureExtractionPipeline> | undefined;
+
+  #imageBackend: Promise<ImageBackend> | undefined;
 
   readonly #model: string;
 
@@ -127,7 +140,7 @@ export class Gemma2Embedder implements IEmbedder {
     this.info = {
       dims,
       name: this.#model,
-      modalities: ["text"],
+      modalities: ["text", "image"],
       normalized: true,
       multilingual: true,
     };
@@ -138,10 +151,10 @@ export class Gemma2Embedder implements IEmbedder {
    *
    * @param c モダリティー対応を確認する操作のコンテキストです。
    *
-   * @returns テキストの場合は true、そうでない場合は false です。
+   * @returns テキストまたは画像の場合は true、そうでない場合は false です。
    */
   public supports(c: IEmbedder.SupportsContext): boolean {
-    return c.modality === "text";
+    return c.modality === "text" || c.modality === "image";
   }
 
   /**
@@ -157,24 +170,41 @@ export class Gemma2Embedder implements IEmbedder {
     const lock = await asyncmux(this, c.signal);
 
     try {
-      if (c.input.kind !== "text") {
-        throw new UnsupportedModalityError({
-          actual: c.input.kind,
-          supported: ["text"],
-        });
+      if (c.input.kind === "text") {
+        const vectors = await this.#embedBatch([c.input.text], c.signal);
+        const vector = vectors[0];
+
+        if (vector === undefined) {
+          throw new EmbedFailedError({
+            kind: "text",
+            cause: new Error("Empty embedding result"),
+          });
+        }
+
+        return vector;
       }
 
-      const vectors = await this.#embedBatch([c.input.text], c.signal);
-      const vector = vectors[0];
+      if (c.input.kind === "image") {
+        const rawImage = await this.#decodeImage(c.input.data, c.input.mimeType, c.signal);
+        const vectors = await this.#embedImages([rawImage], c.signal);
+        const vector = vectors[0];
 
-      if (vector === undefined) {
-        throw new EmbedFailedError({
-          kind: "text",
-          cause: new Error("Empty embedding result"),
-        });
+        if (vector === undefined) {
+          throw new EmbedFailedError({
+            kind: "image",
+            cause: new Error("Empty embedding result"),
+          });
+        }
+
+        return vector;
       }
 
-      return vector;
+      const kind: string = (c.input as { kind: string }).kind;
+
+      throw new UnsupportedModalityError({
+        actual: kind,
+        supported: ["text", "image"],
+      });
     } finally {
       lock.release();
     }
@@ -193,20 +223,89 @@ export class Gemma2Embedder implements IEmbedder {
     const lock = await asyncmux(this, c.signal);
 
     try {
-      const texts: string[] = [];
+      const texts: {
+        text: string;
+        index: number;
+      }[] = [];
+      const images: {
+        image: RawImage;
+        index: number;
+      }[] = [];
 
-      for (const input of c.inputs) {
-        if (input.kind !== "text") {
-          throw new UnsupportedModalityError({
-            actual: input.kind,
-            supported: ["text"],
+      for (const [index, input] of c.inputs.entries()) {
+        if (input.kind === "text") {
+          texts.push({
+            text: input.text,
+            index,
+          });
+
+          continue;
+        }
+
+        if (input.kind === "image") {
+          images.push({
+            image: await this.#decodeImage(input.data, input.mimeType, c.signal),
+            index,
+          });
+
+          continue;
+        }
+
+        const kind: string = (input as { kind: string }).kind;
+
+        throw new UnsupportedModalityError({
+          actual: kind,
+          supported: ["text", "image"],
+        });
+      }
+
+      if (texts.length === 0 && images.length === 0) {
+        return [];
+      }
+
+      const textVectors =
+        texts.length === 0
+          ? []
+          : await this.#embedBatch(
+              texts.map((entry) => entry.text),
+              c.signal,
+            );
+      const imageVectors =
+        images.length === 0
+          ? []
+          : await this.#embedImages(
+              images.map((entry) => entry.image),
+              c.signal,
+            );
+      const vectors: Float32Array[] = [];
+
+      for (const [position, entry] of texts.entries()) {
+        const vector = textVectors[position];
+
+        if (vector === undefined) {
+          throw new EmbedFailedError({
+            kind: "text",
+            cause: new Error("Empty embedding result"),
           });
         }
 
-        texts.push(input.text);
+        vectors[entry.index] = vector;
       }
 
-      return await this.#embedBatch(texts, c.signal);
+      for (const [position, entry] of images.entries()) {
+        const vector = imageVectors[position];
+
+        if (vector === undefined) {
+          throw new EmbedFailedError({
+            kind: "image",
+            cause: new Error("Empty embedding result"),
+          });
+        }
+
+        vectors[entry.index] = vector;
+      }
+
+      return vectors;
     } finally {
       lock.release();
     }
@@ -253,6 +352,17 @@ export class Gemma2Embedder implements IEmbedder {
   }
 
   /**
+   * 画像用のプロセッサーとモデルを取得します。初回は読み込みます。
+   *
+   * @returns プロセッサーとモデルの組を解決する Promise です。
+   */
+  async #getImageBackend(): Promise<ImageBackend> {
+    this.#imageBackend ??= this.#loadImageBackend();
+
+    return this.#imageBackend;
+  }
+
+  /**
    * モデルを読み込んで推論器を作ります。
    *
    * @returns 推論器を解決する Promise です。
@@ -276,6 +386,46 @@ export class Gemma2Embedder implements IEmbedder {
       return await pipeline("feature-extraction", this.#model, options);
     } catch (ex) {
       this.#loading = undefined;
+      throw new ModelLoadError({
+        cause: ex,
+        model: this.#model,
+      });
+    }
+  }
+
+  /**
+   * 画像用のプロセッサーとモデルを読み込みます。
+   *
+   * テキスト用のパイプラインとは別に読み込みます。
+   * 非テキストの埋め込みにはパイプラインではなく直接の呼び出しが必要です。
+   *
+   * @returns プロセッサーとモデルの組を解決する Promise です。
+   */
+  async #loadImageBackend(): Promise<ImageBackend> {
+    try {
+      const { AutoModel, AutoProcessor } = await import("@huggingface/transformers");
+      const options: {
+        dtype: DataType;
+        device?: DeviceType;
+        subfolder: string;
+      } = {
+        dtype: this.#dtype,
+        subfolder: this.#subfolder,
+      };
+
+      if (this.#device !== undefined) {
+        options.device = this.#device;
+      }
+
+      const processor = await AutoProcessor.from_pretrained(this.#model, options);
+      const model = await AutoModel.from_pretrained(this.#model, options);
+
+      return {
+        model: model as EmbeddingGemma2Model,
+        processor: processor as EmbeddingGemma2Processor,
+      };
+    } catch (ex) {
+      this.#imageBackend = undefined;
       throw new ModelLoadError({
         cause: ex,
         model: this.#model,
@@ -314,18 +464,104 @@ export class Gemma2Embedder implements IEmbedder {
       });
     }
 
+    return this.#decodeEmbeddings(output, texts.length, "text");
+  }
+
+  /**
+   * 画像データを復号して `RawImage` に変換します。
+   *
+   * @param data 復号する画像データです。
+   * @param mimeType 画像の MIME タイプです。
+   * @param signal 処理を中断するための中断シグナルです。
+   *
+   * @returns 復号した画像を解決する Promise です。
+   */
+  async #decodeImage(
+    data: Uint8Array<ArrayBuffer> | Blob,
+    mimeType: string | undefined,
+    signal: AbortSignal,
+  ): Promise<RawImage> {
+    const { RawImage: ImageReader } = await import("@huggingface/transformers");
+
+    try {
+      const source = data instanceof Blob ? data : new Blob([data], { type: mimeType ?? "" });
+      const image = await ImageReader.read(source);
+
+      signal.throwIfAborted();
+
+      return image;
+    } catch (ex) {
+      signal.throwIfAborted();
+      throw new EmbedFailedError({
+        kind: "image",
+        cause: ex,
+      });
+    }
+  }
+
+  /**
+   * 複数の画像をまとめて埋め込みます。
+   *
+   * @param rawImages 埋め込む画像の一覧です。
+   * @param signal 処理を中断するための中断シグナルです。
+   *
+   * @returns 埋め込みベクトルの一覧を解決する Promise です。
+   */
+  async #embedImages(rawImages: readonly RawImage[], signal: AbortSignal): Promise<Float32Array[]> {
+    const first = rawImages[0];
+
+    if (rawImages.length === 0 || first === undefined) {
+      return [];
+    }
+
+    const backend = await this.#getImageBackend();
+
+    signal.throwIfAborted();
+
+    let output: Tensor;
+
+    try {
+      const inputs =
+        rawImages.length === 1
+          ? await backend.processor(null, first)
+          : await backend.processor(
+              null,
+              rawImages.map((image) => [image]),
+            );
+      const { sentence_embedding }: { sentence_embedding: Tensor } = await backend.model(inputs);
+      output = sentence_embedding;
+    } catch (ex) {
+      throw new EmbedFailedError({
+        kind: "image",
+        cause: ex,
+      });
+    }
+
+    return this.#decodeEmbeddings(output, rawImages.length, "image");
+  }
+
+  /**
+   * モデルの出力テンソルをベクトルの一覧に変換します。
+   *
+   * @param output モデルが出力したテンソルです。
+   * @param count 期待するベクトルの件数です。
+   * @param kind 埋め込んだ入力の種類です。
+   *
+   * @returns 埋め込みベクトルの一覧です。
+   */
+  #decodeEmbeddings(output: Tensor, count: number, kind: string): Float32Array[] {
     const features = output.dims.at(-1) ?? 0;
 
-    if (features <= 0 || output.data.length !== texts.length * features) {
+    if (features <= 0 || output.data.length !== count * features) {
       throw new EmbedFailedError({
-        kind: "text",
+        kind,
         cause: new Error("Unexpected embedding shape"),
       });
     }
 
     const vectors: Float32Array[] = [];
 
-    for (let index = 0; index < texts.length; index += 1) {
+    for (let index = 0; index < count; index += 1) {
       const offset = index * features;
       const native = new Float32Array(features);
 

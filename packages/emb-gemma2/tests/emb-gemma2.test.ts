@@ -1,5 +1,5 @@
 // oxlint-disable import/no-namespace
-import { type IEmbedder, UnsupportedModalityError } from "@omniojs/core";
+import { type IEmbedder, EmbedFailedError, UnsupportedModalityError } from "@omniojs/core";
 import * as v from "valibot";
 import { test, describe } from "vite-plus/test";
 
@@ -12,7 +12,7 @@ import {
 } from "../src/emb-gemma2.js";
 
 describe("Gemma2Embedder", () => {
-  test("supports はテキストのみ対応する", ({ expect }) => {
+  test("supports はテキストと画像に対応する", ({ expect }) => {
     // 準備：
     const embedder = new Gemma2Embedder();
     const signal = AbortSignal.abort();
@@ -31,7 +31,7 @@ describe("Gemma2Embedder", () => {
         signal,
         modality: "image",
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       embedder.supports({
         action: "supports",
@@ -49,7 +49,7 @@ describe("Gemma2Embedder", () => {
     expect(embedder.info).toStrictEqual({
       dims: DEFAULT_DIMS,
       name: DEFAULT_MODEL_ID,
-      modalities: ["text"],
+      modalities: ["text", "image"],
       normalized: true,
       multilingual: true,
     });
@@ -73,7 +73,7 @@ describe("Gemma2Embedder", () => {
     expect(() => new Gemma2Embedder({ dims: 1.5 })).toThrow(v.ValiError);
   });
 
-  test("画像の埋め込みはモデル読込前に UnsupportedModalityError を投げる", async ({
+  test("壊れた画像の埋め込みはモデル読込前に EmbedFailedError を投げる", async ({
     expect,
     signal,
   }) => {
@@ -90,10 +90,29 @@ describe("Gemma2Embedder", () => {
         action: "embed",
         signal,
       }),
+    ).rejects.toBeInstanceOf(EmbedFailedError);
+  });
+
+  test("未知の種類の埋め込みは UnsupportedModalityError を投げる", async ({ expect, signal }) => {
+    // 準備：
+    const embedder = new Gemma2Embedder();
+
+    // 実行と検証：
+    await expect(
+      embedder.embed({
+        input: {
+          kind: "audio",
+        } as never,
+        action: "embed",
+        signal,
+      }),
     ).rejects.toBeInstanceOf(UnsupportedModalityError);
   });
 
-  test("画像を含む一括埋め込みは UnsupportedModalityError を投げる", async ({ expect, signal }) => {
+  test("未知の種類を含む一括埋め込みは UnsupportedModalityError を投げる", async ({
+    expect,
+    signal,
+  }) => {
     // 準備：
     const embedder = new Gemma2Embedder();
 
@@ -107,9 +126,8 @@ describe("Gemma2Embedder", () => {
             text: "hello",
           },
           {
-            data: new Uint8Array([1]),
-            kind: "image",
-          },
+            kind: "audio",
+          } as never,
         ],
         signal,
       }),

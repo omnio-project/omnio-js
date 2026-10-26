@@ -49,6 +49,29 @@ function norm(vector: Float32Array): number {
   return Math.sqrt(sum);
 }
 
+/**
+ * 検証用の 16x16 赤画像の PNG バイト列です。
+ *
+ * 外部への問い合わせなしに画像埋め込みを検証するために使用します。
+ */
+const RED_PNG_HEX =
+  "89504e470d0a1a0a0000000d4948445200000010000000100802000000909168360000001649444154789c6338a1a141126218d530aa61f86a00007c331810f8f8ebd20000000049454e44ae426082";
+
+/**
+ * 検証用の画像バイト列を作ります。
+ *
+ * @returns PNG 画像のバイト列です。
+ */
+function redPngBytes(): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(RED_PNG_HEX.length / 2);
+
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(RED_PNG_HEX.slice(index * 2, index * 2 + 2), 16);
+  }
+
+  return bytes;
+}
+
 describe("Gemma2Embedder の統合", () => {
   test(
     "テキストを 768 次元に埋め込む",
@@ -174,6 +197,70 @@ describe("Gemma2Embedder の統合", () => {
       // 検証：
       expect(actual.length).toBe(256);
       expect(norm(actual)).toBeCloseTo(1, 4);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "画像を 768 次元に埋め込む",
+    async ({ expect, signal }) => {
+      // 準備：
+      const embedder = await getSharedEmbedder(signal);
+
+      // 実行：
+      const actual = await embedder.embed({
+        input: {
+          data: redPngBytes(),
+          kind: "image",
+          mimeType: "image/png",
+        },
+        action: "embed",
+        signal,
+      });
+
+      // 検証：
+      expect(actual).toBeInstanceOf(Float32Array);
+      expect(actual.length).toBe(768);
+      expect(norm(actual)).toBeCloseTo(1, 4);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "テキストと画像の一括埋め込みは入力順に返す",
+    async ({ expect, signal }) => {
+      // 準備：
+      const embedder = await getSharedEmbedder(signal);
+
+      // 実行：
+      const actual = await embedder.embedMany({
+        action: "embedMany",
+        inputs: [
+          {
+            kind: "text",
+            text: "hello",
+          },
+          {
+            data: redPngBytes(),
+            kind: "image",
+            mimeType: "image/png",
+          },
+        ],
+        signal,
+      });
+      const single = await embedder.embed({
+        input: {
+          data: redPngBytes(),
+          kind: "image",
+          mimeType: "image/png",
+        },
+        action: "embed",
+        signal,
+      });
+
+      // 検証：
+      expect(actual).toHaveLength(2);
+      expect(actual[1]).toStrictEqual(single);
     },
     TIMEOUT,
   );
