@@ -237,29 +237,25 @@ export class Omnio {
     const active = signal ?? NEVER_ABORTED;
     active.throwIfAborted();
 
-    const lock = await asyncmux(this, active);
+    using _lock = await asyncmux(this, active);
+
+    if (this.#opened) {
+      return;
+    }
+
+    await this.#entity.open({ signal: active });
 
     try {
-      if (this.#opened) {
-        return;
-      }
-
-      await this.#entity.open({ signal: active });
-
-      try {
-        await this.#index.open({
-          action: "open",
-          signal: active,
-        });
-      } catch (ex) {
-        await this.#entity.close({ signal: active }).catch(() => undefined);
-        throw ex;
-      }
-
-      this.#opened = true;
-    } finally {
-      lock.release();
+      await this.#index.open({
+        action: "open",
+        signal: active,
+      });
+    } catch (ex) {
+      await this.#entity.close({ signal: active }).catch(() => undefined);
+      throw ex;
     }
+
+    this.#opened = true;
   }
 
   /**
@@ -271,22 +267,18 @@ export class Omnio {
     const active = signal ?? NEVER_ABORTED;
     active.throwIfAborted();
 
-    const lock = await asyncmux(this, active);
+    using _lock = await asyncmux(this, active);
 
-    try {
-      if (!this.#opened) {
-        return;
-      }
-
-      await this.#index.close({
-        action: "close",
-        signal: active,
-      });
-      await this.#entity.close({ signal: active });
-      this.#opened = false;
-    } finally {
-      lock.release();
+    if (!this.#opened) {
+      return;
     }
+
+    await this.#index.close({
+      action: "close",
+      signal: active,
+    });
+    await this.#entity.close({ signal: active });
+    this.#opened = false;
   }
 
   /**
@@ -302,77 +294,73 @@ export class Omnio {
     const active = input.signal ?? NEVER_ABORTED;
     active.throwIfAborted();
 
-    const lock = await asyncmux(this, active);
+    using _lock = await asyncmux(this, active);
 
-    try {
-      this.#requireOpen("putObject");
+    this.#requireOpen("putObject");
 
-      const key = toOmnioKey(input.key);
-      const keyString = key.key;
-      const bytes = await toBytes(input.data);
+    const key = toOmnioKey(input.key);
+    const keyString = key.key;
+    const bytes = await toBytes(input.data);
 
-      active.throwIfAborted();
+    active.throwIfAborted();
 
-      const existing = await this.#index.get<TUserMetadata>({
-        key,
-        action: "get",
+    const existing = await this.#index.get<TUserMetadata>({
+      key,
+      action: "get",
+      signal: active,
+    });
+    const now = new Date().toISOString();
+    let embedding: Float32Array | undefined;
+    let embeddingModel: string | undefined;
+    let embeddingSource: EmbedSource | undefined;
+
+    if (input.embedding !== undefined) {
+      embedding = input.embedding;
+    } else if ((input.embed ?? true) && input.description !== undefined) {
+      embedding = await this.#embedder.embedText({
+        text: input.description,
+        action: "embedText",
         signal: active,
       });
-      const now = new Date().toISOString();
-      let embedding: Float32Array | undefined;
-      let embeddingModel: string | undefined;
-      let embeddingSource: EmbedSource | undefined;
-
-      if (input.embedding !== undefined) {
-        embedding = input.embedding;
-      } else if ((input.embed ?? true) && input.description !== undefined) {
-        embedding = await this.#embedder.embedText({
-          text: input.description,
-          action: "embedText",
-          signal: active,
-        });
-        embeddingModel = this.#embedder.info.name;
-        embeddingSource = {
-          kind: "description",
-          model: this.#embedder.info.name,
-        };
-      }
-
-      const object: OmnioObject<TUserMetadata> = {
-        key,
-        tags: [...(input.tags ?? [])],
-        system: {
-          hash: await sha256Hex(bytes),
-          size: bytes.byteLength,
-          createdAt: existing?.system.createdAt ?? now,
-          updatedAt: now,
-          contentType: input.contentType,
-        },
-        embedding,
-        description: input.description,
-        userMetadata: input.userMetadata ?? ({} as TUserMetadata),
-        embeddingDims: embedding === undefined ? undefined : embedding.length,
-        embeddingModel,
-        embeddingSource,
+      embeddingModel = this.#embedder.info.name;
+      embeddingSource = {
+        kind: "description",
+        model: this.#embedder.info.name,
       };
-
-      await this.#entity.set(keyString, bytes, { signal: active });
-
-      try {
-        await this.#index.upsert({
-          action: "upsert",
-          object,
-          signal: active,
-        });
-      } catch (ex) {
-        await this.#entity.delete(keyString, { signal: active }).catch(() => undefined);
-        throw ex;
-      }
-
-      return object;
-    } finally {
-      lock.release();
     }
+
+    const object: OmnioObject<TUserMetadata> = {
+      key,
+      tags: [...(input.tags ?? [])],
+      system: {
+        hash: await sha256Hex(bytes),
+        size: bytes.byteLength,
+        createdAt: existing?.system.createdAt ?? now,
+        updatedAt: now,
+        contentType: input.contentType,
+      },
+      embedding,
+      description: input.description,
+      userMetadata: input.userMetadata ?? ({} as TUserMetadata),
+      embeddingDims: embedding === undefined ? undefined : embedding.length,
+      embeddingModel,
+      embeddingSource,
+    };
+
+    await this.#entity.set(keyString, bytes, { signal: active });
+
+    try {
+      await this.#index.upsert({
+        action: "upsert",
+        object,
+        signal: active,
+      });
+    } catch (ex) {
+      await this.#entity.delete(keyString, { signal: active }).catch(() => undefined);
+      throw ex;
+    }
+
+    return object;
   }
 
   /**
@@ -387,22 +375,18 @@ export class Omnio {
     const active = signal ?? NEVER_ABORTED;
     active.throwIfAborted();
 
-    const lock = await asyncmux(this, active);
+    using _lock = await asyncmux(this, active);
+
+    this.#requireOpen("getObject");
 
     try {
-      this.#requireOpen("getObject");
-
-      try {
-        return await this.#entity.get(toOmnioKey(key).key, { signal: active });
-      } catch (ex) {
-        if (ex instanceof KeyNotFoundError) {
-          return null;
-        }
-
-        throw ex;
+      return await this.#entity.get(toOmnioKey(key).key, { signal: active });
+    } catch (ex) {
+      if (ex instanceof KeyNotFoundError) {
+        return null;
       }
-    } finally {
-      lock.release();
+
+      throw ex;
     }
   }
 
@@ -423,22 +407,18 @@ export class Omnio {
     const active = signal ?? NEVER_ABORTED;
     active.throwIfAborted();
 
-    const lock = await asyncmux(this, active);
+    using _lock = await asyncmux(this, active);
+
+    this.#requireOpen("streamObject");
 
     try {
-      this.#requireOpen("streamObject");
-
-      try {
-        return await this.#entity.stream(toOmnioKey(key).key, { signal: active });
-      } catch (ex) {
-        if (ex instanceof KeyNotFoundError) {
-          return null;
-        }
-
-        throw ex;
+      return await this.#entity.stream(toOmnioKey(key).key, { signal: active });
+    } catch (ex) {
+      if (ex instanceof KeyNotFoundError) {
+        return null;
       }
-    } finally {
-      lock.release();
+
+      throw ex;
     }
   }
 
@@ -457,19 +437,15 @@ export class Omnio {
     const active = signal ?? NEVER_ABORTED;
     active.throwIfAborted();
 
-    const lock = await asyncmux(this, active);
+    using _lock = await asyncmux(this, active);
 
-    try {
-      this.#requireOpen("headObject");
+    this.#requireOpen("headObject");
 
-      return await this.#index.get<TUserMetadata>({
-        key: toOmnioKey(key),
-        action: "get",
-        signal: active,
-      });
-    } finally {
-      lock.release();
-    }
+    return await this.#index.get<TUserMetadata>({
+      key: toOmnioKey(key),
+      action: "get",
+      signal: active,
+    });
   }
 
   /**
@@ -484,24 +460,20 @@ export class Omnio {
     const active = signal ?? NEVER_ABORTED;
     active.throwIfAborted();
 
-    const lock = await asyncmux(this, active);
+    using _lock = await asyncmux(this, active);
 
-    try {
-      this.#requireOpen("deleteObject");
-      const objectKey = toOmnioKey(key);
-      const existed = await this.#entity.has(objectKey.key, { signal: active });
-      await this.#entity.delete(objectKey.key, { signal: active });
+    this.#requireOpen("deleteObject");
+    const objectKey = toOmnioKey(key);
+    const existed = await this.#entity.has(objectKey.key, { signal: active });
+    await this.#entity.delete(objectKey.key, { signal: active });
 
-      const indexDeleted = await this.#index.delete({
-        key: objectKey,
-        action: "delete",
-        signal: active,
-      });
+    const indexDeleted = await this.#index.delete({
+      key: objectKey,
+      action: "delete",
+      signal: active,
+    });
 
-      return existed || indexDeleted;
-    } finally {
-      lock.release();
-    }
+    return existed || indexDeleted;
   }
 
   /**
@@ -523,21 +495,17 @@ export class Omnio {
     const active = signal ?? NEVER_ABORTED;
     active.throwIfAborted();
 
-    const lock = await asyncmux(this, active);
+    using _lock = await asyncmux(this, active);
 
-    try {
-      this.#requireOpen("listObjects");
+    this.#requireOpen("listObjects");
 
-      return await this.#index.list<TUserMetadata>({
-        limit: options?.limit,
-        action: "list",
-        cursor: options?.cursor,
-        filter: options?.filter,
-        signal: active,
-      });
-    } finally {
-      lock.release();
-    }
+    return await this.#index.list<TUserMetadata>({
+      limit: options?.limit,
+      action: "list",
+      cursor: options?.cursor,
+      filter: options?.filter,
+      signal: active,
+    });
   }
 
   /**
@@ -553,58 +521,54 @@ export class Omnio {
     const active = input.signal ?? NEVER_ABORTED;
     active.throwIfAborted();
 
-    const lock = await asyncmux(this, active);
+    using _lock = await asyncmux(this, active);
 
-    try {
-      this.#requireOpen("searchObjects");
+    this.#requireOpen("searchObjects");
 
-      const query = input.query;
-      let vector: Float32Array;
-      let embeddingModel: string | undefined;
+    const query = input.query;
+    let vector: Float32Array;
+    let embeddingModel: string | undefined;
 
-      if ("text" in query) {
-        vector = await this.#embedder.embedText({
-          text: query.text,
-          action: "embedText",
-          signal: active,
-        });
-        embeddingModel = this.#embedder.info.name;
-      } else if ("vector" in query) {
-        vector = query.vector;
-      } else {
-        const image = query.image instanceof Uint8Array ? copiedBytes(query.image) : query.image;
-        vector = await this.#embedder.embed({
-          input: {
-            data: image,
-            kind: "image",
-            mimeType: query.mimeType,
-          },
-          action: "embed",
-          signal: active,
-        });
-      }
-
-      const results = await this.#index.search<TUserMetadata>({
-        topK: input.topK ?? 20,
-        action: "search",
-        filter: input.filter,
+    if ("text" in query) {
+      vector = await this.#embedder.embedText({
+        text: query.text,
+        action: "embedText",
         signal: active,
-        vector,
-        minScore: input.minScore,
-        embeddingModel,
       });
-
-      if (input.includeEmbedding === false) {
-        return results.map((item) => ({
-          ...item,
-          embedding: undefined,
-        }));
-      }
-
-      return results;
-    } finally {
-      lock.release();
+      embeddingModel = this.#embedder.info.name;
+    } else if ("vector" in query) {
+      vector = query.vector;
+    } else {
+      const image = query.image instanceof Uint8Array ? copiedBytes(query.image) : query.image;
+      vector = await this.#embedder.embed({
+        input: {
+          data: image,
+          kind: "image",
+          mimeType: query.mimeType,
+        },
+        action: "embed",
+        signal: active,
+      });
     }
+
+    const results = await this.#index.search<TUserMetadata>({
+      topK: input.topK ?? 20,
+      action: "search",
+      filter: input.filter,
+      signal: active,
+      vector,
+      minScore: input.minScore,
+      embeddingModel,
+    });
+
+    if (input.includeEmbedding === false) {
+      return results.map((item) => ({
+        ...item,
+        embedding: undefined,
+      }));
+    }
+
+    return results;
   }
 
   /**
@@ -622,50 +586,46 @@ export class Omnio {
     const active = signal ?? NEVER_ABORTED;
     active.throwIfAborted();
 
-    const lock = await asyncmux(this, active);
+    using _lock = await asyncmux(this, active);
 
-    try {
-      this.#requireOpen("reindexObject");
-      const objectKey = toOmnioKey(key);
-      const object = await this.#index.get<TUserMetadata>({
-        key: objectKey,
-        action: "get",
-        signal: active,
-      });
+    this.#requireOpen("reindexObject");
+    const objectKey = toOmnioKey(key);
+    const object = await this.#index.get<TUserMetadata>({
+      key: objectKey,
+      action: "get",
+      signal: active,
+    });
 
-      if (object === null || object.description === undefined) {
-        return object;
-      }
-
-      const embedding = await this.#embedder.embedText({
-        text: object.description,
-        action: "embedText",
-        signal: active,
-      });
-      const reindexed: OmnioObject<TUserMetadata> = {
-        ...object,
-        embedding,
-        embeddingDims: embedding.length,
-        embeddingModel: this.#embedder.info.name,
-        embeddingSource: {
-          kind: "description",
-          model: this.#embedder.info.name,
-        },
-        system: {
-          ...object.system,
-          updatedAt: new Date().toISOString(),
-        },
-      };
-      await this.#index.upsert({
-        action: "upsert",
-        object: reindexed,
-        signal: active,
-      });
-
-      return reindexed;
-    } finally {
-      lock.release();
+    if (object === null || object.description === undefined) {
+      return object;
     }
+
+    const embedding = await this.#embedder.embedText({
+      text: object.description,
+      action: "embedText",
+      signal: active,
+    });
+    const reindexed: OmnioObject<TUserMetadata> = {
+      ...object,
+      embedding,
+      embeddingDims: embedding.length,
+      embeddingModel: this.#embedder.info.name,
+      embeddingSource: {
+        kind: "description",
+        model: this.#embedder.info.name,
+      },
+      system: {
+        ...object.system,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    await this.#index.upsert({
+      action: "upsert",
+      object: reindexed,
+      signal: active,
+    });
+
+    return reindexed;
   }
 
   /**

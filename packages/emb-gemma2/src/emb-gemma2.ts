@@ -167,47 +167,43 @@ export class Gemma2Embedder implements IEmbedder {
   public async embed(c: IEmbedder.EmbedContext): Promise<Float32Array> {
     c.signal.throwIfAborted();
 
-    const lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux(this, c.signal);
 
-    try {
-      if (c.input.kind === "text") {
-        const vectors = await this.#embedBatch([c.input.text], c.signal);
-        const vector = vectors[0];
+    if (c.input.kind === "text") {
+      const vectors = await this.#embedBatch([c.input.text], c.signal);
+      const vector = vectors[0];
 
-        if (vector === undefined) {
-          throw new EmbedFailedError({
-            kind: "text",
-            cause: new Error("Empty embedding result"),
-          });
-        }
-
-        return vector;
+      if (vector === undefined) {
+        throw new EmbedFailedError({
+          kind: "text",
+          cause: new Error("Empty embedding result"),
+        });
       }
 
-      if (c.input.kind === "image") {
-        const rawImage = await this.#decodeImage(c.input.data, c.input.mimeType, c.signal);
-        const vectors = await this.#embedImages([rawImage], c.signal);
-        const vector = vectors[0];
-
-        if (vector === undefined) {
-          throw new EmbedFailedError({
-            kind: "image",
-            cause: new Error("Empty embedding result"),
-          });
-        }
-
-        return vector;
-      }
-
-      const kind: string = (c.input as { kind: string }).kind;
-
-      throw new UnsupportedModalityError({
-        actual: kind,
-        supported: ["text", "image"],
-      });
-    } finally {
-      lock.release();
+      return vector;
     }
+
+    if (c.input.kind === "image") {
+      const rawImage = await this.#decodeImage(c.input.data, c.input.mimeType, c.signal);
+      const vectors = await this.#embedImages([rawImage], c.signal);
+      const vector = vectors[0];
+
+      if (vector === undefined) {
+        throw new EmbedFailedError({
+          kind: "image",
+          cause: new Error("Empty embedding result"),
+        });
+      }
+
+      return vector;
+    }
+
+    const kind: string = (c.input as { kind: string }).kind;
+
+    throw new UnsupportedModalityError({
+      actual: kind,
+      supported: ["text", "image"],
+    });
   }
 
   /**
@@ -220,95 +216,91 @@ export class Gemma2Embedder implements IEmbedder {
   public async embedMany(c: IEmbedder.EmbedManyContext): Promise<Float32Array[]> {
     c.signal.throwIfAborted();
 
-    const lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux(this, c.signal);
 
-    try {
-      const texts: {
-        text: string;
-        index: number;
-      }[] = [];
-      const images: {
-        image: RawImage;
-        index: number;
-      }[] = [];
+    const texts: {
+      text: string;
+      index: number;
+    }[] = [];
+    const images: {
+      image: RawImage;
+      index: number;
+    }[] = [];
 
-      for (const [index, input] of c.inputs.entries()) {
-        if (input.kind === "text") {
-          texts.push({
-            text: input.text,
-            index,
-          });
+    for (const [index, input] of c.inputs.entries()) {
+      if (input.kind === "text") {
+        texts.push({
+          text: input.text,
+          index,
+        });
 
-          continue;
-        }
+        continue;
+      }
 
-        if (input.kind === "image") {
-          images.push({
-            image: await this.#decodeImage(input.data, input.mimeType, c.signal),
-            index,
-          });
+      if (input.kind === "image") {
+        images.push({
+          image: await this.#decodeImage(input.data, input.mimeType, c.signal),
+          index,
+        });
 
-          continue;
-        }
+        continue;
+      }
 
-        const kind: string = (input as { kind: string }).kind;
+      const kind: string = (input as { kind: string }).kind;
 
-        throw new UnsupportedModalityError({
-          actual: kind,
-          supported: ["text", "image"],
+      throw new UnsupportedModalityError({
+        actual: kind,
+        supported: ["text", "image"],
+      });
+    }
+
+    if (texts.length === 0 && images.length === 0) {
+      return [];
+    }
+
+    const textVectors =
+      texts.length === 0
+        ? []
+        : await this.#embedBatch(
+            texts.map((entry) => entry.text),
+            c.signal,
+          );
+    const imageVectors =
+      images.length === 0
+        ? []
+        : await this.#embedImages(
+            images.map((entry) => entry.image),
+            c.signal,
+          );
+    const vectors: Float32Array[] = [];
+
+    for (const [position, entry] of texts.entries()) {
+      const vector = textVectors[position];
+
+      if (vector === undefined) {
+        throw new EmbedFailedError({
+          kind: "text",
+          cause: new Error("Empty embedding result"),
         });
       }
 
-      if (texts.length === 0 && images.length === 0) {
-        return [];
-      }
-
-      const textVectors =
-        texts.length === 0
-          ? []
-          : await this.#embedBatch(
-              texts.map((entry) => entry.text),
-              c.signal,
-            );
-      const imageVectors =
-        images.length === 0
-          ? []
-          : await this.#embedImages(
-              images.map((entry) => entry.image),
-              c.signal,
-            );
-      const vectors: Float32Array[] = [];
-
-      for (const [position, entry] of texts.entries()) {
-        const vector = textVectors[position];
-
-        if (vector === undefined) {
-          throw new EmbedFailedError({
-            kind: "text",
-            cause: new Error("Empty embedding result"),
-          });
-        }
-
-        vectors[entry.index] = vector;
-      }
-
-      for (const [position, entry] of images.entries()) {
-        const vector = imageVectors[position];
-
-        if (vector === undefined) {
-          throw new EmbedFailedError({
-            kind: "image",
-            cause: new Error("Empty embedding result"),
-          });
-        }
-
-        vectors[entry.index] = vector;
-      }
-
-      return vectors;
-    } finally {
-      lock.release();
+      vectors[entry.index] = vector;
     }
+
+    for (const [position, entry] of images.entries()) {
+      const vector = imageVectors[position];
+
+      if (vector === undefined) {
+        throw new EmbedFailedError({
+          kind: "image",
+          cause: new Error("Empty embedding result"),
+        });
+      }
+
+      vectors[entry.index] = vector;
+    }
+
+    return vectors;
   }
 
   /**
@@ -321,23 +313,19 @@ export class Gemma2Embedder implements IEmbedder {
   public async embedText(c: IEmbedder.EmbedTextContext): Promise<Float32Array> {
     c.signal.throwIfAborted();
 
-    const lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux(this, c.signal);
 
-    try {
-      const vectors = await this.#embedBatch([c.text], c.signal);
-      const vector = vectors[0];
+    const vectors = await this.#embedBatch([c.text], c.signal);
+    const vector = vectors[0];
 
-      if (vector === undefined) {
-        throw new EmbedFailedError({
-          kind: "text",
-          cause: new Error("Empty embedding result"),
-        });
-      }
-
-      return vector;
-    } finally {
-      lock.release();
+    if (vector === undefined) {
+      throw new EmbedFailedError({
+        kind: "text",
+        cause: new Error("Empty embedding result"),
+      });
     }
+
+    return vector;
   }
 
   /**

@@ -252,53 +252,49 @@ export class SqliteWasmIndex implements IObjectIndex {
   public async open(c: IObjectIndex.OpenContext): Promise<void> {
     c.signal.throwIfAborted();
 
-    const lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux(this, c.signal);
+
+    if (this.#kysely !== undefined) {
+      return;
+    }
+
+    let sqlite3: Awaited<ReturnType<typeof initSqliteWasm>>;
 
     try {
-      if (this.#kysely !== undefined) {
-        return;
-      }
-
-      let sqlite3: Awaited<ReturnType<typeof initSqliteWasm>>;
-
-      try {
-        sqlite3 = await initSqliteWasm();
-      } catch (ex) {
-        throw new DbQueryError({
-          cause: ex,
-          operation: "open",
-        });
-      }
-
-      let handle: SqliteWasmHandle;
-
-      try {
-        handle = new sqlite3.oo1.DB(this.#location, "c");
-      } catch (ex) {
-        throw new DbQueryError({
-          cause: ex,
-          operation: "open",
-        });
-      }
-
-      const kysely = new Kysely<SqliteWasmDatabase>({ dialect: new SqliteWasmDialect(handle) });
-      const { error } = await new Migrator({
-        db: kysely,
-        provider: new SqliteWasmMigrationProvider(),
-      }).migrateToLatest();
-
-      if (error instanceof Error) {
-        handle.close();
-        throw new DbQueryError({
-          cause: error,
-          operation: "open",
-        });
-      }
-
-      this.#kysely = kysely;
-    } finally {
-      lock.release();
+      sqlite3 = await initSqliteWasm();
+    } catch (ex) {
+      throw new DbQueryError({
+        cause: ex,
+        operation: "open",
+      });
     }
+
+    let handle: SqliteWasmHandle;
+
+    try {
+      handle = new sqlite3.oo1.DB(this.#location, "c");
+    } catch (ex) {
+      throw new DbQueryError({
+        cause: ex,
+        operation: "open",
+      });
+    }
+
+    const kysely = new Kysely<SqliteWasmDatabase>({ dialect: new SqliteWasmDialect(handle) });
+    const { error } = await new Migrator({
+      db: kysely,
+      provider: new SqliteWasmMigrationProvider(),
+    }).migrateToLatest();
+
+    if (error instanceof Error) {
+      handle.close();
+      throw new DbQueryError({
+        cause: error,
+        operation: "open",
+      });
+    }
+
+    this.#kysely = kysely;
   }
 
   /**
@@ -309,18 +305,14 @@ export class SqliteWasmIndex implements IObjectIndex {
   public async close(c: IObjectIndex.CloseContext): Promise<void> {
     c.signal.throwIfAborted();
 
-    const lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux(this, c.signal);
 
-    try {
-      const kysely = this.#kysely;
+    const kysely = this.#kysely;
 
-      this.#kysely = undefined;
+    this.#kysely = undefined;
 
-      if (kysely !== undefined) {
-        await kysely.destroy();
-      }
-    } finally {
-      lock.release();
+    if (kysely !== undefined) {
+      await kysely.destroy();
     }
   }
 
@@ -332,87 +324,83 @@ export class SqliteWasmIndex implements IObjectIndex {
   public async upsert<TUserMetadata>(c: IObjectIndex.UpsertContext<TUserMetadata>): Promise<void> {
     c.signal.throwIfAborted();
 
-    const lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux(this, c.signal);
 
-    try {
-      const kysely = this.#requireOpen("upsert");
-      const object = c.object;
-      const vector = object.embedding;
-      let embedding: Uint8Array<ArrayBuffer> | null = null;
-      let embeddingDims: number | null = null;
-      let embeddingModel: string | null = null;
-      let embeddingSource: string | null = null;
+    const kysely = this.#requireOpen("upsert");
+    const object = c.object;
+    const vector = object.embedding;
+    let embedding: Uint8Array<ArrayBuffer> | null = null;
+    let embeddingDims: number | null = null;
+    let embeddingModel: string | null = null;
+    let embeddingSource: string | null = null;
 
-      if (vector !== undefined) {
-        if (object.embeddingDims !== undefined && object.embeddingDims !== vector.length) {
-          throw new VectorDimensionMismatchError({
-            actual: vector.length,
-            expected: object.embeddingDims,
-          });
-        }
-
-        embedding = encodeEmbedding(vector);
-        embeddingDims = vector.length;
-        embeddingModel = object.embeddingModel ?? null;
-
-        if (object.embeddingSource !== undefined) {
-          embeddingSource = stringifyJson(object.embeddingSource, "upsert");
-        }
+    if (vector !== undefined) {
+      if (object.embeddingDims !== undefined && object.embeddingDims !== vector.length) {
+        throw new VectorDimensionMismatchError({
+          actual: vector.length,
+          expected: object.embeddingDims,
+        });
       }
 
-      const key = object.key.key;
-      const tags = [...new Set(object.tags)];
-      const row = {
-        key,
-        hash: object.system.hash ?? null,
-        size: object.system.size,
-        embedding,
-        created_at: object.system.createdAt,
-        updated_at: object.system.updatedAt,
-        description: object.description ?? null,
-        content_type: object.system.contentType,
-        user_metadata: stringifyJson(object.userMetadata, "upsert"),
-        embedding_dims: embeddingDims,
-        embedding_model: embeddingModel,
-        embedding_source: embeddingSource,
-      };
-      await kysely.transaction().execute(async (transaction) => {
+      embedding = encodeEmbedding(vector);
+      embeddingDims = vector.length;
+      embeddingModel = object.embeddingModel ?? null;
+
+      if (object.embeddingSource !== undefined) {
+        embeddingSource = stringifyJson(object.embeddingSource, "upsert");
+      }
+    }
+
+    const key = object.key.key;
+    const tags = [...new Set(object.tags)];
+    const row = {
+      key,
+      hash: object.system.hash ?? null,
+      size: object.system.size,
+      embedding,
+      created_at: object.system.createdAt,
+      updated_at: object.system.updatedAt,
+      description: object.description ?? null,
+      content_type: object.system.contentType,
+      user_metadata: stringifyJson(object.userMetadata, "upsert"),
+      embedding_dims: embeddingDims,
+      embedding_model: embeddingModel,
+      embedding_source: embeddingSource,
+    };
+    await kysely.transaction().execute(async (transaction) => {
+      await transaction
+        .insertInto("objects")
+        .values(row)
+        .onConflict((conflict) =>
+          conflict.column("key").doUpdateSet({
+            hash: row.hash,
+            size: row.size,
+            embedding: row.embedding,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            description: row.description,
+            content_type: row.content_type,
+            user_metadata: row.user_metadata,
+            embedding_dims: row.embedding_dims,
+            embedding_model: row.embedding_model,
+            embedding_source: row.embedding_source,
+          }),
+        )
+        .execute();
+      await transaction.deleteFrom("object_tags").where("key", "=", key).execute();
+
+      if (tags.length > 0) {
         await transaction
-          .insertInto("objects")
-          .values(row)
-          .onConflict((conflict) =>
-            conflict.column("key").doUpdateSet({
-              hash: row.hash,
-              size: row.size,
-              embedding: row.embedding,
-              created_at: row.created_at,
-              updated_at: row.updated_at,
-              description: row.description,
-              content_type: row.content_type,
-              user_metadata: row.user_metadata,
-              embedding_dims: row.embedding_dims,
-              embedding_model: row.embedding_model,
-              embedding_source: row.embedding_source,
-            }),
+          .insertInto("object_tags")
+          .values(
+            tags.map((tag) => ({
+              key,
+              tag,
+            })),
           )
           .execute();
-        await transaction.deleteFrom("object_tags").where("key", "=", key).execute();
-
-        if (tags.length > 0) {
-          await transaction
-            .insertInto("object_tags")
-            .values(
-              tags.map((tag) => ({
-                key,
-                tag,
-              })),
-            )
-            .execute();
-        }
-      });
-    } finally {
-      lock.release();
-    }
+      }
+    });
   }
 
   /**
@@ -427,26 +415,22 @@ export class SqliteWasmIndex implements IObjectIndex {
   ): Promise<OmnioObject<TUserMetadata> | null> {
     c.signal.throwIfAborted();
 
-    const lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux(this, c.signal);
 
-    try {
-      const kysely = this.#requireOpen("get");
-      const row = await kysely
-        .selectFrom("objects")
-        .selectAll()
-        .where("key", "=", c.key.key)
-        .executeTakeFirst();
+    const kysely = this.#requireOpen("get");
+    const row = await kysely
+      .selectFrom("objects")
+      .selectAll()
+      .where("key", "=", c.key.key)
+      .executeTakeFirst();
 
-      if (row === undefined) {
-        return null;
-      }
-
-      const tags = await this.#loadTags(kysely, [row.key]);
-
-      return this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "get");
-    } finally {
-      lock.release();
+    if (row === undefined) {
+      return null;
     }
+
+    const tags = await this.#loadTags(kysely, [row.key]);
+
+    return this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "get");
   }
 
   /**
@@ -459,20 +443,16 @@ export class SqliteWasmIndex implements IObjectIndex {
   public async delete(c: IObjectIndex.DeleteContext): Promise<boolean> {
     c.signal.throwIfAborted();
 
-    const lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux(this, c.signal);
 
-    try {
-      const kysely = this.#requireOpen("delete");
-      const result = await kysely
-        .deleteFrom("objects")
-        .where("key", "=", c.key.key)
-        .executeTakeFirst();
-      const deleted = result.numDeletedRows;
+    const kysely = this.#requireOpen("delete");
+    const result = await kysely
+      .deleteFrom("objects")
+      .where("key", "=", c.key.key)
+      .executeTakeFirst();
+    const deleted = result.numDeletedRows;
 
-      return typeof deleted === "bigint" ? deleted > 0n : (deleted ?? 0) > 0;
-    } finally {
-      lock.release();
-    }
+    return typeof deleted === "bigint" ? deleted > 0n : (deleted ?? 0) > 0;
   }
 
   /**
@@ -487,55 +467,35 @@ export class SqliteWasmIndex implements IObjectIndex {
   ): Promise<IObjectIndex.ListResult<TUserMetadata>> {
     c.signal.throwIfAborted();
 
-    const lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux(this, c.signal);
 
-    try {
-      const kysely = this.#requireOpen("list");
-      const limit = c.limit ?? 100;
+    const kysely = this.#requireOpen("list");
+    const limit = c.limit ?? 100;
 
-      if (limit <= 0) {
-        return {
-          items: [],
-          nextCursor: null,
-        };
-      }
+    if (limit <= 0) {
+      return {
+        items: [],
+        nextCursor: null,
+      };
+    }
 
-      const offset = parseCursor(c.cursor);
-      const userMetadataFilter = c.filter?.userMetadata;
+    const offset = parseCursor(c.cursor);
+    const userMetadataFilter = c.filter?.userMetadata;
 
-      if (userMetadataFilter !== undefined) {
-        const candidates = await withMetadataFilter(
-          kysely.selectFrom("objects").selectAll(),
-          c.filter,
-        )
-          .orderBy("key")
-          .execute();
-        const matched = candidates.filter((row) =>
-          matchesUserMetadata(
-            parseJson(row.user_metadata, "list") as Record<string, unknown>,
-            userMetadataFilter,
-          ),
-        );
-        const page = matched.slice(offset, offset + limit);
-        const tags = await this.#loadTags(
-          kysely,
-          page.map((row) => row.key),
-        );
-
-        return {
-          items: page.map((row) =>
-            this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "list"),
-          ),
-          nextCursor: offset + page.length < matched.length ? String(offset + page.length) : null,
-        };
-      }
-
-      const rows = await withMetadataFilter(kysely.selectFrom("objects").selectAll(), c.filter)
+    if (userMetadataFilter !== undefined) {
+      const candidates = await withMetadataFilter(
+        kysely.selectFrom("objects").selectAll(),
+        c.filter,
+      )
         .orderBy("key")
-        .limit(limit + 1)
-        .offset(offset)
         .execute();
-      const page = rows.slice(0, limit);
+      const matched = candidates.filter((row) =>
+        matchesUserMetadata(
+          parseJson(row.user_metadata, "list") as Record<string, unknown>,
+          userMetadataFilter,
+        ),
+      );
+      const page = matched.slice(offset, offset + limit);
       const tags = await this.#loadTags(
         kysely,
         page.map((row) => row.key),
@@ -545,11 +505,25 @@ export class SqliteWasmIndex implements IObjectIndex {
         items: page.map((row) =>
           this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "list"),
         ),
-        nextCursor: rows.length > limit ? String(offset + limit) : null,
+        nextCursor: offset + page.length < matched.length ? String(offset + page.length) : null,
       };
-    } finally {
-      lock.release();
     }
+
+    const rows = await withMetadataFilter(kysely.selectFrom("objects").selectAll(), c.filter)
+      .orderBy("key")
+      .limit(limit + 1)
+      .offset(offset)
+      .execute();
+    const page = rows.slice(0, limit);
+    const tags = await this.#loadTags(
+      kysely,
+      page.map((row) => row.key),
+    );
+
+    return {
+      items: page.map((row) => this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "list")),
+      nextCursor: rows.length > limit ? String(offset + limit) : null,
+    };
   }
 
   /**
@@ -564,84 +538,80 @@ export class SqliteWasmIndex implements IObjectIndex {
   ): Promise<IndexedObject<TUserMetadata>[]> {
     c.signal.throwIfAborted();
 
-    const lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux(this, c.signal);
 
-    try {
-      const kysely = this.#requireOpen("search");
+    const kysely = this.#requireOpen("search");
 
-      if (c.topK <= 0 || c.vector.length === 0) {
-        return [];
+    if (c.topK <= 0 || c.vector.length === 0) {
+      return [];
+    }
+
+    const rows = await withMetadataFilter(
+      kysely.selectFrom("objects").selectAll(),
+      c.filter,
+    ).execute();
+    const metric = c.metric ?? "cosine";
+    const scored: {
+      row: ObjectRow;
+      score: number;
+    }[] = [];
+
+    for (const row of rows) {
+      if (row.embedding === null) {
+        continue;
       }
 
-      const rows = await withMetadataFilter(
-        kysely.selectFrom("objects").selectAll(),
-        c.filter,
-      ).execute();
-      const metric = c.metric ?? "cosine";
-      const scored: {
-        row: ObjectRow;
-        score: number;
-      }[] = [];
+      if (c.embeddingModel !== undefined && row.embedding_model !== c.embeddingModel) {
+        continue;
+      }
 
-      for (const row of rows) {
-        if (row.embedding === null) {
-          continue;
-        }
+      const vector = decodeEmbedding(row.embedding);
 
-        if (c.embeddingModel !== undefined && row.embedding_model !== c.embeddingModel) {
-          continue;
-        }
-
-        const vector = decodeEmbedding(row.embedding);
-
-        if (row.embedding_dims !== null && row.embedding_dims !== vector.length) {
-          throw new VectorDimensionMismatchError({
-            actual: vector.length,
-            expected: row.embedding_dims,
-          });
-        }
-
-        if (vector.length !== c.vector.length) {
-          continue;
-        }
-
-        const score = scoreVector(metric, c.vector, vector);
-
-        if (c.minScore !== undefined && score < c.minScore) {
-          continue;
-        }
-
-        if (
-          c.filter?.userMetadata !== undefined &&
-          !matchesUserMetadata(
-            parseJson(row.user_metadata, "search") as Record<string, unknown>,
-            c.filter.userMetadata,
-          )
-        ) {
-          continue;
-        }
-
-        scored.push({
-          row,
-          score,
+      if (row.embedding_dims !== null && row.embedding_dims !== vector.length) {
+        throw new VectorDimensionMismatchError({
+          actual: vector.length,
+          expected: row.embedding_dims,
         });
       }
 
-      scored.sort((left, right) => right.score - left.score);
+      if (vector.length !== c.vector.length) {
+        continue;
+      }
 
-      const top = scored.slice(0, c.topK);
-      const tags = await this.#loadTags(
-        kysely,
-        top.map(({ row }) => row.key),
-      );
+      const score = scoreVector(metric, c.vector, vector);
 
-      return top.map(({ row, score }) => ({
-        ...this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "search"),
+      if (c.minScore !== undefined && score < c.minScore) {
+        continue;
+      }
+
+      if (
+        c.filter?.userMetadata !== undefined &&
+        !matchesUserMetadata(
+          parseJson(row.user_metadata, "search") as Record<string, unknown>,
+          c.filter.userMetadata,
+        )
+      ) {
+        continue;
+      }
+
+      scored.push({
+        row,
         score,
-      }));
-    } finally {
-      lock.release();
+      });
     }
+
+    scored.sort((left, right) => right.score - left.score);
+
+    const top = scored.slice(0, c.topK);
+    const tags = await this.#loadTags(
+      kysely,
+      top.map(({ row }) => row.key),
+    );
+
+    return top.map(({ row, score }) => ({
+      ...this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "search"),
+      score,
+    }));
   }
 
   /**
