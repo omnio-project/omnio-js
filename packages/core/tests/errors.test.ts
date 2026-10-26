@@ -9,6 +9,7 @@ import {
   DbNotOpenError,
   ModelLoadError,
   EmbedFailedError,
+  InvalidOmnioKeyError,
   UnsupportedModalityError,
   EmbeddingModelMismatchError,
   VectorDimensionMismatchError,
@@ -385,5 +386,43 @@ describe("ModelLoadError", () => {
 
     // 検証：
     expect(error.message).toBe("埋め込みモデルの読み込みに失敗しました: embeddinggemma-2");
+  });
+});
+describe("InvalidOmnioKeyError", () => {
+  test("InvalidUsageErrorBase を継承し name は OmnioInvalidKeyError である", ({ expect }) => {
+    // 実行：
+    const error = new InvalidOmnioKeyError({ input: "" });
+
+    // 検証：
+    expect(error).toBeInstanceOf(ErrorBase);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe("OmnioInvalidKeyError");
+  });
+
+  test("meta に入力値を保持する", ({ expect }) => {
+    // 実行：
+    const error = new InvalidOmnioKeyError({ input: "" });
+
+    // 検証：
+    expect(error.meta).toStrictEqual({ input: "" });
+  });
+
+  test("既定のメッセージは英語である", ({ expect }) => {
+    // 実行：
+    const error = new InvalidOmnioKeyError({ input: "" });
+
+    // 検証：
+    expect(error.message).toBe("Invalid object key");
+  });
+
+  test("ja では日本語のメッセージを返す", ({ expect, setLang }) => {
+    // 準備：
+    setLang("ja");
+
+    // 実行：
+    const error = new InvalidOmnioKeyError({ input: "" });
+
+    // 検証：
+    expect(error.message).toBe("無効なオブジェクトキーです");
   });
 });

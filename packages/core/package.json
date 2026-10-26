@@ -28,18 +28,15 @@
   },
   "dependencies": {
     "i18n-error-base": "^0.0.8",
-    "maypromise": "^0.0.4"
+    "maypromise": "^0.0.4",
+    "valibot": "^1.0.0"
   },
   "devDependencies": {
     "@vitest/browser-playwright": "catalog:",
     "@vitest/coverage-istanbul": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "playwright": "catalog:",
-    "valibot": "^1.0.0",
     "vite-plus": "catalog:"
-  },
-  "peerDependencies": {
-    "valibot": "^1.0.0"
   },
   "readme": "README.md"
 }

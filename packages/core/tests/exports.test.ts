@@ -9,22 +9,42 @@ import * as errors from "../src/errors/errors.js";
 import * as dbTypes from "../src/idx.types.js";
 import * as core from "../src/index.js";
 import * as objectTypes from "../src/object.types.js";
+import * as schemas from "../src/schemas.js";
 
 describe("exports", () => {
   test("エントリーポイントは実行時の公開値をすべて再エクスポートする", ({ expect }) => {
     // 実行と検証：
     expect(Object.keys(core).sort()).toStrictEqual([
+      "ContentTypeSchema",
       "DbErrorBase",
       "DbNotOpenError",
       "DbQueryError",
+      "DescriptionSchema",
       "EmbErrorBase",
       "EmbedFailedError",
+      "EmbeddingDimsSchema",
       "EmbeddingModelMismatchError",
+      "EmbeddingModelSchema",
       "ErrorBase",
+      "HashSchema",
+      "InvalidOmnioKeyError",
       "InvalidUsageErrorBase",
+      "MAX_OBJECT_KEY_BYTES",
+      "MAX_OBJECT_KEY_LENGTH",
+      "MAX_OBJECT_SIZE",
+      "MAX_TAGS",
+      "MAX_TAG_BYTES",
+      "MAX_TAG_LENGTH",
       "ModelLoadError",
+      "ObjectKeySchema",
+      "SHA256_HEX_REGEX",
+      "SizeSchema",
+      "TagSchema",
+      "TagsSchema",
+      "TimestampSchema",
       "UnexpectedErrorBase",
       "UnsupportedModalityError",
+      "UserMetadataSchema",
       "VectorDimensionMismatchError",
       "setErrorMessage",
     ]);
@@ -45,6 +65,18 @@ describe("exports", () => {
     expect(core.UnsupportedModalityError).toBe(embErrors.UnsupportedModalityError);
     expect(core.EmbedFailedError).toBe(embErrors.EmbedFailedError);
     expect(core.ModelLoadError).toBe(embErrors.ModelLoadError);
+    expect(core.InvalidOmnioKeyError).toBe(errors.InvalidOmnioKeyError);
+    expect(core.ObjectKeySchema).toBe(schemas.ObjectKeySchema);
+    expect(core.TagSchema).toBe(schemas.TagSchema);
+    expect(core.TagsSchema).toBe(schemas.TagsSchema);
+    expect(core.DescriptionSchema).toBe(schemas.DescriptionSchema);
+    expect(core.ContentTypeSchema).toBe(schemas.ContentTypeSchema);
+    expect(core.HashSchema).toBe(schemas.HashSchema);
+    expect(core.SizeSchema).toBe(schemas.SizeSchema);
+    expect(core.TimestampSchema).toBe(schemas.TimestampSchema);
+    expect(core.EmbeddingDimsSchema).toBe(schemas.EmbeddingDimsSchema);
+    expect(core.EmbeddingModelSchema).toBe(schemas.EmbeddingModelSchema);
+    expect(core.UserMetadataSchema).toBe(schemas.UserMetadataSchema);
   });
 
   test("型のみのモジュールは実行時の値を公開しない", ({ expect }) => {
@@ -97,6 +129,24 @@ describe("exports", () => {
     expectTypeOf<objectTypes.MetadataFilter>().toEqualTypeOf<core.MetadataFilter>();
   });
 
+  test("schemas の型はエントリーポイントから同一に解決される", () => {
+    // 実行と検証：
+    expectTypeOf<schemas.ObjectKey>().toEqualTypeOf<core.ObjectKey>();
+    expectTypeOf<schemas.ObjectKeyLike>().toEqualTypeOf<core.ObjectKeyLike>();
+    expectTypeOf<schemas.Tag>().toEqualTypeOf<core.Tag>();
+    expectTypeOf<schemas.TagLike>().toEqualTypeOf<core.TagLike>();
+    expectTypeOf<schemas.Tags>().toEqualTypeOf<core.Tags>();
+    expectTypeOf<schemas.TagsLike>().toEqualTypeOf<core.TagsLike>();
+    expectTypeOf<schemas.Description>().toEqualTypeOf<core.Description>();
+    expectTypeOf<schemas.ContentType>().toEqualTypeOf<core.ContentType>();
+    expectTypeOf<schemas.Hash>().toEqualTypeOf<core.Hash>();
+    expectTypeOf<schemas.Size>().toEqualTypeOf<core.Size>();
+    expectTypeOf<schemas.Timestamp>().toEqualTypeOf<core.Timestamp>();
+    expectTypeOf<schemas.EmbeddingDims>().toEqualTypeOf<core.EmbeddingDims>();
+    expectTypeOf<schemas.EmbeddingModel>().toEqualTypeOf<core.EmbeddingModel>();
+    expectTypeOf<schemas.UserMetadata>().toEqualTypeOf<core.UserMetadata>();
+  });
+
   test("errors の型はエントリーポイントから同一に解決される", () => {
     // 実行と検証：
     expectTypeOf<core.ErrorMeta>().toEqualTypeOf<errors.ErrorMeta>();
@@ -105,5 +155,7 @@ describe("exports", () => {
     expectTypeOf<core.DbNotOpenErrorMeta>().toEqualTypeOf<dbErrors.DbNotOpenErrorMeta>();
     expectTypeOf<core.UnsupportedModalityErrorArgs>().toEqualTypeOf<embErrors.UnsupportedModalityErrorArgs>();
     expectTypeOf<core.UnsupportedModalityErrorMeta>().toEqualTypeOf<embErrors.UnsupportedModalityErrorMeta>();
+    expectTypeOf<core.InvalidOmnioKeyErrorArgs>().toEqualTypeOf<errors.InvalidOmnioKeyErrorArgs>();
+    expectTypeOf<core.InvalidOmnioKeyErrorMeta>().toEqualTypeOf<errors.InvalidOmnioKeyErrorMeta>();
   });
 });

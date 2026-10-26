@@ -31,10 +31,16 @@ export {
   UnsupportedModalityError,
 } from "./emb-errors.js";
 
-export type { ErrorMeta, ErrorOptions } from "./errors.js";
+export type {
+  ErrorMeta,
+  ErrorOptions,
+  InvalidOmnioKeyErrorArgs,
+  InvalidOmnioKeyErrorMeta,
+} from "./errors.js";
 export {
   ErrorBase,
   setErrorMessage,
   UnexpectedErrorBase,
+  InvalidOmnioKeyError,
   InvalidUsageErrorBase,
 } from "./errors.js";

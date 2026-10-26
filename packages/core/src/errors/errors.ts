@@ -44,3 +44,40 @@ export class InvalidUsageErrorBase<
 export class UnexpectedErrorBase<
   TMeta extends ErrorMeta | undefined = ErrorMeta | undefined,
 > extends ErrorBase<TMeta> {}
+
+/**
+ * `InvalidOmnioKeyError` のメタデータです。
+ */
+export type InvalidOmnioKeyErrorMeta = {
+  /** 検証に失敗した入力値です。 */
+  readonly input: unknown;
+};
+
+/**
+ * `InvalidOmnioKeyError` のコンストラクター引数です。
+ */
+export type InvalidOmnioKeyErrorArgs = ErrorOptions & InvalidOmnioKeyErrorMeta;
+
+/**
+ * オブジェクトキーが無効であることを示すエラーです。
+ *
+ * @example
+ * ```
+ * import { InvalidOmnioKeyError } from "@omniojs/core";
+ *
+ * throw new InvalidOmnioKeyError({ input: "" });
+ * ```
+ */
+export class InvalidOmnioKeyError extends InvalidUsageErrorBase<InvalidOmnioKeyErrorMeta> {
+  static {
+    this.prototype.name = "OmnioInvalidKeyError";
+  }
+
+  public constructor(args: InvalidOmnioKeyErrorArgs) {
+    const { input, ...options } = args;
+    const meta: InvalidOmnioKeyErrorMeta = { input };
+    super(meta, () => "Invalid object key", options);
+  }
+}
+
+setErrorMessage(InvalidOmnioKeyError, () => "無効なオブジェクトキーです", "ja");
