@@ -15,11 +15,13 @@ minimumReleaseAgeExclude:
   - "@oxlint/*"
   - "@tai-kun/blume-integrations"
   - "@tai-kun/vp-lint-plugins"
+  - "@unikvs/*"
   - "@vitest/*"
   - "@voidzero-dev/*"
   - oxfmt
   - oxlint
   - oxlint-tsgolint
+  - unikvs
   - vite-plus
   - vitest
 
