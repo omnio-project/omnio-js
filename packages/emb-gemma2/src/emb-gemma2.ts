@@ -11,6 +11,7 @@ import {
   EmbedFailedError,
   UnsupportedModalityError,
 } from "@omniojs/core";
+import { asyncmux } from "asyncmux";
 
 /** 既定のモデル ID です。 */
 export const DEFAULT_MODEL_ID = "onnx-community/embeddinggemma-2-ONNX";
@@ -48,6 +49,9 @@ export interface Gemma2EmbedderOptions {
  * EmbeddingGemma 2 による `IEmbedder` の実装です。
  *
  * テキスト埋め込みに対応します。画像などの modalities は将来対応します。
+ *
+ * すべての非同期メソッドは `asyncmux` によりインスタンス単位で排他します。
+ * データの整合性のためではなく、推論器の初期化と埋め込み操作が同時実行されないためです。
  */
 export class Gemma2Embedder implements IEmbedder {
   /** 埋め込み器の能力情報です。 */
@@ -110,24 +114,30 @@ export class Gemma2Embedder implements IEmbedder {
   public async embed(c: IEmbedder.EmbedContext): Promise<Float32Array> {
     c.signal.throwIfAborted();
 
-    if (c.input.kind !== "text") {
-      throw new UnsupportedModalityError({
-        actual: c.input.kind,
-        supported: ["text"],
-      });
+    const lock = await asyncmux(this, c.signal);
+
+    try {
+      if (c.input.kind !== "text") {
+        throw new UnsupportedModalityError({
+          actual: c.input.kind,
+          supported: ["text"],
+        });
+      }
+
+      const vectors = await this.embedBatch([c.input.text], c.signal);
+      const vector = vectors[0];
+
+      if (vector === undefined) {
+        throw new EmbedFailedError({
+          kind: "text",
+          cause: new Error("Empty embedding result"),
+        });
+      }
+
+      return vector;
+    } finally {
+      lock.release();
     }
-
-    const vectors = await this.embedBatch([c.input.text], c.signal);
-    const vector = vectors[0];
-
-    if (vector === undefined) {
-      throw new EmbedFailedError({
-        kind: "text",
-        cause: new Error("Empty embedding result"),
-      });
-    }
-
-    return vector;
   }
 
   /**
@@ -140,20 +150,26 @@ export class Gemma2Embedder implements IEmbedder {
   public async embedMany(c: IEmbedder.EmbedManyContext): Promise<Float32Array[]> {
     c.signal.throwIfAborted();
 
-    const texts: string[] = [];
+    const lock = await asyncmux(this, c.signal);
 
-    for (const input of c.inputs) {
-      if (input.kind !== "text") {
-        throw new UnsupportedModalityError({
-          actual: input.kind,
-          supported: ["text"],
-        });
+    try {
+      const texts: string[] = [];
+
+      for (const input of c.inputs) {
+        if (input.kind !== "text") {
+          throw new UnsupportedModalityError({
+            actual: input.kind,
+            supported: ["text"],
+          });
+        }
+
+        texts.push(input.text);
       }
 
-      texts.push(input.text);
+      return await this.embedBatch(texts, c.signal);
+    } finally {
+      lock.release();
     }
-
-    return this.embedBatch(texts, c.signal);
   }
 
   /**
@@ -166,17 +182,23 @@ export class Gemma2Embedder implements IEmbedder {
   public async embedText(c: IEmbedder.EmbedTextContext): Promise<Float32Array> {
     c.signal.throwIfAborted();
 
-    const vectors = await this.embedBatch([c.text], c.signal);
-    const vector = vectors[0];
+    const lock = await asyncmux(this, c.signal);
 
-    if (vector === undefined) {
-      throw new EmbedFailedError({
-        kind: "text",
-        cause: new Error("Empty embedding result"),
-      });
+    try {
+      const vectors = await this.embedBatch([c.text], c.signal);
+      const vector = vectors[0];
+
+      if (vector === undefined) {
+        throw new EmbedFailedError({
+          kind: "text",
+          cause: new Error("Empty embedding result"),
+        });
+      }
+
+      return vector;
+    } finally {
+      lock.release();
     }
-
-    return vector;
   }
 
   /**

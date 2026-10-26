@@ -40,6 +40,7 @@ onlyBuiltDependencies: []
 allowBuilds:
   esbuild: true
   onnxruntime-node: true
+  protobufjs: true
 
 update:
   ignoreDeps:

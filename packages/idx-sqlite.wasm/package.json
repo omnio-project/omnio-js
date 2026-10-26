@@ -29,6 +29,7 @@
   "dependencies": {
     "@omniojs/core": "workspace:*",
     "@sqlite.org/sqlite-wasm": "^3.53.4-build2",
+    "asyncmux": "^0.0.12",
     "kysely": "^0.29.7"
   },
   "devDependencies": {

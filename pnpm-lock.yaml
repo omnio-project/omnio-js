@@ -55,7 +55,23 @@ importers:
         version: 1.3.0(@astrojs/compiler-rs@0.5.1)(@types/node@24.19.2)(@vitest/browser-playwright@5.0.5(@voidzero-dev/vite-plus-core@1.3.0(@types/node@24.19.2)(@volar/typescript@2.4.28(typescript@7.0.2))(esbuild@0.28.2)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(playwright@1.64.1)(vitest@5.0.5))(@vitest/coverage-istanbul@5.0.5(vitest@5.0.5))(@vitest/coverage-v8@5.0.5(@vitest/browser@5.0.5(@voidzero-dev/vite-plus-core@1.3.0(@types/node@24.19.2)(@volar/typescript@2.4.28(typescript@7.0.2))(esbuild@0.28.2)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(vitest@5.0.5))(vitest@5.0.5))(@vitest/ui@5.0.5(vitest@5.0.5))(@volar/typescript@2.4.28(typescript@7.0.2))(esbuild@0.28.2)(jiti@2.7.0)(playwright@1.64.1)(typescript@7.0.2)(yaml@2.9.1)
 
   omnio:
+    dependencies:
+      '@omniojs/core':
+        specifier: workspace:*
+        version: link:../packages/core
+      asyncmux:
+        specifier: ^0.0.12
+        version: 0.0.12(@logtape/logtape@2.0.0)(valibot@1.0.0(typescript@7.0.2))
+      unikvs:
+        specifier: ^0.0.12
+        version: 0.0.12(@logtape/logtape@2.0.0)(fast-utf8@0.0.7)(valibot@1.0.0(typescript@7.0.2))
     devDependencies:
+      '@omniojs/idx-sqlite.wasm':
+        specifier: workspace:*
+        version: link:../packages/idx-sqlite.wasm
+      '@unikvs/memory':
+        specifier: ^0.0.12
+        version: 0.0.12(@logtape/logtape@2.0.0)(valibot@1.0.0(typescript@7.0.2))
       '@vitest/browser-playwright':
         specifier: 'catalog:'
         version: 5.0.5(playwright@1.64.1)(vite@8.3.4(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))(vitest@5.0.5)
@@ -111,6 +127,9 @@ importers:
       '@omniojs/core':
         specifier: workspace:*
         version: link:../core
+      asyncmux:
+        specifier: ^0.0.12
+        version: 0.0.12(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))
     devDependencies:
       '@vitest/browser-playwright':
         specifier: 'catalog:'
@@ -154,6 +173,9 @@ importers:
       '@sqlite.org/sqlite-wasm':
         specifier: ^3.53.4-build2
         version: 3.53.4-build2
+      asyncmux:
+        specifier: ^0.0.12
+        version: 0.0.12(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))
       kysely:
         specifier: ^0.29.7
         version: 0.29.7
@@ -928,6 +950,9 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
+  '@logtape/logtape@2.0.0':
+    resolution: {integrity: sha512-z9Hp44mIRXAzgxSyQfFQiRuJ78EMnZa6g43UCxyGOO3RgHjn/7q+5OhdbhypkeHjiJRPxv6RmRsyF0S+OOYWnA==}
+
   '@logtape/logtape@2.4.2':
     resolution: {integrity: sha512-YJyC1gEMgWmTqJTRtKkjgasEbi8/0gP7Dj8n6bL46gQIAhpTY8uXJ+1QYMOgF5asotlGMvy3G7ejXUe45Yd1MQ==}
 
@@ -1698,6 +1723,15 @@ packages:
       astro: '>=7.0.0'
       blume: ^2.0.0
 
+  '@tai-kun/is-promise-like@0.0.5':
+    resolution: {integrity: sha512-kQ3bjOVFS1Ff7/tXQAG3Mwo7UiF2ymyHa34X0gPs8P1eua2Y2kJh8zmj04eflp7JqwHq+6QA6sTJp8VDoL9yAA==}
+
+  '@tai-kun/valibot-extra-lab@0.0.5':
+    resolution: {integrity: sha512-V6oow6ULIZB61r1CNwhXPYhA2BWohebRRMaA8GKyCZF/KHDEqkao5+dqORlwbiaRZMGpjPkHVyrmY8l9e1PlUw==}
+    peerDependencies:
+      fast-utf8: ^0.0.7
+      valibot: ^1.0.0
+
   '@tai-kun/vp-lint-plugins@0.0.9':
     resolution: {integrity: sha512-TTb3DC2Z/gT/EOqJIK6w/DbmdtNDu0T76F9aJuwckk0PN+8m+gWcYefW/lNAs7UNiApPfI+hvnCAyqSq24KlcQ==}
     peerDependencies:
@@ -2044,6 +2078,9 @@ packages:
   '@types/node@24.19.2':
     resolution: {integrity: sha512-93d49wCWJkCyN87MxLpNN6KXPCwFw7bVUg79mGUV1OS40JGWwVCr8n61DXCSqz7CV6/VfPkb7xec7uP2M+QHWQ==}
 
+  '@types/object-inspect@1.13.0':
+    resolution: {integrity: sha512-lwGTVESDDV+XsQ1pH4UifpJ1f7OtXzQ6QBOX2Afq2bM/T3oOt8hF6exJMjjIjtEWeAN2YAo25J7HxWh97CCz9w==}
+
   '@types/react-dom@19.3.0':
     resolution: {integrity: sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q==}
     peerDependencies:
@@ -2185,6 +2222,17 @@ packages:
 
   '@ungap/structured-clone@1.4.0':
     resolution: {integrity: sha512-1mEZtMKPM09vDmQt5y7YvmN2+DFTP7Tg0EWXdic8/C6VRnpb33e4ghisCIE3WZjsE2N8mf+QV1Zqh7ZFYLWInQ==}
+
+  '@unikvs/core@0.0.12':
+    resolution: {integrity: sha512-AYuwoSotpMzFACaoMkqAzdWcpyx83ml/Rtop+fYCdqH+7lixFwBsH4PUCp2SEEYEYvzeMRs1tAAuN3s5VTEsMQ==}
+    peerDependencies:
+      '@logtape/logtape': 2.0.0
+      valibot: 1.0.0
+
+  '@unikvs/memory@0.0.12':
+    resolution: {integrity: sha512-YbDHxMl1xsPFdumPeFQahC5505R+12tICE9aKqLtqmv/IMNbhOcHs4Bow6XpYwMm6wMFf05mPxXp4brxKtO4Mw==}
+    peerDependencies:
+      '@logtape/logtape': 2.0.0
 
   '@upsetjs/venn.js@2.0.0':
     resolution: {integrity: sha512-WbBhLrooyePuQ1VZxrJjtLvTc4NVfpOyKx0sKqioq9bX1C1m7Jgykkn8gLrtwumBioXIqam8DLxp88Adbue6Hw==}
@@ -2585,6 +2633,12 @@ packages:
     resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}
     engines: {node: '>=6.5'}
 
+  abort-signal-utils@0.0.2:
+    resolution: {integrity: sha512-dkti+X9MEn6rSbQ9mDoO9Eco9JO2eqlrvTaiJ6T/yXT8PyfT62xnX3dtmjdyEfIxonmJtav+MqmSFd71HX4S0Q==}
+
+  abort-signal-utils@0.0.3:
+    resolution: {integrity: sha512-gV93kxcFZs74x89PBX9YfatMs9FLHpwBzgJFnl0g+urHJgwWiCxNe4nyVr3DnNBX1GOAFjg6WsvQI38igYpN0w==}
+
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
     engines: {node: '>= 0.6'}
@@ -2701,6 +2755,16 @@ packages:
   async@3.2.6:
     resolution: {integrity: sha512-htCUDlxyyCLMgaM3xXg0C0LW2xqfuQ6p05pCEIsXuyQ+a1koYKTuBMzRNwmybfLgvJDMd0r1LTn4+E0Ti6C2AA==}
 
+  asyncmux@0.0.10:
+    resolution: {integrity: sha512-tcWA9u4kQugNkM4gRlJGd9O673hAngy2b2+k08bAY5q4QW0urEJkAFkA5LNrXqXe45HPhmR2HFz2IFIhAQ6nKA==}
+    peerDependencies:
+      '@logtape/logtape': ^2.0.0
+
+  asyncmux@0.0.12:
+    resolution: {integrity: sha512-QRHjGn8b1ENXddTP/BRvrX6S2ExX4mCapG5+YOnR3MDIBNLWJGCRU3KvRUdE7VL2iABABUZxmEOyvvJyLg28mQ==}
+    peerDependencies:
+      '@logtape/logtape': ^2.0.0
+
   axobject-query@4.1.0:
     resolution: {integrity: sha512-qIj0G9wZbMGNLjLmg1PT6v2mE9AH2zlnADJD/2tC6E00hgmhUOfEB6greHPAfLRSufHqROIUTkw6E+M3lH0PTQ==}
     engines: {node: '>= 0.4'}
@@ -2814,6 +2878,9 @@ packages:
   call-bound@1.0.4:
     resolution: {integrity: sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg==}
     engines: {node: '>= 0.4'}
+
+  call-fn-once@0.0.6:
+    resolution: {integrity: sha512-UEHgUCzg07DyCcf/qJafSQiOktoUiO97iJ22H7zaHpT8qrTNSoU9GHJ9MhDm+5f3LdJMBUR8LJdASa3ILMG2+Q==}
 
   callsites@3.1.0:
     resolution: {integrity: sha512-P8BjAsXvZS+VIDUI11hHCQEv74YT67YUi5JJFNWIqL235sBmjX4+qx9Muvls5ivyNENctx46xQLQ3aTuE7ssaQ==}
@@ -3408,6 +3475,9 @@ packages:
   fast-uri@3.1.8:
     resolution: {integrity: sha512-GZMtZUTNRpOVIECoXwLNZS5xUGE+mVNbTB8h/7Rwh2TFWcBQiPzTgyZi05BF9UMZKkLJv8XBRJTlU7zg8+ZfMg==}
 
+  fast-utf8@0.0.7:
+    resolution: {integrity: sha512-tx02jdpgf/ZkDijnvFiOdRzgn0AYLtK+duvK/9Q57iaAigxJSDfmTnIe0rO9wF6bnYLNQEpBWhZFWRDFlxD+EQ==}
+
   fast-utf8@0.0.9:
     resolution: {integrity: sha512-BpQ//zAuVL0m66/3w4wkzMaf/ptBNcTuDNHuupEC16WK04N3RJASsEQ1i56w/KjyGr0+kf7GCGgz6nWiObcsLw==}
     peerDependencies:
@@ -3606,6 +3676,11 @@ packages:
     resolution: {integrity: sha512-B4FFZ6q/T2jhhksgkbEW3HBvWIfDW85snkQgawt07S7J5QXTk6BkNV+0yAeZrM5QpMAdYlocGoljn0sJ/WQkFw==}
     engines: {node: '>=10.17.0'}
 
+  i18n-error-base@0.0.7:
+    resolution: {integrity: sha512-c7qcAQGZvvlxKf5waapePkWnW7NTNBc3U3fNTeLrYTsAtL4bkcIYzPDTfZLhPdw3qfvJ7OFng61sXP+34FlSOw==}
+    peerDependencies:
+      valibot: ^1.0.0
+
   i18n-error-base@0.0.8:
     resolution: {integrity: sha512-sfHUgxYGKhCQ/adFQcPI+qNlsFHvdB8kLBXwn034hjzFTVPhUkMizbqWB6nYVOXjWOzs9sFAK7vCvjRlJ/ZbTg==}
     peerDependencies:
@@ -3627,6 +3702,9 @@ packages:
 
   inherits@2.0.4:
     resolution: {integrity: sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==}
+
+  inspect-lite@0.0.2:
+    resolution: {integrity: sha512-r4u2I3KZAi67c1yAUoUPG7AmKXgEi475Rk987Z4GXNtgYIzW/newSy9j+g9oPSyaX5Vxpj64obx/iBUsG9UDQw==}
 
   internmap@1.0.1:
     resolution: {integrity: sha512-lDB5YccMydFBtasVtxnZ3MRBHuaoE8GKsppq+EchKL2U4nK/DmEpPHNH8MZe5HkMtpSiTSOZwfN0tzYjO/lJEw==}
@@ -4860,6 +4938,9 @@ packages:
   trough@2.2.0:
     resolution: {integrity: sha512-tmMpK00BjZiUyVyvrBK7knerNgmgvcV/KLVyuma/SC+TQN167GrMRciANTz09+k3zW8L8t60jWO1GpfkZdjTaw==}
 
+  try-capture-stack-trace@0.0.3:
+    resolution: {integrity: sha512-T9bJ6zaV8g4HWz4twbWBqSWnNlb6MG6yih4A/YnuEH4FDQ/AWXeBwMe+/fBdI29OGP85YzLkG+bc6WzSrsfl4g==}
+
   ts-dedent@2.3.0:
     resolution: {integrity: sha512-JfJeIHke7y2egdGGgRAvpCwYFUsHlM2gPcrVOxFkznt/4uzQ7HFmvE63iFHVLBJNDuyDOQgijDK/tXH/f6Msjg==}
     engines: {node: '>=6.10'}
@@ -4889,6 +4970,9 @@ packages:
   type-is@2.1.0:
     resolution: {integrity: sha512-faYHw0anBbc/kWF3zFTEnxSFOAGUX9GFbOBthvDdLsIlEoWOFOtS0zgCiQYwIskL9iGXZL3kAXD8OoZ4GmMATA==}
     engines: {node: '>= 18'}
+
+  type-name@2.0.2:
+    resolution: {integrity: sha512-kkgkuqR/jKdKO5oh/I2SMu2dGbLXoJq0zkdgbxaqYK+hr9S9edwVVGf+tMUFTx2gH9TN2+Zu9JZ/Njonb3cjhA==}
 
   typesafe-path@0.2.2:
     resolution: {integrity: sha512-OJabfkAg1WLZSqJAJ0Z6Sdt3utnbzr/jh+NAHoyWHJe8CMSy79Gm085094M9nvTPy22KzTVn5Zq5mbapCI/hPA==}
@@ -4938,6 +5022,12 @@ packages:
 
   unifont@0.7.5:
     resolution: {integrity: sha512-ULe/Cs+ZIsq+dcFofNkhqielCrUJnb5mr+Yc4EBM2VlL+6OZR6+cjtI2mT1bJvRBrVncqHAbLURxmPLcCXzWMg==}
+
+  unikvs@0.0.12:
+    resolution: {integrity: sha512-epRIitJ4DP1TEX3WrOpEY4U5fc6lsfNXRslPW18LmS2VVydDdZ6RKFwLWMs07MecNkKrLZ54jHBm5YCUEEvF5Q==}
+    peerDependencies:
+      '@logtape/logtape': 2.0.0
+      valibot: 1.0.0
 
   unist-util-is@6.0.1:
     resolution: {integrity: sha512-LsiILbtBETkDz8I9p1dQ0uyRUWuaQzd/cuEeS1hoRSyW5E5XGmTzlwY1OrNzzakGowI9Dr/I8HVaw4hTtnxy8g==}
@@ -5039,6 +5129,14 @@ packages:
   vali-date@1.0.0:
     resolution: {integrity: sha512-sgECfZthyaCKW10N0fm27cg8HYTFK5qMWgypqkXMQ4Wbl/zZKx7xZICgcoxIIE+WFAP/MBL2EFwC/YvLxw3Zeg==}
     engines: {node: '>=0.10.0'}
+
+  valibot@1.0.0:
+    resolution: {integrity: sha512-1Hc0ihzWxBar6NGeZv7fPLY0QuxFMyxwYR2sF1Blu7Wq7EnremwY2W02tit2ij2VJT8HcSkHAQqmFfl77f73Yw==}
+    peerDependencies:
+      typescript: '>=5'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   valibot@1.5.0:
     resolution: {integrity: sha512-nil6AkP2TChWL43Z5uJ6GTxX01CUA+g8LWUM+N/rB9NBbkUMaUsi9PUNzlUPgoKASgmx9f7eGOYpJ04/fSa6FQ==}
@@ -6094,6 +6192,8 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
+  '@logtape/logtape@2.0.0': {}
+
   '@logtape/logtape@2.4.2': {}
 
   '@mapbox/node-pre-gyp@2.0.3(supports-color@7.2.0)':
@@ -6612,6 +6712,14 @@ snapshots:
       astro: 7.3.5(@types/node@22.20.5)(@vercel/functions@3.9.11(ws@8.22.0))(jiti@2.7.0)(yaml@2.9.1)
       blume: 2.2.4(@emnapi/runtime@1.11.3)(@shikijs/themes@4.5.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(@vercel/functions@3.9.11(ws@8.22.0))(csstype@3.2.3)(esbuild@0.28.2)(prettier@3.9.9)(supports-color@7.2.0)(vite@8.3.4(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))(ws@8.22.0)(yaml@2.9.1)
 
+  '@tai-kun/is-promise-like@0.0.5': {}
+
+  '@tai-kun/valibot-extra-lab@0.0.5(fast-utf8@0.0.7)(valibot@1.0.0(typescript@7.0.2))':
+    dependencies:
+      fast-utf8: 0.0.7
+      inspect-lite: 0.0.2
+      valibot: 1.0.0(typescript@7.0.2)
+
   '@tai-kun/vp-lint-plugins@0.0.9(vite-plus@1.3.0(@astrojs/compiler-rs@0.5.1)(@types/node@24.19.2)(@vitest/browser-playwright@5.0.5(@voidzero-dev/vite-plus-core@1.3.0(@types/node@24.19.2)(@volar/typescript@2.4.28(typescript@7.0.2))(esbuild@0.28.2)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(playwright@1.64.1)(vitest@5.0.5))(@vitest/coverage-istanbul@5.0.5(vitest@5.0.5))(@vitest/coverage-v8@5.0.5(@vitest/browser@5.0.5(@voidzero-dev/vite-plus-core@1.3.0(@types/node@24.19.2)(@volar/typescript@2.4.28(typescript@7.0.2))(esbuild@0.28.2)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(vitest@5.0.5))(vitest@5.0.5))(@vitest/ui@5.0.5(vitest@5.0.5))(@volar/typescript@2.4.28(typescript@7.0.2))(esbuild@0.28.2)(jiti@2.7.0)(playwright@1.64.1)(typescript@7.0.2)(yaml@2.9.1))':
     dependencies:
       vite-plus: 1.3.0(@astrojs/compiler-rs@0.5.1)(@types/node@24.19.2)(@vitest/browser-playwright@5.0.5(@voidzero-dev/vite-plus-core@1.3.0(@types/node@24.19.2)(@volar/typescript@2.4.28(typescript@7.0.2))(esbuild@0.28.2)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(playwright@1.64.1)(vitest@5.0.5))(@vitest/coverage-istanbul@5.0.5(vitest@5.0.5))(@vitest/coverage-v8@5.0.5(@vitest/browser@5.0.5(@voidzero-dev/vite-plus-core@1.3.0(@types/node@24.19.2)(@volar/typescript@2.4.28(typescript@7.0.2))(esbuild@0.28.2)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(vitest@5.0.5))(vitest@5.0.5))(@vitest/ui@5.0.5(vitest@5.0.5))(@volar/typescript@2.4.28(typescript@7.0.2))(esbuild@0.28.2)(jiti@2.7.0)(playwright@1.64.1)(typescript@7.0.2)(yaml@2.9.1)
@@ -6932,6 +7040,8 @@ snapshots:
     dependencies:
       undici-types: 7.24.6
 
+  '@types/object-inspect@1.13.0': {}
+
   '@types/react-dom@19.3.0(@types/react@19.3.0)':
     dependencies:
       '@types/react': 19.3.0
@@ -7013,6 +7123,21 @@ snapshots:
       - supports-color
 
   '@ungap/structured-clone@1.4.0': {}
+
+  '@unikvs/core@0.0.12(@logtape/logtape@2.0.0)(valibot@1.0.0(typescript@7.0.2))':
+    dependencies:
+      '@logtape/logtape': 2.0.0
+      i18n-error-base: 0.0.7(valibot@1.0.0(typescript@7.0.2))
+      maypromise: 0.0.4
+      valibot: 1.0.0(typescript@7.0.2)
+
+  '@unikvs/memory@0.0.12(@logtape/logtape@2.0.0)(valibot@1.0.0(typescript@7.0.2))':
+    dependencies:
+      '@logtape/logtape': 2.0.0
+      '@unikvs/core': 0.0.12(@logtape/logtape@2.0.0)(valibot@1.0.0(typescript@7.0.2))
+      type-name: 2.0.2
+    transitivePeerDependencies:
+      - valibot
 
   '@upsetjs/venn.js@2.0.0':
     optionalDependencies:
@@ -7435,6 +7560,14 @@ snapshots:
     dependencies:
       event-target-shim: 5.0.1
 
+  abort-signal-utils@0.0.2:
+    dependencies:
+      try-capture-stack-trace: 0.0.3
+
+  abort-signal-utils@0.0.3:
+    dependencies:
+      try-capture-stack-trace: 0.0.3
+
   accepts@2.0.0:
     dependencies:
       mime-types: 3.0.2
@@ -7617,6 +7750,33 @@ snapshots:
   async-sema@3.1.1: {}
 
   async@3.2.6: {}
+
+  asyncmux@0.0.10(@logtape/logtape@2.0.0)(valibot@1.0.0(typescript@7.0.2)):
+    dependencies:
+      '@logtape/logtape': 2.0.0
+      '@tai-kun/is-promise-like': 0.0.5
+      i18n-error-base: 0.0.7(valibot@1.0.0(typescript@7.0.2))
+      try-capture-stack-trace: 0.0.3
+    transitivePeerDependencies:
+      - valibot
+
+  asyncmux@0.0.12(@logtape/logtape@2.0.0)(valibot@1.0.0(typescript@7.0.2)):
+    dependencies:
+      '@logtape/logtape': 2.0.0
+      '@tai-kun/is-promise-like': 0.0.5
+      i18n-error-base: 0.0.7(valibot@1.0.0(typescript@7.0.2))
+      try-capture-stack-trace: 0.0.3
+    transitivePeerDependencies:
+      - valibot
+
+  asyncmux@0.0.12(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2)):
+    dependencies:
+      '@logtape/logtape': 2.4.2
+      '@tai-kun/is-promise-like': 0.0.5
+      i18n-error-base: 0.0.7(valibot@1.5.0(typescript@7.0.2))
+      try-capture-stack-trace: 0.0.3
+    transitivePeerDependencies:
+      - valibot
 
   axobject-query@4.1.0: {}
 
@@ -7815,6 +7975,11 @@ snapshots:
     dependencies:
       call-bind-apply-helpers: 1.0.2
       get-intrinsic: 1.3.0
+
+  call-fn-once@0.0.6:
+    dependencies:
+      abort-signal-utils: 0.0.2
+      maypromise: 0.0.4
 
   callsites@3.1.0: {}
 
@@ -8446,6 +8611,10 @@ snapshots:
 
   fast-uri@3.1.8: {}
 
+  fast-utf8@0.0.7:
+    dependencies:
+      try-capture-stack-trace: 0.0.3
+
   fast-utf8@0.0.9(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2)):
     dependencies:
       '@logtape/logtape': 2.4.2
@@ -8663,6 +8832,14 @@ snapshots:
 
   human-signals@2.1.0: {}
 
+  i18n-error-base@0.0.7(valibot@1.0.0(typescript@7.0.2)):
+    dependencies:
+      valibot: 1.0.0(typescript@7.0.2)
+
+  i18n-error-base@0.0.7(valibot@1.5.0(typescript@7.0.2)):
+    dependencies:
+      valibot: 1.5.0(typescript@7.0.2)
+
   i18n-error-base@0.0.8(valibot@1.5.0(typescript@7.0.2)):
     dependencies:
       valibot: 1.5.0(typescript@7.0.2)
@@ -8680,6 +8857,11 @@ snapshots:
   import-meta-resolve@4.2.0: {}
 
   inherits@2.0.4: {}
+
+  inspect-lite@0.0.2:
+    dependencies:
+      '@types/object-inspect': 1.13.0
+      object-inspect: 1.13.4
 
   internmap@1.0.1: {}
 
@@ -10154,6 +10336,8 @@ snapshots:
 
   trough@2.2.0: {}
 
+  try-capture-stack-trace@0.0.3: {}
+
   ts-dedent@2.3.0: {}
 
   ts-interface-checker@0.1.13: {}
@@ -10181,6 +10365,8 @@ snapshots:
       content-type: 2.1.0
       media-typer: 1.1.1
       mime-types: 3.0.2
+
+  type-name@2.0.2: {}
 
   typesafe-path@0.2.2: {}
 
@@ -10245,6 +10431,19 @@ snapshots:
       ohash: 2.0.12
       undici: 8.11.2
 
+  unikvs@0.0.12(@logtape/logtape@2.0.0)(fast-utf8@0.0.7)(valibot@1.0.0(typescript@7.0.2)):
+    dependencies:
+      '@logtape/logtape': 2.0.0
+      '@tai-kun/valibot-extra-lab': 0.0.5(fast-utf8@0.0.7)(valibot@1.0.0(typescript@7.0.2))
+      '@unikvs/core': 0.0.12(@logtape/logtape@2.0.0)(valibot@1.0.0(typescript@7.0.2))
+      abort-signal-utils: 0.0.3
+      asyncmux: 0.0.10(@logtape/logtape@2.0.0)(valibot@1.0.0(typescript@7.0.2))
+      call-fn-once: 0.0.6
+      try-capture-stack-trace: 0.0.3
+      valibot: 1.0.0(typescript@7.0.2)
+    transitivePeerDependencies:
+      - fast-utf8
+
   unist-util-is@6.0.1:
     dependencies:
       '@types/unist': 3.0.3
@@ -10299,6 +10498,10 @@ snapshots:
   uuid@14.0.2: {}
 
   vali-date@1.0.0: {}
+
+  valibot@1.0.0(typescript@7.0.2):
+    optionalDependencies:
+      typescript: 7.0.2
 
   valibot@1.5.0(typescript@7.0.2):
     optionalDependencies:

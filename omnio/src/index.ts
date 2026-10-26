@@ -1,1 +1,18 @@
-export { add } from "./add.js";
+export type { OmnioEntity } from "./entity.js";
+
+export type {
+  OmnioOptions,
+  PutObjectInput,
+  ObjectSearchQuery,
+  SearchObjectsInput,
+} from "./omnio.js";
+export { Omnio } from "./omnio.js";
+
+export type {
+  OmnioKey,
+  IEmbedder,
+  OmnioObject,
+  IObjectIndex,
+  IndexedObject,
+  MetadataFilter,
+} from "@omniojs/core";

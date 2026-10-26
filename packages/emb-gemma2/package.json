@@ -28,7 +28,8 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.1",
-    "@omniojs/core": "workspace:*"
+    "@omniojs/core": "workspace:*",
+    "asyncmux": "^0.0.12"
   },
   "devDependencies": {
     "@vitest/browser-playwright": "catalog:",
