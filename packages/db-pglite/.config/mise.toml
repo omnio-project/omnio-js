@@ -1,0 +1,28 @@
+[tasks.test]
+run = [{ task = "test:server" }, { task = "test:client" }, { task = "test:check" }]
+env = { CI = 1 }
+
+[tasks."test:server"]
+run = "npx vp test --config ./.config/vite.server.config.ts"
+
+[tasks."test:client"]
+run = "npx vp test --config ./.config/vite.client.config.ts"
+
+[tasks."test:coverage"]
+run = [{ task = "test:coverage:server" }, { task = "test:coverage:client" }]
+env = { CI = 1 }
+
+[tasks."test:coverage:server"]
+run = "npx vp test run --coverage --config ./.config/vite.server.config.ts"
+
+[tasks."test:coverage:client"]
+run = "npx vp test run --coverage --config ./.config/vite.client.config.ts"
+
+[tasks."test:check"]
+run = "npx vp check"
+
+[tasks.check]
+run = "npx vp check --fix"
+
+[tasks.update]
+run = ["npx playwright install --with-deps"]

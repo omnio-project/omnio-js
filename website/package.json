@@ -1,0 +1,12 @@
+{
+  "name": "website",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "blume build"
+  },
+  "devDependencies": {
+    "@tai-kun/blume-integrations": "0.0.2",
+    "blume": "2.2.4"
+  }
+}

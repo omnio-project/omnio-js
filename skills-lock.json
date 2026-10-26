@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "skills": {
+    "blume-docs": {
+      "source": "tai-kun/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/blume-docs/SKILL.md",
+      "computedHash": "fcd223b8a00c51d532868d74bc95a433af999b3b3b0b24d34f37e22d78521bbb"
+    },
+    "japanese": {
+      "source": "tai-kun/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/japanese/SKILL.md",
+      "computedHash": "6b01a63f4a00a3ace274ebd13ec703fde427152bf280e1444905ca893cc22fd0"
+    },
+    "jsdoc": {
+      "source": "tai-kun/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/jsdoc/SKILL.md",
+      "computedHash": "3acf93995d814e991edc08059738863e50b8b7665d6f8c809bde7632d16b8d49"
+    },
+    "pc-safety-guard": {
+      "source": "tai-kun/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pc-safety-guard/SKILL.md",
+      "computedHash": "1f5e0266e76f57412b7588d364678246f89188a5a6b6b3b91357c1cc84f3a792"
+    },
+    "test-audit": {
+      "source": "tai-kun/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/test-audit/SKILL.md",
+      "computedHash": "c4f506e5a2a5816c45c7eeabed1622145b7ceec7ed2b4152c2820b3e26d6d923"
+    },
+    "vitest": {
+      "source": "tai-kun/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/vitest/SKILL.md",
+      "computedHash": "fdfd09a411a1c012ade6226ab592ae0526cdc31599d4b5bdc281f01d1c74d3e2"
+    },
+    "yomiyasu": {
+      "source": "nanaism/yomiyasu",
+      "sourceType": "github",
+      "skillPath": "skills/yomiyasu/SKILL.md",
+      "computedHash": "d339749e69e67a3979a902a1ffb481f93492bf1ab9375557e26fbf7102af9463"
+    }
+  }
+}

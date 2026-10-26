@@ -1,0 +1,37 @@
+{
+  "name": "@omniojs/db-sqlite",
+  "version": "0.0.0",
+  "description": "",
+  "homepage": "https://omnio-project.github.io/omnio-js/",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/omnio-project/omnio-js",
+    "directory": "packages/db-sqlite"
+  },
+  "files": [
+    "dist",
+    "src",
+    "package.json",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "vp -C .config pack"
+  },
+  "devDependencies": {
+    "@vitest/browser-playwright": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "playwright": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "readme": "README.md"
+}

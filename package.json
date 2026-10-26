@@ -1,0 +1,26 @@
+{
+  "name": "omnio-js-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "workspaces": [
+    "omnio",
+    "packages/db-sqlite",
+    "packages/db-pglite",
+    "packages/emb-gemma2",
+    "website"
+  ],
+  "type": "module",
+  "scripts": {
+    "prepare": "vp config"
+  },
+  "devDependencies": {
+    "@tai-kun/vp-lint-plugins": "0.0.9",
+    "@tsconfig/node24": "24.0.5",
+    "@tsconfig/strictest": "2.0.8",
+    "@types/node": "24.19.2",
+    "npm-check-updates": "23.1.1",
+    "skills": "1.7.2",
+    "typescript": "7.0.2",
+    "vite-plus": "catalog:"
+  }
+}

@@ -1,0 +1,41 @@
+[settings]
+minimum_release_age = "7d"
+
+[tools]
+node = "24"
+pnpm = "11"
+
+[tasks.init]
+description = "テンプレートを初期化します"
+run = "node scripts/init/run.mjs"
+
+[tasks.create]
+description = "scripts/templates からパッケージを追加します"
+run = "node scripts/create/run.mjs"
+
+[tasks.test]
+run = [
+  { task = "test:check" },
+  "for d in $(jq -r '.workspaces[]' package.json); do (cd $d && mise test); done",
+]
+env = { CI = 1 }
+
+[tasks."test:check"]
+run = ["npx vp check", "node scripts/sort-workspaces.mjs"]
+
+[tasks.check]
+run = [
+  "npx vp check --fix",
+  "node scripts/sort-workspaces.mjs --fix",
+  "for d in $(jq -r '.workspaces[]' package.json); do (cd $d && mise check); done",
+]
+
+[tasks.update]
+run = [
+  "npx npm-check-updates --target minor -u --cooldown 7 --workspaces",
+  "pnpm update --include-github-actions",
+  "pnpm install",
+  "for d in $(jq -r '.workspaces[]' package.json); do (cd $d && mise update); done",
+  "pnpm audit --audit-level critical",
+  "npx skills update -y",
+]
