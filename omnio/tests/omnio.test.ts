@@ -186,6 +186,61 @@ describe("open と close", () => {
     ).rejects.toThrow(DbNotOpenError);
     await omnio.close(signal);
   });
+
+  test("close すると既定のシグナルで実行中の操作を中断する", async ({ expect, signal }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index);
+    const started = Promise.withResolvers<AbortSignal>();
+    using _get = vi.spyOn(index, "get").mockImplementation((c) => {
+      started.resolve(c.signal);
+
+      return new Promise<never>((_, reject) => {
+        c.signal.addEventListener(
+          "abort",
+          () => {
+            reject(c.signal.reason);
+          },
+          { once: true },
+        );
+      });
+    });
+
+    // 実行：
+    const loading = omnio.headObject("missing");
+    const active = await started.promise;
+    expect(active.aborted).toBe(false);
+
+    const closing = omnio.close();
+
+    expect(active.aborted).toBe(true);
+
+    // 検証：
+    await expect(loading).rejects.toMatchObject({ name: "AbortError" });
+    await closing;
+    expect(omnio.isOpen).toBe(false);
+  });
+
+  test("閉じて開き直すと既定のシグナルで再び操作できる", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+
+    // 実行：
+    await omnio.close(signal);
+    await omnio.open(signal);
+
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+
+    // 検証：
+    expect(stored.key.key).toBe("k");
+
+    // 後始末：
+    await omnio.close(signal);
+  });
 });
 
 describe("putObject と getObject", () => {

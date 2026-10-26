@@ -13,13 +13,26 @@ import { type ValueStream, KeyNotFoundError } from "unikvs";
 
 import type { OmnioEntity } from "./entity.js";
 
-/** 中断されないシグナルです。呼び出し側が中断を指定しない場合に使います。 */
-const NEVER_ABORTED: AbortSignal = new AbortController().signal;
+/** `open` と `close` の既定タイムアウトです。ミリ秒単位で表します。 */
+const DEFAULT_LIFECYCLE_TIMEOUT_MS = 30_000;
+
+/**
+ * ライフサイクル操作で使う中断シグナルを作ります。
+ *
+ * @param signal 呼び出し側が指定した中断シグナルです。
+ *
+ * @returns 指定されたシグナルと既定タイムアウトを組み合わせたシグナルです。
+ */
+function withLifecycleTimeout(signal: AbortSignal | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+
+  return signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+}
 
 /**
  * `Omnio` の設定です。データベースと埋め込み、ストレージーの指定はすべて必須です。
  */
-export interface OmnioOptions {
+export type OmnioOptions = {
   /** 実体を保存するストレージーです。 */
   readonly entity: OmnioEntity;
 
@@ -28,12 +41,12 @@ export interface OmnioOptions {
 
   /** 埋め込み推論器です。 */
   readonly embedder: IEmbedder;
-}
+};
 
 /**
  * オブジェクト保存の入力です。
  */
-export interface PutObjectInput<TUserMetadata = Record<string, unknown>> {
+export type PutObjectInput<TUserMetadata = Record<string, unknown>> = {
   /** オブジェクトキーまたはその文字列表現です。 */
   readonly key: OmnioKey | string;
 
@@ -58,9 +71,9 @@ export interface PutObjectInput<TUserMetadata = Record<string, unknown>> {
   /** 埋め込みを生成するかです。既定では説明文がある場合に生成します。 */
   readonly embed?: boolean | undefined;
 
-  /** 処理を中断するための中断シグナルです。 */
+  /** 処理を中断するための中断シグナルです。省略時は close 時に中断されます。 */
   readonly signal?: AbortSignal | undefined;
-}
+};
 
 /**
  * 意味検索のクエリーです。
@@ -85,7 +98,7 @@ export type ObjectSearchQuery =
 /**
  * 意味検索の入力です。
  */
-export interface SearchObjectsInput {
+export type SearchObjectsInput = {
   /** 検索クエリーです。 */
   readonly query: ObjectSearchQuery;
 
@@ -101,9 +114,9 @@ export interface SearchObjectsInput {
   /** 埋め込みベクトルを結果に含めるかです。既定は含めます。 */
   readonly includeEmbedding?: boolean | undefined;
 
-  /** 処理を中断するための中断シグナルです。 */
+  /** 処理を中断するための中断シグナルです。省略時は close 時に中断されます。 */
   readonly signal?: AbortSignal | undefined;
-}
+};
 
 /**
  * オブジェクトキーまたはその文字列表現を `OmnioKey` に変換します。
@@ -219,6 +232,9 @@ async function nullIfKeyNotFound<T>(load: () => Promise<T>): Promise<T | null> {
  *
  * すべての非同期メソッドは `asyncmux` によりインスタンス単位で排他します。
  * データの整合性のためではなく、`open` や `close` などのライフサイクルと操作が同時実行されないためです。
+ *
+ * `open` と `close` は既定で 30 秒のタイムアウトを持ちます。
+ * それ以外のメソッドは、`close` の呼び出しで中断されるライフサイクルシグナルを既定で使います。
  */
 export class Omnio {
   readonly #entity: OmnioEntity;
@@ -226,6 +242,8 @@ export class Omnio {
   readonly #index: IObjectIndex;
 
   readonly #embedder: IEmbedder;
+
+  #lifecycle: AbortController;
 
   #opened: boolean;
 
@@ -236,6 +254,7 @@ export class Omnio {
     this.#entity = options.entity;
     this.#index = options.index;
     this.#embedder = options.embedder;
+    this.#lifecycle = new AbortController();
     this.#opened = false;
   }
 
@@ -249,10 +268,10 @@ export class Omnio {
   /**
    * 実体とインデックスを開きます。
    *
-   * @param signal 処理を中断するための中断シグナルです。
+   * @param signal 処理を中断するための中断シグナルです。省略時は 30 秒でタイムアウトし、指定時も 30 秒の上限を持ちます。
    */
   public async open(signal?: AbortSignal): Promise<void> {
-    const active = signal ?? NEVER_ABORTED;
+    const active = withLifecycleTimeout(signal);
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
@@ -269,7 +288,9 @@ export class Omnio {
         signal: active,
       });
     } catch (ex) {
-      await this.#entity.close({ signal: active }).catch(() => undefined);
+      await this.#entity
+        .close({ signal: AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS) })
+        .catch(() => undefined);
       throw ex;
     }
 
@@ -279,11 +300,15 @@ export class Omnio {
   /**
    * 実体とインデックスを閉じます。
    *
-   * @param signal 処理を中断するための中断シグナルです。
+   * @param signal 処理を中断するための中断シグナルです。省略時は 30 秒でタイムアウトし、指定時も 30 秒の上限を持ちます。
    */
   public async close(signal?: AbortSignal): Promise<void> {
-    const active = signal ?? NEVER_ABORTED;
+    const active = withLifecycleTimeout(signal);
     active.throwIfAborted();
+
+    if (this.#opened) {
+      this.#lifecycle.abort();
+    }
 
     using _lock = await asyncmux(this, active);
 
@@ -297,6 +322,7 @@ export class Omnio {
     });
     await this.#entity.close({ signal: active });
     this.#opened = false;
+    this.#lifecycle = new AbortController();
   }
 
   /**
@@ -309,12 +335,12 @@ export class Omnio {
   public async putObject<TUserMetadata = Record<string, unknown>>(
     input: PutObjectInput<TUserMetadata>,
   ): Promise<OmnioObject<TUserMetadata>> {
-    const active = input.signal ?? NEVER_ABORTED;
+    this.#requireOpen("putObject");
+
+    const active = this.#activeSignal(input.signal);
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
-
-    this.#requireOpen("putObject");
 
     const key = toOmnioKey(input.key);
     const keyString = key.key;
@@ -380,17 +406,17 @@ export class Omnio {
    * 実体のバイト列を取得します。
    *
    * @param key 取得するキーです。
-   * @param signal 処理を中断するための中断シグナルです。
+   * @param signal 処理を中断するための中断シグナルです。省略時は close 時に中断されます。
    *
    * @returns バイト列、存在しない場合は null です。
    */
   public async getObject(key: OmnioKey | string, signal?: AbortSignal): Promise<Uint8Array | null> {
-    const active = signal ?? NEVER_ABORTED;
+    this.#requireOpen("getObject");
+
+    const active = this.#activeSignal(signal);
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
-
-    this.#requireOpen("getObject");
 
     return await nullIfKeyNotFound(() => this.#entity.get(toOmnioKey(key).key, { signal: active }));
   }
@@ -401,7 +427,7 @@ export class Omnio {
    * 取得したストリームは呼び出し側で破棄してください。
    *
    * @param key 取得するキーです。
-   * @param signal 処理を中断するための中断シグナルです。
+   * @param signal 処理を中断するための中断シグナルです。省略時は close 時に中断されます。
    *
    * @returns バイト列のストリーム、存在しない場合は null です。
    */
@@ -409,12 +435,12 @@ export class Omnio {
     key: OmnioKey | string,
     signal?: AbortSignal,
   ): Promise<ValueStream<Uint8Array> | null> {
-    const active = signal ?? NEVER_ABORTED;
+    this.#requireOpen("streamObject");
+
+    const active = this.#activeSignal(signal);
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
-
-    this.#requireOpen("streamObject");
 
     return await nullIfKeyNotFound(() =>
       this.#entity.stream(toOmnioKey(key).key, { signal: active }),
@@ -425,7 +451,7 @@ export class Omnio {
    * メタデータを取得します。
    *
    * @param key 取得するキーです。
-   * @param signal 処理を中断するための中断シグナルです。
+   * @param signal 処理を中断するための中断シグナルです。省略時は close 時に中断されます。
    *
    * @returns メタデータ、存在しない場合は null です。
    */
@@ -433,12 +459,12 @@ export class Omnio {
     key: OmnioKey | string,
     signal?: AbortSignal,
   ): Promise<OmnioObject<TUserMetadata> | null> {
-    const active = signal ?? NEVER_ABORTED;
+    this.#requireOpen("headObject");
+
+    const active = this.#activeSignal(signal);
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
-
-    this.#requireOpen("headObject");
 
     return await this.#index.get<TUserMetadata>({
       key: toOmnioKey(key),
@@ -451,17 +477,18 @@ export class Omnio {
    * オブジェクトを削除します。
    *
    * @param key 削除するキーです。
-   * @param signal 処理を中断するための中断シグナルです。
+   * @param signal 処理を中断するための中断シグナルです。省略時は close 時に中断されます。
    *
    * @returns 削除した場合は true、存在しなかった場合は false です。
    */
   public async deleteObject(key: OmnioKey | string, signal?: AbortSignal): Promise<boolean> {
-    const active = signal ?? NEVER_ABORTED;
+    this.#requireOpen("deleteObject");
+
+    const active = this.#activeSignal(signal);
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
 
-    this.#requireOpen("deleteObject");
     const objectKey = toOmnioKey(key);
     const existed = await this.#entity.has(objectKey.key, { signal: active });
     await this.#entity.delete(objectKey.key, { signal: active });
@@ -479,7 +506,7 @@ export class Omnio {
    * オブジェクトを一覧します。
    *
    * @param options 絞り込み条件とページ指定です。
-   * @param signal 処理を中断するための中断シグナルです。
+   * @param signal 処理を中断するための中断シグナルです。省略時は close 時に中断されます。
    *
    * @returns 一覧結果です。
    */
@@ -491,12 +518,12 @@ export class Omnio {
     },
     signal?: AbortSignal,
   ): Promise<IObjectIndex.ListResult<TUserMetadata>> {
-    const active = signal ?? NEVER_ABORTED;
+    this.#requireOpen("listObjects");
+
+    const active = this.#activeSignal(signal);
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
-
-    this.#requireOpen("listObjects");
 
     return await this.#index.list<TUserMetadata>({
       limit: options?.limit,
@@ -517,12 +544,12 @@ export class Omnio {
   public async searchObjects<TUserMetadata = Record<string, unknown>>(
     input: SearchObjectsInput,
   ): Promise<IndexedObject<TUserMetadata>[]> {
-    const active = input.signal ?? NEVER_ABORTED;
+    this.#requireOpen("searchObjects");
+
+    const active = this.#activeSignal(input.signal);
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
-
-    this.#requireOpen("searchObjects");
 
     const query = input.query;
     let vector: Float32Array;
@@ -576,7 +603,7 @@ export class Omnio {
    * 既存オブジェクトの埋め込みを作り直します。
    *
    * @param key 作り直すキーです。
-   * @param signal 処理を中断するための中断シグナルです。
+   * @param signal 処理を中断するための中断シグナルです。省略時は close 時に中断されます。
    *
    * @returns 更新したオブジェクト、存在しない場合は null です。
    */
@@ -584,12 +611,13 @@ export class Omnio {
     key: OmnioKey | string,
     signal?: AbortSignal,
   ): Promise<OmnioObject<TUserMetadata> | null> {
-    const active = signal ?? NEVER_ABORTED;
+    this.#requireOpen("reindexObject");
+
+    const active = this.#activeSignal(signal);
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
 
-    this.#requireOpen("reindexObject");
     const objectKey = toOmnioKey(key);
     const object = await this.#index.get<TUserMetadata>({
       key: objectKey,
@@ -655,22 +683,35 @@ export class Omnio {
   }
 
   /**
+   * 操作で使う中断シグナルを返します。
+   *
+   * @param signal 呼び出し側が指定した中断シグナルです。
+   *
+   * @returns 指定されたシグナル、省略時は close 時に中断されるシグナルです。
+   */
+  #activeSignal(signal: AbortSignal | undefined): AbortSignal {
+    return signal ?? this.#lifecycle.signal;
+  }
+
+  /**
    * 失敗した保存の実体を元の状態に戻します。
    *
    * 保存前のバイト列があればそれを書き戻し、ない場合は削除します。
-   * 中断シグナルは使わず、補償処理が中断で失敗しないようにします。
+   * 補償処理には既定のタイムアウトを設定し、close 時の中断の影響を受けないようにします。
    *
    * @param key 復元するキーです。
    * @param previousBytes 保存前のバイト列です。存在しない場合もあります。
    */
   async #restoreEntity(key: string, previousBytes: Uint8Array | undefined): Promise<void> {
+    const signal = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+
     if (previousBytes !== undefined) {
-      await this.#entity.set(key, previousBytes, { signal: NEVER_ABORTED });
+      await this.#entity.set(key, previousBytes, { signal });
 
       return;
     }
 
-    await this.#entity.delete(key, { signal: NEVER_ABORTED });
+    await this.#entity.delete(key, { signal });
   }
 
   /**

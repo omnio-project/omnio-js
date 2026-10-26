@@ -1,7 +1,7 @@
 /**
  * `objects` テーブルの行です。
  */
-export interface ObjectRow {
+export type ObjectRow = {
   /** コンテンツタイプです。 */
   readonly content_type: string;
 
@@ -37,26 +37,26 @@ export interface ObjectRow {
 
   /** 利用者が自由に付与するメタデータです。JSON 文字列で表します。 */
   readonly user_metadata: string;
-}
+};
 
 /**
  * `object_tags` テーブルの行です。
  */
-export interface ObjectTagRow {
+export type ObjectTagRow = {
   /** タグが付いたオブジェクトのキーです。 */
   readonly key: string;
 
   /** 絞り込み用のタグです。 */
   readonly tag: string;
-}
+};
 
 /**
  * kysely が扱うデータベースの表定義です。
  */
-export interface SqliteWasmDatabase {
+export type SqliteWasmDatabase = {
   /** オブジェクトの表です。 */
   readonly objects: ObjectRow;
 
   /** タグの表です。 */
   readonly object_tags: ObjectTagRow;
-}
+};

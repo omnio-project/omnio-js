@@ -10,7 +10,7 @@ export type EmbedModality = "image" | "text" | (string & {});
 /**
  * 埋め込み器の能力情報です。
  */
-export interface EmbedderInfo {
+export type EmbedderInfo = {
   /** 出力ベクトルの次元数です。 */
   readonly dims: number;
 
@@ -28,7 +28,7 @@ export interface EmbedderInfo {
 
   /** 出力ベクトルが L2 正規化されているかを示します。 */
   readonly normalized: boolean;
-}
+};
 
 /**
  * 埋め込み器への入力です。

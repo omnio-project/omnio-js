@@ -3,7 +3,7 @@ import type { OmnioKey } from "./object-key.js";
 /**
  * オブジェクトのシステムメタデータです。
  */
-export interface OmnioSystemMetadata {
+export type OmnioSystemMetadata = {
   /** コンテンツタイプです。 */
   readonly contentType: string;
 
@@ -18,7 +18,7 @@ export interface OmnioSystemMetadata {
 
   /** 更新時刻です。ISO 8601 文字列で表します。 */
   readonly updatedAt: string;
-}
+};
 
 /**
  * 埋め込みベクトルの由来です。
@@ -56,7 +56,7 @@ export type EmbedSource =
 /**
  * 実体とメタデータを合わせた論理単位です。
  */
-export interface OmnioObject<TUserMetadata = Record<string, unknown>> {
+export type OmnioObject<TUserMetadata = Record<string, unknown>> = {
   /** 任意のテキスト形式の説明文です。埋め込み対象にできます。 */
   readonly description?: string | undefined;
 
@@ -83,12 +83,12 @@ export interface OmnioObject<TUserMetadata = Record<string, unknown>> {
 
   /** 利用者が自由に付与するメタデータです。 */
   readonly userMetadata: TUserMetadata;
-}
+};
 
 /**
  * メタデータによる絞り込み条件です。
  */
-export interface MetadataFilter {
+export type MetadataFilter = {
   /** 対象とするコンテンツタイプの一覧です。 */
   readonly contentTypes?: readonly string[] | undefined;
 
@@ -109,4 +109,4 @@ export interface MetadataFilter {
 
   /** 利用者メタデータに対する条件です。 */
   readonly userMetadata?: Record<string, unknown> | undefined;
-}
+};

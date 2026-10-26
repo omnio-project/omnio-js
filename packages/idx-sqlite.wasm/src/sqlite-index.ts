@@ -23,10 +23,10 @@ import { scoreVector, decodeEmbedding, encodeEmbedding } from "./vector.js";
 /**
  * `SqliteWasmIndex` のオプションです。
  */
-export interface SqliteWasmIndexOptions {
+export type SqliteWasmIndexOptions = {
   /** データベースの保存場所です。既定値はメモリーです。 */
   readonly location?: string | undefined;
-}
+};
 
 /**
  * `SqliteWasmIndex` のコンストラクター引数を検証するスキーマです。

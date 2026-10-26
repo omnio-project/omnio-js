@@ -203,15 +203,15 @@ class OmnioKey {
   get extname(): string;
 }
 
-interface OmnioSystemMetadata {
+type OmnioSystemMetadata = {
   size: number;
   contentType: string;
   hash?: string;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-interface OmnioObject<TUserMetadata = Record<string, unknown>> {
+type OmnioObject<TUserMetadata = Record<string, unknown>> = {
   key: OmnioKey;
   system: OmnioSystemMetadata;
   description?: string;
@@ -221,7 +221,7 @@ interface OmnioObject<TUserMetadata = Record<string, unknown>> {
   embeddingModel?: string;
   embeddingDims?: number;
   embeddingSource?: EmbedSource;
-}
+};
 
 type EmbedSource =
   | { kind: "description"; model: string }
@@ -271,13 +271,13 @@ S3 の制限と z-rack の慣習を参考にしています。
 ```ts
 type EmbedModality = "text" | "image" | (string & {});
 
-interface EmbedderInfo {
+type EmbedderInfo = {
   name: string;
   dims: number;
   maxTokens?: number;
   normalized: boolean;
   modalities: EmbedModality[];
-}
+};
 
 type EmbedInput =
   | { kind: "text"; text: string }
@@ -311,7 +311,7 @@ type IEmbedderContext =
 ### 8.2 `IObjectIndex`
 
 ```ts
-interface MetadataFilter {
+type MetadataFilter = {
   contentTypes?: string[];
   tagsAll?: string[];
   tagsAny?: string[];
@@ -319,11 +319,11 @@ interface MetadataFilter {
   createdBefore?: string;
   userMetadata?: Record<string, unknown>;
   fullText?: string;
-}
+};
 
-interface IndexedObject<T = Record<string, unknown>> extends OmnioObject<T> {
+type IndexedObject<T = Record<string, unknown>> = OmnioObject<T> & {
   score?: number;
-}
+};
 
 interface IObjectIndex {
   readonly isOpen: boolean;
@@ -384,7 +384,7 @@ type OmnioEntity = UniKvs<{
   [key: string]: Value<Uint8Array<ArrayBuffer>>;
 }>;
 
-interface PutObjectInput<T = Record<string, unknown>> {
+type PutObjectInput<T = Record<string, unknown>> = {
   key: OmnioKey;
   data: Uint8Array<ArrayBuffer> | Blob | ReadableStream<Uint8Array<ArrayBuffer>>;
   contentType: string;
@@ -393,26 +393,26 @@ interface PutObjectInput<T = Record<string, unknown>> {
   userMetadata?: T;
   embedding?: Float32Array;
   embed?: boolean;
-}
+};
 
 type ObjectSearchQuery =
   | { text: string }
   | { image: Uint8Array<ArrayBuffer> | Blob; mimeType?: string }
   | { vector: Float32Array };
 
-interface SearchObjectsInput {
+type SearchObjectsInput = {
   query: ObjectSearchQuery;
   topK?: number;
   minScore?: number;
   filter?: MetadataFilter;
   includeEmbedding?: boolean;
-}
+};
 
-interface OmnioOptions {
+type OmnioOptions = {
   entity: OmnioEntity;
   index: IObjectIndex;
   embedder: IEmbedder;
-}
+};
 
 class Omnio {
   constructor(options: OmnioOptions);
@@ -447,6 +447,8 @@ class Omnio {
 5. メタデータとベクトルを `ObjectIndex` に保存します。
 6. `searchObjects` はクエリーをベクトルに変換し、`ObjectIndex.search` にフィルター付きで委譲します。
 7. `reindexObject` はモデル変更時に既存オブジェクトの埋め込みを作り直します。
+8. `open` と `close` は既定で 30 秒のタイムアウトを持ちます。
+9. それ以外の操作は、`close` の呼び出しで中断されるライフサイクルシグナルを既定の中断シグナルとして使います。
 
 `embed: false` を指定した場合は埋め込みを生成せず、メタデータのみ保存します。
 実体のみ先に保存し、埋め込みは後でバッチ処理する用途に対応します。

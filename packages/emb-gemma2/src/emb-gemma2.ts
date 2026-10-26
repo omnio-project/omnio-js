@@ -33,7 +33,7 @@ export const DEFAULT_DIMS = 768;
 /**
  * `Gemma2Embedder` のオプションです。
  */
-export interface Gemma2EmbedderOptions {
+export type Gemma2EmbedderOptions = {
   /** 使用するモデル ID です。 */
   readonly model?: string | undefined;
 
@@ -48,7 +48,7 @@ export interface Gemma2EmbedderOptions {
 
   /** 推論デバイスです。 */
   readonly device?: DeviceType | undefined;
-}
+};
 
 /**
  * `Gemma2Embedder` のコンストラクター引数を検証するスキーマです。
@@ -95,10 +95,10 @@ const Gemma2EmbedderOptionsSchema = v.object({
 /**
  * 画像埋め込みに使うプロセッサーとモデルの組です。
  */
-interface ImageBackend {
-  readonly processor: EmbeddingGemma2Processor;
+type ImageBackend = {
   readonly model: EmbeddingGemma2Model;
-}
+  readonly processor: EmbeddingGemma2Processor;
+};
 
 /**
  * EmbeddingGemma 2 による `IEmbedder` の実装です。
