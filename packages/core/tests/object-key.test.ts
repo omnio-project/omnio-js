@@ -111,8 +111,8 @@ describe("不正なキー", () => {
 
     try {
       OmnioKey.parse("");
-    } catch (error) {
-      caught = error;
+    } catch (ex) {
+      caught = ex;
     }
 
     // 検証：

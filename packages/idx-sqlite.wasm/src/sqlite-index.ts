@@ -37,9 +37,9 @@ export interface SqliteWasmIndexOptions {
 function parseJson(text: string, operation: string): unknown {
   try {
     return JSON.parse(text) as unknown;
-  } catch (error) {
+  } catch (ex) {
     throw new DbQueryError({
-      cause: error,
+      cause: ex,
       operation,
     });
   }
@@ -56,9 +56,9 @@ function parseJson(text: string, operation: string): unknown {
 function stringifyJson(value: unknown, operation: string): string {
   try {
     return JSON.stringify(value);
-  } catch (error) {
+  } catch (ex) {
     throw new DbQueryError({
-      cause: error,
+      cause: ex,
       operation,
     });
   }
@@ -253,9 +253,9 @@ export class SqliteWasmIndex implements IObjectIndex {
 
       try {
         sqlite3 = await initSqliteWasm();
-      } catch (error) {
+      } catch (ex) {
         throw new DbQueryError({
-          cause: error,
+          cause: ex,
           operation: "open",
         });
       }
@@ -264,9 +264,9 @@ export class SqliteWasmIndex implements IObjectIndex {
 
       try {
         handle = new sqlite3.oo1.DB(this.location, "c");
-      } catch (error) {
+      } catch (ex) {
         throw new DbQueryError({
-          cause: error,
+          cause: ex,
           operation: "open",
         });
       }

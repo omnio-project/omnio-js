@@ -109,9 +109,9 @@ class SqliteWasmConnection implements DatabaseConnection {
 
     try {
       statement = this.db.prepare(sqlText);
-    } catch (error) {
+    } catch (ex) {
       throw new DbQueryError({
-        cause: error,
+        cause: ex,
         operation: "query",
         queryText: sqlText,
       });
@@ -148,13 +148,13 @@ class SqliteWasmConnection implements DatabaseConnection {
         rows: [],
         numAffectedRows: toCount(this.db.selectValue("select changes()")),
       };
-    } catch (error) {
-      if (error instanceof DbQueryError) {
-        throw error;
+    } catch (ex) {
+      if (ex instanceof DbQueryError) {
+        throw ex;
       }
 
       throw new DbQueryError({
-        cause: error,
+        cause: ex,
         operation: "query",
         queryText: sqlText,
       });

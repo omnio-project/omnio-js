@@ -251,8 +251,8 @@ describe("lifecycle", () => {
         action: "open",
         signal: controller.signal,
       });
-    } catch (error) {
-      name = (error as Error).name;
+    } catch (ex) {
+      name = (ex as Error).name;
     }
 
     // 検証：

@@ -234,10 +234,10 @@ export class Gemma2Embedder implements IEmbedder {
       }
 
       return await pipeline("feature-extraction", this.model, options);
-    } catch (error) {
+    } catch (ex) {
       this.loading = undefined;
       throw new ModelLoadError({
-        cause: error,
+        cause: ex,
         model: this.model,
       });
     }
@@ -267,10 +267,10 @@ export class Gemma2Embedder implements IEmbedder {
         pooling: "mean",
         normalize: true,
       });
-    } catch (error) {
+    } catch (ex) {
       throw new EmbedFailedError({
         kind: "text",
-        cause: error,
+        cause: ex,
       });
     }
 

@@ -251,9 +251,9 @@ export class Omnio {
           action: "open",
           signal: active,
         });
-      } catch (error) {
+      } catch (ex) {
         await this.entity.close({ signal: active }).catch(() => undefined);
-        throw error;
+        throw ex;
       }
 
       this.opened = true;
@@ -364,9 +364,9 @@ export class Omnio {
           object,
           signal: active,
         });
-      } catch (error) {
+      } catch (ex) {
         await this.entity.delete(keyString, { signal: active }).catch(() => undefined);
-        throw error;
+        throw ex;
       }
 
       return object;
@@ -394,12 +394,12 @@ export class Omnio {
 
       try {
         return await this.entity.get(toOmnioKey(key).key, { signal: active });
-      } catch (error) {
-        if (error instanceof KeyNotFoundError) {
+      } catch (ex) {
+        if (ex instanceof KeyNotFoundError) {
           return null;
         }
 
-        throw error;
+        throw ex;
       }
     } finally {
       lock.release();
@@ -430,12 +430,12 @@ export class Omnio {
 
       try {
         return await this.entity.stream(toOmnioKey(key).key, { signal: active });
-      } catch (error) {
-        if (error instanceof KeyNotFoundError) {
+      } catch (ex) {
+        if (ex instanceof KeyNotFoundError) {
           return null;
         }
 
-        throw error;
+        throw ex;
       }
     } finally {
       lock.release();

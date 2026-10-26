@@ -15,7 +15,7 @@
     "prepare": "vp config"
   },
   "devDependencies": {
-    "@tai-kun/vp-lint-plugins": "0.0.9",
+    "@tai-kun/vp-lint-plugins": "0.0.10",
     "@tsconfig/node24": "24.0.5",
     "@tsconfig/strictest": "2.0.8",
     "@types/node": "24.19.2",

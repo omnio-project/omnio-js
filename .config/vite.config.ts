@@ -268,6 +268,7 @@ export default defineConfig({
       "unicorn/no-array-sort": "off",
       "unicorn/no-hex-escape": "error",
       "unicorn/throw-new-error": "error",
+      "tai-kun/catch-param-name": "error",
       "unicorn/prefer-array-find": "error",
       "unicorn/prefer-array-flat": "error",
       "unicorn/prefer-array-some": "error",
