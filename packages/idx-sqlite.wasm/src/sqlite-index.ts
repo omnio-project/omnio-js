@@ -225,23 +225,23 @@ function withMetadataFilter(
  * データの整合性のためではなく、`open` や `close` などのライフサイクルと操作が同時実行されないためです。
  */
 export class SqliteWasmIndex implements IObjectIndex {
-  private kysely: Kysely<SqliteWasmDatabase> | undefined;
+  #kysely: Kysely<SqliteWasmDatabase> | undefined;
 
-  private readonly location: string;
+  readonly #location: string;
 
   /**
    * @param options データベースの保存場所などの設定です。
    */
   public constructor(options: SqliteWasmIndexOptions = {}) {
     const parsed = v.parse(SqliteWasmIndexOptionsSchema, options);
-    this.location = parsed.location ?? ":memory:";
+    this.#location = parsed.location ?? ":memory:";
   }
 
   /**
    * インデックスが現在開いているかを示します。
    */
   public get isOpen(): boolean {
-    return this.kysely !== undefined;
+    return this.#kysely !== undefined;
   }
 
   /**
@@ -255,7 +255,7 @@ export class SqliteWasmIndex implements IObjectIndex {
     const lock = await asyncmux(this, c.signal);
 
     try {
-      if (this.kysely !== undefined) {
+      if (this.#kysely !== undefined) {
         return;
       }
 
@@ -273,7 +273,7 @@ export class SqliteWasmIndex implements IObjectIndex {
       let handle: SqliteWasmHandle;
 
       try {
-        handle = new sqlite3.oo1.DB(this.location, "c");
+        handle = new sqlite3.oo1.DB(this.#location, "c");
       } catch (ex) {
         throw new DbQueryError({
           cause: ex,
@@ -295,7 +295,7 @@ export class SqliteWasmIndex implements IObjectIndex {
         });
       }
 
-      this.kysely = kysely;
+      this.#kysely = kysely;
     } finally {
       lock.release();
     }
@@ -312,9 +312,9 @@ export class SqliteWasmIndex implements IObjectIndex {
     const lock = await asyncmux(this, c.signal);
 
     try {
-      const kysely = this.kysely;
+      const kysely = this.#kysely;
 
-      this.kysely = undefined;
+      this.#kysely = undefined;
 
       if (kysely !== undefined) {
         await kysely.destroy();
@@ -335,7 +335,7 @@ export class SqliteWasmIndex implements IObjectIndex {
     const lock = await asyncmux(this, c.signal);
 
     try {
-      const kysely = this.requireOpen("upsert");
+      const kysely = this.#requireOpen("upsert");
       const object = c.object;
       const vector = object.embedding;
       let embedding: Uint8Array<ArrayBuffer> | null = null;
@@ -430,7 +430,7 @@ export class SqliteWasmIndex implements IObjectIndex {
     const lock = await asyncmux(this, c.signal);
 
     try {
-      const kysely = this.requireOpen("get");
+      const kysely = this.#requireOpen("get");
       const row = await kysely
         .selectFrom("objects")
         .selectAll()
@@ -441,9 +441,9 @@ export class SqliteWasmIndex implements IObjectIndex {
         return null;
       }
 
-      const tags = await this.loadTags(kysely, [row.key]);
+      const tags = await this.#loadTags(kysely, [row.key]);
 
-      return this.toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "get");
+      return this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "get");
     } finally {
       lock.release();
     }
@@ -462,7 +462,7 @@ export class SqliteWasmIndex implements IObjectIndex {
     const lock = await asyncmux(this, c.signal);
 
     try {
-      const kysely = this.requireOpen("delete");
+      const kysely = this.#requireOpen("delete");
       const result = await kysely
         .deleteFrom("objects")
         .where("key", "=", c.key.key)
@@ -490,7 +490,7 @@ export class SqliteWasmIndex implements IObjectIndex {
     const lock = await asyncmux(this, c.signal);
 
     try {
-      const kysely = this.requireOpen("list");
+      const kysely = this.#requireOpen("list");
       const limit = c.limit ?? 100;
 
       if (limit <= 0) {
@@ -517,14 +517,14 @@ export class SqliteWasmIndex implements IObjectIndex {
           ),
         );
         const page = matched.slice(offset, offset + limit);
-        const tags = await this.loadTags(
+        const tags = await this.#loadTags(
           kysely,
           page.map((row) => row.key),
         );
 
         return {
           items: page.map((row) =>
-            this.toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "list"),
+            this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "list"),
           ),
           nextCursor: offset + page.length < matched.length ? String(offset + page.length) : null,
         };
@@ -536,14 +536,14 @@ export class SqliteWasmIndex implements IObjectIndex {
         .offset(offset)
         .execute();
       const page = rows.slice(0, limit);
-      const tags = await this.loadTags(
+      const tags = await this.#loadTags(
         kysely,
         page.map((row) => row.key),
       );
 
       return {
         items: page.map((row) =>
-          this.toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "list"),
+          this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "list"),
         ),
         nextCursor: rows.length > limit ? String(offset + limit) : null,
       };
@@ -567,7 +567,7 @@ export class SqliteWasmIndex implements IObjectIndex {
     const lock = await asyncmux(this, c.signal);
 
     try {
-      const kysely = this.requireOpen("search");
+      const kysely = this.#requireOpen("search");
 
       if (c.topK <= 0 || c.vector.length === 0) {
         return [];
@@ -630,13 +630,13 @@ export class SqliteWasmIndex implements IObjectIndex {
       scored.sort((left, right) => right.score - left.score);
 
       const top = scored.slice(0, c.topK);
-      const tags = await this.loadTags(
+      const tags = await this.#loadTags(
         kysely,
         top.map(({ row }) => row.key),
       );
 
       return top.map(({ row, score }) => ({
-        ...this.toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "search"),
+        ...this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "search"),
         score,
       }));
     } finally {
@@ -651,8 +651,8 @@ export class SqliteWasmIndex implements IObjectIndex {
    *
    * @returns kysely のインスタンスです。
    */
-  private requireOpen(operation: string): Kysely<SqliteWasmDatabase> {
-    const kysely = this.kysely;
+  #requireOpen(operation: string): Kysely<SqliteWasmDatabase> {
+    const kysely = this.#kysely;
 
     if (kysely === undefined) {
       throw new DbNotOpenError({ operation });
@@ -669,7 +669,7 @@ export class SqliteWasmIndex implements IObjectIndex {
    *
    * @returns キーからタグ一覧への対応表です。
    */
-  private async loadTags(
+  async #loadTags(
     kysely: Kysely<SqliteWasmDatabase>,
     keys: readonly string[],
   ): Promise<Map<string, string[]>> {
@@ -705,7 +705,7 @@ export class SqliteWasmIndex implements IObjectIndex {
    *
    * @returns 変換したオブジェクトです。
    */
-  private toObject<TUserMetadata>(
+  #toObject<TUserMetadata>(
     row: ObjectRow,
     tags: readonly string[],
     operation: string,

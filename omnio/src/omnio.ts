@@ -203,29 +203,29 @@ async function sha256Hex(data: Uint8Array): Promise<string> {
  * データの整合性のためではなく、`open` や `close` などのライフサイクルと操作が同時実行されないためです。
  */
 export class Omnio {
-  private readonly entity: OmnioEntity;
+  readonly #entity: OmnioEntity;
 
-  private readonly index: IObjectIndex;
+  readonly #index: IObjectIndex;
 
-  private readonly embedder: IEmbedder;
+  readonly #embedder: IEmbedder;
 
-  private opened: boolean;
+  #opened: boolean;
 
   /**
    * @param options データベースと埋め込み、ストレージーです。すべて必須です。
    */
   public constructor(options: OmnioOptions) {
-    this.entity = options.entity;
-    this.index = options.index;
-    this.embedder = options.embedder;
-    this.opened = false;
+    this.#entity = options.entity;
+    this.#index = options.index;
+    this.#embedder = options.embedder;
+    this.#opened = false;
   }
 
   /**
    * `Omnio` が現在開いているかを示します。
    */
   public get isOpen(): boolean {
-    return this.opened;
+    return this.#opened;
   }
 
   /**
@@ -240,23 +240,23 @@ export class Omnio {
     const lock = await asyncmux(this, active);
 
     try {
-      if (this.opened) {
+      if (this.#opened) {
         return;
       }
 
-      await this.entity.open({ signal: active });
+      await this.#entity.open({ signal: active });
 
       try {
-        await this.index.open({
+        await this.#index.open({
           action: "open",
           signal: active,
         });
       } catch (ex) {
-        await this.entity.close({ signal: active }).catch(() => undefined);
+        await this.#entity.close({ signal: active }).catch(() => undefined);
         throw ex;
       }
 
-      this.opened = true;
+      this.#opened = true;
     } finally {
       lock.release();
     }
@@ -274,16 +274,16 @@ export class Omnio {
     const lock = await asyncmux(this, active);
 
     try {
-      if (!this.opened) {
+      if (!this.#opened) {
         return;
       }
 
-      await this.index.close({
+      await this.#index.close({
         action: "close",
         signal: active,
       });
-      await this.entity.close({ signal: active });
-      this.opened = false;
+      await this.#entity.close({ signal: active });
+      this.#opened = false;
     } finally {
       lock.release();
     }
@@ -305,7 +305,7 @@ export class Omnio {
     const lock = await asyncmux(this, active);
 
     try {
-      this.requireOpen("putObject");
+      this.#requireOpen("putObject");
 
       const key = toOmnioKey(input.key);
       const keyString = key.key;
@@ -313,7 +313,7 @@ export class Omnio {
 
       active.throwIfAborted();
 
-      const existing = await this.index.get<TUserMetadata>({
+      const existing = await this.#index.get<TUserMetadata>({
         key,
         action: "get",
         signal: active,
@@ -326,15 +326,15 @@ export class Omnio {
       if (input.embedding !== undefined) {
         embedding = input.embedding;
       } else if ((input.embed ?? true) && input.description !== undefined) {
-        embedding = await this.embedder.embedText({
+        embedding = await this.#embedder.embedText({
           text: input.description,
           action: "embedText",
           signal: active,
         });
-        embeddingModel = this.embedder.info.name;
+        embeddingModel = this.#embedder.info.name;
         embeddingSource = {
           kind: "description",
-          model: this.embedder.info.name,
+          model: this.#embedder.info.name,
         };
       }
 
@@ -356,16 +356,16 @@ export class Omnio {
         embeddingSource,
       };
 
-      await this.entity.set(keyString, bytes, { signal: active });
+      await this.#entity.set(keyString, bytes, { signal: active });
 
       try {
-        await this.index.upsert({
+        await this.#index.upsert({
           action: "upsert",
           object,
           signal: active,
         });
       } catch (ex) {
-        await this.entity.delete(keyString, { signal: active }).catch(() => undefined);
+        await this.#entity.delete(keyString, { signal: active }).catch(() => undefined);
         throw ex;
       }
 
@@ -390,10 +390,10 @@ export class Omnio {
     const lock = await asyncmux(this, active);
 
     try {
-      this.requireOpen("getObject");
+      this.#requireOpen("getObject");
 
       try {
-        return await this.entity.get(toOmnioKey(key).key, { signal: active });
+        return await this.#entity.get(toOmnioKey(key).key, { signal: active });
       } catch (ex) {
         if (ex instanceof KeyNotFoundError) {
           return null;
@@ -426,10 +426,10 @@ export class Omnio {
     const lock = await asyncmux(this, active);
 
     try {
-      this.requireOpen("streamObject");
+      this.#requireOpen("streamObject");
 
       try {
-        return await this.entity.stream(toOmnioKey(key).key, { signal: active });
+        return await this.#entity.stream(toOmnioKey(key).key, { signal: active });
       } catch (ex) {
         if (ex instanceof KeyNotFoundError) {
           return null;
@@ -460,9 +460,9 @@ export class Omnio {
     const lock = await asyncmux(this, active);
 
     try {
-      this.requireOpen("headObject");
+      this.#requireOpen("headObject");
 
-      return await this.index.get<TUserMetadata>({
+      return await this.#index.get<TUserMetadata>({
         key: toOmnioKey(key),
         action: "get",
         signal: active,
@@ -487,12 +487,12 @@ export class Omnio {
     const lock = await asyncmux(this, active);
 
     try {
-      this.requireOpen("deleteObject");
+      this.#requireOpen("deleteObject");
       const objectKey = toOmnioKey(key);
-      const existed = await this.entity.has(objectKey.key, { signal: active });
-      await this.entity.delete(objectKey.key, { signal: active });
+      const existed = await this.#entity.has(objectKey.key, { signal: active });
+      await this.#entity.delete(objectKey.key, { signal: active });
 
-      const indexDeleted = await this.index.delete({
+      const indexDeleted = await this.#index.delete({
         key: objectKey,
         action: "delete",
         signal: active,
@@ -526,9 +526,9 @@ export class Omnio {
     const lock = await asyncmux(this, active);
 
     try {
-      this.requireOpen("listObjects");
+      this.#requireOpen("listObjects");
 
-      return await this.index.list<TUserMetadata>({
+      return await this.#index.list<TUserMetadata>({
         limit: options?.limit,
         action: "list",
         cursor: options?.cursor,
@@ -556,24 +556,24 @@ export class Omnio {
     const lock = await asyncmux(this, active);
 
     try {
-      this.requireOpen("searchObjects");
+      this.#requireOpen("searchObjects");
 
       const query = input.query;
       let vector: Float32Array;
       let embeddingModel: string | undefined;
 
       if ("text" in query) {
-        vector = await this.embedder.embedText({
+        vector = await this.#embedder.embedText({
           text: query.text,
           action: "embedText",
           signal: active,
         });
-        embeddingModel = this.embedder.info.name;
+        embeddingModel = this.#embedder.info.name;
       } else if ("vector" in query) {
         vector = query.vector;
       } else {
         const image = query.image instanceof Uint8Array ? copiedBytes(query.image) : query.image;
-        vector = await this.embedder.embed({
+        vector = await this.#embedder.embed({
           input: {
             data: image,
             kind: "image",
@@ -584,7 +584,7 @@ export class Omnio {
         });
       }
 
-      const results = await this.index.search<TUserMetadata>({
+      const results = await this.#index.search<TUserMetadata>({
         topK: input.topK ?? 20,
         action: "search",
         filter: input.filter,
@@ -625,9 +625,9 @@ export class Omnio {
     const lock = await asyncmux(this, active);
 
     try {
-      this.requireOpen("reindexObject");
+      this.#requireOpen("reindexObject");
       const objectKey = toOmnioKey(key);
-      const object = await this.index.get<TUserMetadata>({
+      const object = await this.#index.get<TUserMetadata>({
         key: objectKey,
         action: "get",
         signal: active,
@@ -637,7 +637,7 @@ export class Omnio {
         return object;
       }
 
-      const embedding = await this.embedder.embedText({
+      const embedding = await this.#embedder.embedText({
         text: object.description,
         action: "embedText",
         signal: active,
@@ -646,17 +646,17 @@ export class Omnio {
         ...object,
         embedding,
         embeddingDims: embedding.length,
-        embeddingModel: this.embedder.info.name,
+        embeddingModel: this.#embedder.info.name,
         embeddingSource: {
           kind: "description",
-          model: this.embedder.info.name,
+          model: this.#embedder.info.name,
         },
         system: {
           ...object.system,
           updatedAt: new Date().toISOString(),
         },
       };
-      await this.index.upsert({
+      await this.#index.upsert({
         action: "upsert",
         object: reindexed,
         signal: active,
@@ -673,8 +673,8 @@ export class Omnio {
    *
    * @param operation 実行中の操作名です。
    */
-  private requireOpen(operation: string): void {
-    if (!this.opened) {
+  #requireOpen(operation: string): void {
+    if (!this.#opened) {
       throw new DbNotOpenError({ operation });
     }
   }

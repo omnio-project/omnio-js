@@ -101,17 +101,17 @@ export class Gemma2Embedder implements IEmbedder {
   /** 埋め込み器の能力情報です。 */
   public readonly info: EmbedderInfo;
 
-  private loading: Promise<FeatureExtractionPipeline> | undefined;
+  #loading: Promise<FeatureExtractionPipeline> | undefined;
 
-  private readonly model: string;
+  readonly #model: string;
 
-  private readonly dtype: DataType;
+  readonly #dtype: DataType;
 
-  private readonly subfolder: string;
+  readonly #subfolder: string;
 
-  private readonly dims: number;
+  readonly #dims: number;
 
-  private readonly device: DeviceType | undefined;
+  readonly #device: DeviceType | undefined;
 
   /**
    * @param options モデル ID や次元数などの設定です。
@@ -119,14 +119,14 @@ export class Gemma2Embedder implements IEmbedder {
   public constructor(options: Gemma2EmbedderOptions = {}) {
     const parsed = v.parse(Gemma2EmbedderOptionsSchema, options);
     const dims = parsed.dims ?? DEFAULT_DIMS;
-    this.model = parsed.model ?? DEFAULT_MODEL_ID;
-    this.dtype = parsed.dtype ?? DEFAULT_DTYPE;
-    this.subfolder = parsed.subfolder ?? DEFAULT_SUBFOLDER;
-    this.dims = dims;
-    this.device = parsed.device;
+    this.#model = parsed.model ?? DEFAULT_MODEL_ID;
+    this.#dtype = parsed.dtype ?? DEFAULT_DTYPE;
+    this.#subfolder = parsed.subfolder ?? DEFAULT_SUBFOLDER;
+    this.#dims = dims;
+    this.#device = parsed.device;
     this.info = {
       dims,
-      name: this.model,
+      name: this.#model,
       modalities: ["text"],
       normalized: true,
       multilingual: true,
@@ -164,7 +164,7 @@ export class Gemma2Embedder implements IEmbedder {
         });
       }
 
-      const vectors = await this.embedBatch([c.input.text], c.signal);
+      const vectors = await this.#embedBatch([c.input.text], c.signal);
       const vector = vectors[0];
 
       if (vector === undefined) {
@@ -206,7 +206,7 @@ export class Gemma2Embedder implements IEmbedder {
         texts.push(input.text);
       }
 
-      return await this.embedBatch(texts, c.signal);
+      return await this.#embedBatch(texts, c.signal);
     } finally {
       lock.release();
     }
@@ -225,7 +225,7 @@ export class Gemma2Embedder implements IEmbedder {
     const lock = await asyncmux(this, c.signal);
 
     try {
-      const vectors = await this.embedBatch([c.text], c.signal);
+      const vectors = await this.#embedBatch([c.text], c.signal);
       const vector = vectors[0];
 
       if (vector === undefined) {
@@ -246,10 +246,10 @@ export class Gemma2Embedder implements IEmbedder {
    *
    * @returns 推論器を解決する Promise です。
    */
-  private async getExtractor(): Promise<FeatureExtractionPipeline> {
-    this.loading ??= this.loadExtractor();
+  async #getExtractor(): Promise<FeatureExtractionPipeline> {
+    this.#loading ??= this.#loadExtractor();
 
-    return this.loading;
+    return this.#loading;
   }
 
   /**
@@ -257,7 +257,7 @@ export class Gemma2Embedder implements IEmbedder {
    *
    * @returns 推論器を解決する Promise です。
    */
-  private async loadExtractor(): Promise<FeatureExtractionPipeline> {
+  async #loadExtractor(): Promise<FeatureExtractionPipeline> {
     try {
       const { pipeline } = await import("@huggingface/transformers");
       const options: {
@@ -265,20 +265,20 @@ export class Gemma2Embedder implements IEmbedder {
         device?: DeviceType;
         subfolder: string;
       } = {
-        dtype: this.dtype,
-        subfolder: this.subfolder,
+        dtype: this.#dtype,
+        subfolder: this.#subfolder,
       };
 
-      if (this.device !== undefined) {
-        options.device = this.device;
+      if (this.#device !== undefined) {
+        options.device = this.#device;
       }
 
-      return await pipeline("feature-extraction", this.model, options);
+      return await pipeline("feature-extraction", this.#model, options);
     } catch (ex) {
-      this.loading = undefined;
+      this.#loading = undefined;
       throw new ModelLoadError({
         cause: ex,
-        model: this.model,
+        model: this.#model,
       });
     }
   }
@@ -291,12 +291,12 @@ export class Gemma2Embedder implements IEmbedder {
    *
    * @returns 埋め込みベクトルの一覧を解決する Promise です。
    */
-  private async embedBatch(texts: readonly string[], signal: AbortSignal): Promise<Float32Array[]> {
+  async #embedBatch(texts: readonly string[], signal: AbortSignal): Promise<Float32Array[]> {
     if (texts.length === 0) {
       return [];
     }
 
-    const extractor = await this.getExtractor();
+    const extractor = await this.#getExtractor();
 
     signal.throwIfAborted();
 
@@ -333,7 +333,7 @@ export class Gemma2Embedder implements IEmbedder {
         native[position] = Number(output.data[offset + position]);
       }
 
-      vectors.push(this.finalizeVector(native));
+      vectors.push(this.#finalizeVector(native));
     }
 
     return vectors;
@@ -346,12 +346,12 @@ export class Gemma2Embedder implements IEmbedder {
    *
    * @returns 指定した次元数のベクトルです。
    */
-  private finalizeVector(native: Float32Array): Float32Array {
-    if (native.length <= this.dims) {
+  #finalizeVector(native: Float32Array): Float32Array {
+    if (native.length <= this.#dims) {
       return native.slice();
     }
 
-    const truncated = native.slice(0, this.dims);
+    const truncated = native.slice(0, this.#dims);
     let norm = 0;
 
     for (const value of truncated) {

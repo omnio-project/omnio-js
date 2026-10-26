@@ -30,7 +30,7 @@ class FakeEmbedder implements IEmbedder {
       throw new Error(`unsupported: ${c.input.kind}`);
     }
 
-    return this.vectorFor(c.input.text);
+    return this.#vectorFor(c.input.text);
   }
 
   public async embedMany(c: IEmbedder.EmbedManyContext): Promise<Float32Array[]> {
@@ -41,14 +41,14 @@ class FakeEmbedder implements IEmbedder {
         throw new Error(`unsupported: ${input.kind}`);
       }
 
-      vectors.push(this.vectorFor(input.text));
+      vectors.push(this.#vectorFor(input.text));
     }
 
     return vectors;
   }
 
   public async embedText(c: IEmbedder.EmbedTextContext): Promise<Float32Array> {
-    return this.vectorFor(c.text);
+    return this.#vectorFor(c.text);
   }
 
   /**
@@ -58,7 +58,7 @@ class FakeEmbedder implements IEmbedder {
    *
    * @returns 2 次元のベクトルです。
    */
-  private vectorFor(text: string): Float32Array {
+  #vectorFor(text: string): Float32Array {
     if (text.includes("cat")) {
       return new Float32Array([1, 0]);
     }

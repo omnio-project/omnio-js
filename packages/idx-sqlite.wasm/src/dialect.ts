@@ -87,13 +87,13 @@ function toCount(value: unknown): bigint {
  * sqlite-wasm 上で動作する kysely 用のデータベース接続です。
  */
 class SqliteWasmConnection implements DatabaseConnection {
-  private readonly db: SqliteWasmHandle;
+  readonly #db: SqliteWasmHandle;
 
   /**
    * @param db SQLite WASM のデータベースハンドルです。
    */
   public constructor(db: SqliteWasmHandle) {
-    this.db = db;
+    this.#db = db;
   }
 
   /**
@@ -108,7 +108,7 @@ class SqliteWasmConnection implements DatabaseConnection {
     let statement: ReturnType<SqliteWasmHandle["prepare"]>;
 
     try {
-      statement = this.db.prepare(sqlText);
+      statement = this.#db.prepare(sqlText);
     } catch (ex) {
       throw new DbQueryError({
         cause: ex,
@@ -139,14 +139,14 @@ class SqliteWasmConnection implements DatabaseConnection {
       if (compiled.query.kind === "InsertQueryNode") {
         return {
           rows: [],
-          insertId: toCount(this.db.selectValue("select last_insert_rowid()")),
-          numAffectedRows: toCount(this.db.selectValue("select changes()")),
+          insertId: toCount(this.#db.selectValue("select last_insert_rowid()")),
+          numAffectedRows: toCount(this.#db.selectValue("select changes()")),
         };
       }
 
       return {
         rows: [],
-        numAffectedRows: toCount(this.db.selectValue("select changes()")),
+        numAffectedRows: toCount(this.#db.selectValue("select changes()")),
       };
     } catch (ex) {
       if (ex instanceof DbQueryError) {
@@ -179,15 +179,15 @@ class SqliteWasmConnection implements DatabaseConnection {
  * 単一接続であり、取得と解放は無操作です。
  */
 class SqliteWasmDriver implements Driver {
-  private connection: SqliteWasmConnection | undefined;
+  #connection: SqliteWasmConnection | undefined;
 
-  private readonly db: SqliteWasmHandle;
+  readonly #db: SqliteWasmHandle;
 
   /**
    * @param db SQLite WASM のデータベースハンドルです。
    */
   public constructor(db: SqliteWasmHandle) {
-    this.db = db;
+    this.#db = db;
   }
 
   /**
@@ -201,9 +201,9 @@ class SqliteWasmDriver implements Driver {
    * @returns 共有のデータベース接続を解決する Promise です。
    */
   public async acquireConnection(): Promise<DatabaseConnection> {
-    this.connection ??= new SqliteWasmConnection(this.db);
+    this.#connection ??= new SqliteWasmConnection(this.#db);
 
-    return this.connection;
+    return this.#connection;
   }
 
   /**
@@ -242,8 +242,8 @@ class SqliteWasmDriver implements Driver {
    * ハンドルを閉じて破棄します。
    */
   public async destroy(): Promise<void> {
-    this.connection = undefined;
-    this.db.close();
+    this.#connection = undefined;
+    this.#db.close();
   }
 }
 
@@ -260,13 +260,13 @@ class SqliteWasmDriver implements Driver {
  * ```
  */
 export class SqliteWasmDialect implements Dialect {
-  private readonly db: SqliteWasmHandle;
+  readonly #db: SqliteWasmHandle;
 
   /**
    * @param db SQLite WASM のデータベースハンドルです。
    */
   public constructor(db: SqliteWasmHandle) {
-    this.db = db;
+    this.#db = db;
   }
 
   /**
@@ -284,7 +284,7 @@ export class SqliteWasmDialect implements Dialect {
    * @returns sqlite-wasm 用のドライバーです。
    */
   public createDriver(): Driver {
-    return new SqliteWasmDriver(this.db);
+    return new SqliteWasmDriver(this.#db);
   }
 
   /**
