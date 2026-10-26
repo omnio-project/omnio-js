@@ -6,12 +6,16 @@
       "path": "omnio",
     },
     {
-      "name": "db-sqlite",
-      "path": "packages/db-sqlite",
+      "name": "core",
+      "path": "packages/core",
     },
     {
       "name": "db-pglite",
       "path": "packages/db-pglite",
+    },
+    {
+      "name": "db-sqlite",
+      "path": "packages/db-sqlite",
     },
     {
       "name": "emb-gemma2",

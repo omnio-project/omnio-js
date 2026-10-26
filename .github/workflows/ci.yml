@@ -16,14 +16,16 @@ jobs:
       fail-fast: false
       matrix:
         package:
-          - name: "omnio"
-            directory: "omnio"
-          - name: "db-sqlite"
-            directory: "packages/db-sqlite"
+          - name: "core"
+            directory: "packages/core"
           - name: "db-pglite"
             directory: "packages/db-pglite"
+          - name: "db-sqlite"
+            directory: "packages/db-sqlite"
           - name: "emb-gemma2"
             directory: "packages/emb-gemma2"
+          - name: "omnio"
+            directory: "omnio"
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:

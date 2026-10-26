@@ -1,8 +1,9 @@
 packages:
   [
     "omnio",
-    "packages/db-sqlite",
+    "packages/core",
     "packages/db-pglite",
+    "packages/db-sqlite",
     "packages/emb-gemma2",
     "website",
   ]
