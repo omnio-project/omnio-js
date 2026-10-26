@@ -1,3 +1,4 @@
+// oxlint-disable import/no-namespace
 import {
   type EmbedSource,
   type OmnioObject,
@@ -12,6 +13,7 @@ import {
 import { asyncmux } from "asyncmux";
 import { type SelectQueryBuilder, sql, Kysely } from "kysely";
 import { Migrator } from "kysely/migration";
+import * as v from "valibot";
 
 import { type SqliteWasmHandle, initSqliteWasm, SqliteWasmDialect } from "./dialect.js";
 import { SqliteWasmMigrationProvider } from "./migrations.js";
@@ -25,6 +27,13 @@ export interface SqliteWasmIndexOptions {
   /** データベースの保存場所です。既定値はメモリーです。 */
   readonly location?: string | undefined;
 }
+
+/**
+ * `SqliteWasmIndex` のコンストラクター引数を検証するスキーマです。
+ */
+const SqliteWasmIndexOptionsSchema = v.object({
+  location: v.optional(v.pipe(v.string(), v.minLength(1))),
+});
 
 /**
  * JSON 文字列を読み取ります。
@@ -224,7 +233,8 @@ export class SqliteWasmIndex implements IObjectIndex {
    * @param options データベースの保存場所などの設定です。
    */
   public constructor(options: SqliteWasmIndexOptions = {}) {
-    this.location = options.location ?? ":memory:";
+    const parsed = v.parse(SqliteWasmIndexOptionsSchema, options);
+    this.location = parsed.location ?? ":memory:";
   }
 
   /**

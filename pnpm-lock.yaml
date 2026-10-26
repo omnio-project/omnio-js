@@ -130,6 +130,9 @@ importers:
       asyncmux:
         specifier: ^0.0.12
         version: 0.0.12(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))
+      valibot:
+        specifier: ^1.0.0
+        version: 1.5.0(typescript@7.0.2)
     devDependencies:
       '@vitest/browser-playwright':
         specifier: 'catalog:'
@@ -179,6 +182,9 @@ importers:
       kysely:
         specifier: ^0.29.7
         version: 0.29.7
+      valibot:
+        specifier: ^1.0.0
+        version: 1.5.0(typescript@7.0.2)
     devDependencies:
       '@vitest/browser-playwright':
         specifier: 'catalog:'

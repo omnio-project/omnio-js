@@ -1,4 +1,6 @@
+// oxlint-disable import/no-namespace
 import { type IEmbedder, UnsupportedModalityError } from "@omniojs/core";
+import * as v from "valibot";
 import { test, describe } from "vite-plus/test";
 
 import {
@@ -64,11 +66,11 @@ describe("Gemma2Embedder", () => {
     expect(embedder.info.dims).toBe(256);
   });
 
-  test("不正な dims では構築時に RangeError を投げる", ({ expect }) => {
+  test("不正な dims では構築時に ValiError を投げる", ({ expect }) => {
     // 実行と検証：
-    expect(() => new Gemma2Embedder({ dims: 0 })).toThrow(RangeError);
-    expect(() => new Gemma2Embedder({ dims: -1 })).toThrow(RangeError);
-    expect(() => new Gemma2Embedder({ dims: 1.5 })).toThrow(RangeError);
+    expect(() => new Gemma2Embedder({ dims: 0 })).toThrow(v.ValiError);
+    expect(() => new Gemma2Embedder({ dims: -1 })).toThrow(v.ValiError);
+    expect(() => new Gemma2Embedder({ dims: 1.5 })).toThrow(v.ValiError);
   });
 
   test("画像の埋め込みはモデル読込前に UnsupportedModalityError を投げる", async ({

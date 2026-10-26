@@ -1,3 +1,4 @@
+// oxlint-disable import/no-namespace
 import type {
   Tensor,
   DataType,
@@ -12,6 +13,7 @@ import {
   UnsupportedModalityError,
 } from "@omniojs/core";
 import { asyncmux } from "asyncmux";
+import * as v from "valibot";
 
 /** 既定のモデル ID です。 */
 export const DEFAULT_MODEL_ID = "onnx-community/embeddinggemma-2-ONNX";
@@ -46,6 +48,48 @@ export interface Gemma2EmbedderOptions {
 }
 
 /**
+ * `Gemma2Embedder` のコンストラクター引数を検証するスキーマです。
+ */
+const Gemma2EmbedderOptionsSchema = v.object({
+  dims: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(1))),
+  dtype: v.optional(
+    v.picklist([
+      "auto",
+      "fp32",
+      "fp16",
+      "q8",
+      "int8",
+      "uint8",
+      "q4",
+      "bnb4",
+      "q4f16",
+      "q2",
+      "q2f16",
+      "q1",
+      "q1f16",
+    ]),
+  ),
+  model: v.optional(v.pipe(v.string(), v.minLength(1))),
+  device: v.optional(
+    v.picklist([
+      "auto",
+      "gpu",
+      "cpu",
+      "wasm",
+      "webgpu",
+      "cuda",
+      "dml",
+      "coreml",
+      "webnn",
+      "webnn-npu",
+      "webnn-gpu",
+      "webnn-cpu",
+    ]),
+  ),
+  subfolder: v.optional(v.pipe(v.string(), v.minLength(1))),
+});
+
+/**
  * EmbeddingGemma 2 による `IEmbedder` の実装です。
  *
  * テキスト埋め込みに対応します。画像などの modalities は将来対応します。
@@ -73,17 +117,13 @@ export class Gemma2Embedder implements IEmbedder {
    * @param options モデル ID や次元数などの設定です。
    */
   public constructor(options: Gemma2EmbedderOptions = {}) {
-    const dims = options.dims ?? DEFAULT_DIMS;
-
-    if (!Number.isInteger(dims) || dims <= 0) {
-      throw new RangeError(`dims must be a positive integer, but got ${dims}`);
-    }
-
-    this.model = options.model ?? DEFAULT_MODEL_ID;
-    this.dtype = options.dtype ?? DEFAULT_DTYPE;
-    this.subfolder = options.subfolder ?? DEFAULT_SUBFOLDER;
+    const parsed = v.parse(Gemma2EmbedderOptionsSchema, options);
+    const dims = parsed.dims ?? DEFAULT_DIMS;
+    this.model = parsed.model ?? DEFAULT_MODEL_ID;
+    this.dtype = parsed.dtype ?? DEFAULT_DTYPE;
+    this.subfolder = parsed.subfolder ?? DEFAULT_SUBFOLDER;
     this.dims = dims;
-    this.device = options.device;
+    this.device = parsed.device;
     this.info = {
       dims,
       name: this.model,
