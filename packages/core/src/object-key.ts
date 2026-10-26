@@ -1,8 +1,8 @@
 import { safeParse } from "valibot";
 
+import utf8 from "./_utf8.js";
 import { InvalidOmnioKeyError } from "./errors/errors.js";
 import { ObjectKeySchema } from "./schemas.js";
-import utf8 from "./utf8.js";
 
 /** "." の UTF-8 コードポイントです。 */
 const DOT = 46;

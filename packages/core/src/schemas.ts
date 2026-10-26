@@ -17,7 +17,7 @@ import {
 } from "valibot";
 import type { Brand, GenericSchema } from "valibot";
 
-import utf8 from "./utf8.js";
+import utf8 from "./_utf8.js";
 
 /** オブジェクトキーの最大文字数です。 */
 export const MAX_OBJECT_KEY_LENGTH = 1024;
