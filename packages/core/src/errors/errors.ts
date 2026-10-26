@@ -81,3 +81,20 @@ export class InvalidOmnioKeyError extends InvalidUsageErrorBase<InvalidOmnioKeyE
 }
 
 setErrorMessage(InvalidOmnioKeyError, () => "無効なオブジェクトキーです", "ja");
+
+/**
+ * 操作が中断されたことを示すエラーです。
+ *
+ * 中断シグナルの reason として使い、呼び出し側が中断理由を判別できるようにします。
+ */
+export class OperationAbortedError extends ErrorBase<undefined> {
+  static {
+    this.prototype.name = "OmnioOperationAbortedError";
+  }
+
+  public constructor(options?: ErrorOptions) {
+    super("Operation aborted", options);
+  }
+}
+
+setErrorMessage(OperationAbortedError, () => "操作が中断されました", "ja");

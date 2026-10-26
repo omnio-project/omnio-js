@@ -10,6 +10,7 @@ import {
   ModelLoadError,
   EmbedFailedError,
   InvalidOmnioKeyError,
+  OperationAbortedError,
   UnsupportedModalityError,
   EmbeddingModelMismatchError,
   VectorDimensionMismatchError,
@@ -424,5 +425,35 @@ describe("InvalidOmnioKeyError", () => {
 
     // 検証：
     expect(error.message).toBe("無効なオブジェクトキーです");
+  });
+});
+describe("OperationAbortedError", () => {
+  test("ErrorBase を継承し name は OmnioOperationAbortedError である", ({ expect }) => {
+    // 実行：
+    const error = new OperationAbortedError();
+
+    // 検証：
+    expect(error).toBeInstanceOf(ErrorBase);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe("OmnioOperationAbortedError");
+  });
+
+  test("既定のメッセージは英語である", ({ expect }) => {
+    // 実行：
+    const error = new OperationAbortedError();
+
+    // 検証：
+    expect(error.message).toBe("Operation aborted");
+  });
+
+  test("ja では日本語のメッセージを返す", ({ expect, setLang }) => {
+    // 準備：
+    setLang("ja");
+
+    // 実行：
+    const error = new OperationAbortedError();
+
+    // 検証：
+    expect(error.message).toBe("操作が中断されました");
   });
 });

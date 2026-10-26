@@ -1,5 +1,10 @@
 // oxlint-disable import/no-namespace
-import { type IEmbedder, EmbedFailedError, UnsupportedModalityError } from "@omniojs/core";
+import {
+  type IEmbedder,
+  EmbedFailedError,
+  OperationAbortedError,
+  UnsupportedModalityError,
+} from "@omniojs/core";
 import * as v from "valibot";
 import { test, describe } from "vite-plus/test";
 
@@ -15,7 +20,7 @@ describe("Gemma2Embedder", () => {
   test("supports はテキストと画像に対応する", ({ expect }) => {
     // 準備：
     const embedder = new Gemma2Embedder();
-    const signal = AbortSignal.abort();
+    const signal = AbortSignal.abort(new OperationAbortedError());
 
     // 実行と検証：
     expect(

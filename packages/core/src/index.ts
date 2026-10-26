@@ -30,6 +30,7 @@ export {
   UnexpectedErrorBase,
   InvalidOmnioKeyError,
   InvalidUsageErrorBase,
+  OperationAbortedError,
   UnsupportedModalityError,
   EmbeddingModelMismatchError,
   VectorDimensionMismatchError,

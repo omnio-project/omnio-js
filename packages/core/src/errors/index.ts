@@ -43,4 +43,5 @@ export {
   UnexpectedErrorBase,
   InvalidOmnioKeyError,
   InvalidUsageErrorBase,
+  OperationAbortedError,
 } from "./errors.js";

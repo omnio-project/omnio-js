@@ -39,6 +39,7 @@ describe("exports", () => {
       "ModelLoadError",
       "ObjectKeySchema",
       "OmnioKey",
+      "OperationAbortedError",
       "SHA256_HEX_REGEX",
       "SizeSchema",
       "TagSchema",
@@ -68,6 +69,7 @@ describe("exports", () => {
     expect(core.EmbedFailedError).toBe(embErrors.EmbedFailedError);
     expect(core.ModelLoadError).toBe(embErrors.ModelLoadError);
     expect(core.InvalidOmnioKeyError).toBe(errors.InvalidOmnioKeyError);
+    expect(core.OperationAbortedError).toBe(errors.OperationAbortedError);
     expect(core.ObjectKeySchema).toBe(schemas.ObjectKeySchema);
     expect(core.TagSchema).toBe(schemas.TagSchema);
     expect(core.TagsSchema).toBe(schemas.TagsSchema);

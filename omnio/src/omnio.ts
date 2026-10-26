@@ -7,6 +7,7 @@ import {
   type MetadataFilter,
   OmnioKey,
   DbNotOpenError,
+  OperationAbortedError,
 } from "@omniojs/core";
 import { asyncmux } from "asyncmux";
 import { type ValueStream, KeyNotFoundError } from "unikvs";
@@ -306,7 +307,7 @@ export class Omnio {
     active.throwIfAborted();
 
     if (this.#opened) {
-      this.#lifecycle.abort();
+      this.#lifecycle.abort(new OperationAbortedError());
     }
 
     using _lock = await asyncmux(this, active);

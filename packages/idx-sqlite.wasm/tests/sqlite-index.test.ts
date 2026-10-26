@@ -3,6 +3,7 @@ import {
   OmnioKey,
   DbQueryError,
   DbNotOpenError,
+  OperationAbortedError,
   VectorDimensionMismatchError,
 } from "@omniojs/core";
 import type { Migration } from "kysely/migration";
@@ -244,22 +245,16 @@ describe("lifecycle", () => {
     // 準備：
     const index = new SqliteWasmIndex();
     const controller = new AbortController();
-    controller.abort();
+    const reason = new OperationAbortedError();
+    controller.abort(reason);
 
-    let name = "";
-
-    // 実行：
-    try {
-      await index.open({
+    // 実行と検証：
+    await expect(
+      index.open({
         action: "open",
         signal: controller.signal,
-      });
-    } catch (ex) {
-      name = (ex as Error).name;
-    }
-
-    // 検証：
-    expect(name).toBe("AbortError");
+      }),
+    ).rejects.toBe(reason);
     expect(index.isOpen).toBe(false);
   });
 

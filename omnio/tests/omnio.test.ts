@@ -1,4 +1,10 @@
-import { type IEmbedder, OmnioKey, DbNotOpenError, InvalidOmnioKeyError } from "@omniojs/core";
+import {
+  type IEmbedder,
+  OmnioKey,
+  DbNotOpenError,
+  InvalidOmnioKeyError,
+  OperationAbortedError,
+} from "@omniojs/core";
 import { SqliteWasmIndex } from "@omniojs/idx-sqlite.wasm";
 import { Memory } from "@unikvs/memory";
 import { type Value, UniKvs } from "unikvs";
@@ -216,7 +222,8 @@ describe("open と close", () => {
     expect(active.aborted).toBe(true);
 
     // 検証：
-    await expect(loading).rejects.toMatchObject({ name: "AbortError" });
+    expect(active.reason).toBeInstanceOf(OperationAbortedError);
+    await expect(loading).rejects.toBeInstanceOf(OperationAbortedError);
     await closing;
     expect(omnio.isOpen).toBe(false);
   });
@@ -240,16 +247,18 @@ describe("open と close", () => {
       });
     });
     const controller = new AbortController();
+    const reason = new OperationAbortedError();
 
     // 実行：
     const loading = omnio.headObject("missing", controller.signal);
     const active = await started.promise;
     expect(active.aborted).toBe(false);
-    controller.abort();
+    controller.abort(reason);
 
     // 検証：
     expect(active.aborted).toBe(true);
-    await expect(loading).rejects.toMatchObject({ name: "AbortError" });
+    expect(active.reason).toBe(reason);
+    await expect(loading).rejects.toBe(reason);
 
     // 後始末：
     await omnio.close(signal);
@@ -284,8 +293,9 @@ describe("open と close", () => {
 
     // 検証：
     expect(active.aborted).toBe(true);
+    expect(active.reason).toBeInstanceOf(OperationAbortedError);
     expect(controller.signal.aborted).toBe(false);
-    await expect(loading).rejects.toMatchObject({ name: "AbortError" });
+    await expect(loading).rejects.toBeInstanceOf(OperationAbortedError);
     await closing;
     expect(omnio.isOpen).toBe(false);
   });
