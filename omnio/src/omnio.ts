@@ -15,11 +15,12 @@ import {
   UserMetadataSchema,
   OperationAbortedError,
 } from "@omniojs/core";
+import { ChecksumSha256 } from "@unikvs/checksum";
 import { asyncmux } from "asyncmux";
 import { type IValueStream, KeyNotFoundError } from "unikvs";
 import * as v from "valibot";
 
-import type { IOmnioEntity } from "./entity.js";
+import type { IOmnioEntity, IOmnioEntityBuilder } from "./entity.js";
 
 /** `open` と `close` の既定タイムアウトです。ミリ秒単位で表します。 */
 const DEFAULT_LIFECYCLE_TIMEOUT_MS = 30_000;
@@ -39,8 +40,13 @@ function withLifecycleTimeout(signal: AbortSignal | undefined): AbortSignal {
  * `Omnio` の設定です。データベースと埋め込み、ストレージーの指定はすべて必須です。
  */
 export type OmnioOptions = {
-  /** 実体を保存するストレージーです。 */
-  readonly entity: IOmnioEntity;
+  /**
+   * 実体を保存するストレージーのビルダーです。
+   *
+   * `persist()` まで構成した unikvs ビルダーを渡してください。
+   * `Omnio` はコンストラクターで `build()` を実行します。
+   */
+  readonly entity: IOmnioEntityBuilder;
 
   /** メタデータとベクトルを保存するインデックスです。 */
   readonly index: IObjectIndex;
@@ -200,19 +206,6 @@ async function toBytes(
 }
 
 /**
- * バイト列の SHA-256 ハッシュ値を求めます。
- *
- * @param data ハッシュ化するバイト列です。
- *
- * @returns 16 進数 64 文字のハッシュ値です。
- */
-async function sha256Hex(data: Uint8Array<ArrayBuffer>): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", data);
-
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-/**
  * キーが見つからない例外を null に変換します。
  *
  * @param load 実行する取得処理です。
@@ -295,6 +288,11 @@ const IOmnioEntitySchema = v.custom<IOmnioEntity>((input) =>
   hasFunctions(input, ["open", "close", "has", "get", "set", "delete", "stream"]),
 );
 
+/** 実体ストレージーのビルダーのスキーマです。 */
+const IOmnioEntityBuilderSchema = v.custom<IOmnioEntityBuilder>((input) =>
+  hasFunctions(input, ["build"]),
+);
+
 /** インデックスのスキーマです。 */
 const IObjectIndexSchema = v.custom<IObjectIndex>((input) => {
   if (
@@ -331,7 +329,7 @@ const IEmbedderSchema = v.custom<IEmbedder>((input) => {
 /** `Omnio` のコンストラクター引数を検証するスキーマです。 */
 const OmnioOptionsSchema = v.object({
   index: IObjectIndexSchema,
-  entity: IOmnioEntitySchema,
+  entity: IOmnioEntityBuilderSchema,
   embedder: IEmbedderSchema,
 });
 
@@ -396,7 +394,7 @@ const OptionalListObjectsOptionsSchema = v.optional(ListObjectsOptionsSchema);
 /**
  * オブジェクトストレージーのように動作する IO 層のファサードです。
  *
- * 実体の保存先に unikvs、メタデータとベクトルの保存先に `IObjectIndex`、自然言語検索に `IEmbedder` を使います。
+ * 実体の保存先に unikvs ビルダー、メタデータとベクトルの保存先に `IObjectIndex`、自然言語検索に `IEmbedder` を使います。
  *
  * すべての非同期メソッドは `asyncmux` によりインスタンス単位で排他します。
  * データの整合性のためではなく、`open` や `close` などのライフサイクルと操作が同時実行されないためです。
@@ -435,7 +433,12 @@ export class Omnio {
    */
   public constructor(options: OmnioOptions) {
     const parsed = v.parse(OmnioOptionsSchema, options);
-    this.#entity = parsed.entity;
+    this.#entity = v.parse(
+      IOmnioEntitySchema,
+      parsed.entity.build({
+        beforeAll: [new ChecksumSha256()],
+      }),
+    );
     this.#index = parsed.index;
     this.#embedder = parsed.embedder;
 
@@ -578,42 +581,42 @@ export class Omnio {
       embeddingSource = embedded.embeddingSource;
     }
 
-    const object: OmnioObject<TUserMetadata> = {
-      key,
-      tags: [...(parsed.tags ?? [])],
-      system: {
-        hash: await sha256Hex(bytes),
-        size: bytes.byteLength,
-        createdAt: existing?.system.createdAt ?? now,
-        updatedAt: now,
-        contentType: parsed.contentType,
-      },
-      entityId,
-      embedding,
-      description: parsed.description,
-      userMetadata: (parsed.userMetadata ?? {}) as TUserMetadata,
-      embeddingDims: embedding === undefined ? undefined : embedding.length,
-      embeddingModel,
-      embeddingSource,
-    };
     const previousBytes =
       existing === null
         ? undefined
         : ((await this.#readEntityBytes(existing, active)) ?? undefined);
 
     try {
-      await this.#entity.set(entityId, bytes, { signal: active });
+      const hash = await this.#setEntity(entityId, bytes, active);
+      const object: OmnioObject<TUserMetadata> = {
+        key,
+        tags: [...(parsed.tags ?? [])],
+        system: {
+          hash,
+          size: bytes.byteLength,
+          createdAt: existing?.system.createdAt ?? now,
+          updatedAt: now,
+          contentType: parsed.contentType,
+        },
+        entityId,
+        embedding,
+        description: parsed.description,
+        userMetadata: (parsed.userMetadata ?? {}) as TUserMetadata,
+        embeddingDims: embedding === undefined ? undefined : embedding.length,
+        embeddingModel,
+        embeddingSource,
+      };
       await this.#index.upsert({
         action: "upsert",
         object,
         signal: active,
       });
+
+      return object;
     } catch (ex) {
       await this.#restoreEntity(entityId, previousBytes).catch(() => undefined);
       throw ex;
     }
-
-    return object;
   }
 
   /**
@@ -1173,6 +1176,41 @@ export class Omnio {
     await this.#entity.delete(legacyKey, { signal }).catch(() => undefined);
 
     return legacyBytes;
+  }
+
+  /**
+   * 実体を保存し、チェックサムを返します。
+   *
+   * チェックサムはビルド時に先頭へ挿入した `ChecksumSha256` が計算します。
+   *
+   * @param entityId 保存先の実体 ID です。
+   * @param bytes 保存するバイト列です。
+   * @param signal 処理を中断するための中断シグナルです。
+   *
+   * @returns SHA-256 の 16 進数 64 文字のハッシュ値です。
+   */
+  async #setEntity(
+    entityId: string,
+    bytes: Uint8Array<ArrayBuffer>,
+    signal: AbortSignal,
+  ): Promise<string> {
+    let hash: string | undefined;
+    await this.#entity.set(entityId, bytes, {
+      vars: {
+        [ChecksumSha256.CHECKSUM_ON_HASH_VAR_NAME]: (value: string) => {
+          hash = value;
+        },
+      },
+      signal,
+    });
+
+    if (hash === undefined) {
+      throw new Error(
+        "実体ストレージーの保存時に SHA-256 チェックサムを取得できませんでした。実体ビルダーが build オプションの beforeAll を適用しているか確認してください。",
+      );
+    }
+
+    return hash;
   }
 
   /**

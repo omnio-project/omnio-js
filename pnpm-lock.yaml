@@ -56,15 +56,21 @@ importers:
 
   omnio:
     dependencies:
+      '@noble/hashes':
+        specifier: ^2.4.0
+        version: 2.4.0
       '@omniojs/core':
         specifier: workspace:*
         version: link:../packages/core
+      '@unikvs/checksum':
+        specifier: ^0.0.15
+        version: 0.0.15(@logtape/logtape@2.4.2)(@noble/hashes@2.4.0)(valibot@1.5.0(typescript@7.0.2))
       asyncmux:
         specifier: ^0.0.12
         version: 0.0.12(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))
       unikvs:
-        specifier: ^0.0.13
-        version: 0.0.13(@logtape/logtape@2.4.2)(fast-utf8@0.0.7)(typescript@7.0.2)(valibot@1.5.0(typescript@7.0.2))
+        specifier: ^0.0.15
+        version: 0.0.15(@logtape/logtape@2.4.2)(fast-utf8@0.0.7)(typescript@7.0.2)(valibot@1.5.0(typescript@7.0.2))
       valibot:
         specifier: ^1.5.0
         version: 1.5.0(typescript@7.0.2)
@@ -73,8 +79,8 @@ importers:
         specifier: workspace:*
         version: link:../packages/idx-sqlite.wasm
       '@unikvs/memory':
-        specifier: ^0.0.13
-        version: 0.0.13(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))
+        specifier: ^0.0.15
+        version: 0.0.15(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))
       '@vitest/browser-playwright':
         specifier: 'catalog:'
         version: 5.0.5(@voidzero-dev/vite-plus-core@1.3.0(@types/node@24.19.2)(@volar/typescript@2.4.28(typescript@7.0.2))(esbuild@0.28.2)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(playwright@1.64.1)(vitest@5.0.5)
@@ -987,6 +993,10 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.4
       '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.4
+
+  '@noble/hashes@2.4.0':
+    resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
+    engines: {node: '>= 20.19.0'}
 
   '@nodable/entities@3.1.0':
     resolution: {integrity: sha512-LsS/DjHr+uDM647Gru/cA8+J3a3HfhttwCKLyuoyN7yXTFCxKBtSgMQBvrW9yNPa2/zDRUNuGPaH5QUFoa4arQ==}
@@ -2229,13 +2239,24 @@ packages:
   '@ungap/structured-clone@1.4.0':
     resolution: {integrity: sha512-1mEZtMKPM09vDmQt5y7YvmN2+DFTP7Tg0EWXdic8/C6VRnpb33e4ghisCIE3WZjsE2N8mf+QV1Zqh7ZFYLWInQ==}
 
-  '@unikvs/core@0.0.13':
-    resolution: {integrity: sha512-3Wmhu+nguNCgvlnn0xzk82uLNPb0779sdsWZ4fCj4jfoqbyrZzfSZ59qd3pFb7EUKhvWaoVDMJrTj40itufg6w==}
+  '@unikvs/checksum@0.0.15':
+    resolution: {integrity: sha512-bfo7om+DrrEinwoRTjU0DqvGBAfD7DoBchm1Fc2ZEcWIAmSueRPyelxfFXK8EKE7r3duFdVBKuJ2zCr8piq/JQ==}
+    peerDependencies:
+      '@logtape/logtape': ^2.0.0
+      '@noble/hashes': ^2.0.0
+
+  '@unikvs/core@0.0.15':
+    resolution: {integrity: sha512-FTb3bGUrXOObSVxcSIeVUa00gcCgg8dp426dGiUsxfXvvJjCSob3mdwzlpnztNOwNe2CGQCNdTIrOgJwczKG4Q==}
     peerDependencies:
       valibot: ^1.0.0
 
-  '@unikvs/memory@0.0.13':
-    resolution: {integrity: sha512-bwtFDZqrPARklWdfTrbk6dFEBtES0TQIcpA8puc4mq3Q3Ks8lOfY3bo+Qk3PqKtzVHHuJ3d10vxsIwzCGxcjjQ==}
+  '@unikvs/memory@0.0.15':
+    resolution: {integrity: sha512-fWeT7iGwMdGRNqLLr6Vmj968hZtxMf0mUHR0Ql0lF9qKd7Hy+bdZRpQyH1d6BLIAlAvwnmocEAUPutlY34RjRQ==}
+    peerDependencies:
+      '@logtape/logtape': ^2.0.0
+
+  '@unikvs/utils@0.0.15':
+    resolution: {integrity: sha512-sEcsxtkeRcsC+8Ll1LfHn0gfvH3dciQwniLKvr9FJnJU6QCk/rXLk7ahK1XahDZgUBBtwjSBPU1zuOdKtriycA==}
     peerDependencies:
       '@logtape/logtape': ^2.0.0
 
@@ -3510,6 +3531,10 @@ packages:
 
   filelist@1.0.6:
     resolution: {integrity: sha512-5giy2PkLYY1cP39p17Ech+2xlpTRL9HLspOfEgm0L6CwBXBTgsK5ou0JtzYuepxkaQ/tvhCFIJ5uXo0OrM2DxA==}
+
+  filename-reserved-regex@4.1.0:
+    resolution: {integrity: sha512-pdgqcVlu789LoYmu0kz4pxSphL0pX/UVFFDJ/kTHk+1ZRc43UiokPZFsRV8OGxW49khh11rj54AhqczGIwLa+g==}
+    engines: {node: '>=20'}
 
   finalhandler@2.1.1:
     resolution: {integrity: sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA==}
@@ -5025,8 +5050,8 @@ packages:
   unifont@0.7.5:
     resolution: {integrity: sha512-ULe/Cs+ZIsq+dcFofNkhqielCrUJnb5mr+Yc4EBM2VlL+6OZR6+cjtI2mT1bJvRBrVncqHAbLURxmPLcCXzWMg==}
 
-  unikvs@0.0.13:
-    resolution: {integrity: sha512-kEVWaFHMWGIRBudnsHda8wHEy+ehjWr6e5cEeb8g90zo/wqOWGlZgU5I7xQ+FIQ1ZQPzBk5GXecytGw9GXzW7w==}
+  unikvs@0.0.15:
+    resolution: {integrity: sha512-OsSUs6WC5KUpq6XTHzPmS9Ej5GHzWDcYR8iD5QPtpoMQsGCHxOzy1Gdq2PUbKt2X4qmzuSSt3RO1J14nw9vFsA==}
     peerDependencies:
       '@logtape/logtape': ^2.0.0
       valibot: ^1.0.0
@@ -6240,6 +6265,8 @@ snapshots:
       '@emnapi/runtime': 1.11.3
       '@tybys/wasm-util': 0.10.4
 
+  '@noble/hashes@2.4.0': {}
+
   '@nodable/entities@3.1.0': {}
 
   '@orama/orama@3.1.18': {}
@@ -7116,17 +7143,39 @@ snapshots:
 
   '@ungap/structured-clone@1.4.0': {}
 
-  '@unikvs/core@0.0.13(valibot@1.5.0(typescript@7.0.2))':
+  '@unikvs/checksum@0.0.15(@logtape/logtape@2.4.2)(@noble/hashes@2.4.0)(valibot@1.5.0(typescript@7.0.2))':
+    dependencies:
+      '@logtape/logtape': 2.4.2
+      '@noble/hashes': 2.4.0
+      '@unikvs/core': 0.0.15(valibot@1.5.0(typescript@7.0.2))
+      '@unikvs/utils': 0.0.15(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))
+      inspect-lite: 0.0.2
+    transitivePeerDependencies:
+      - valibot
+
+  '@unikvs/core@0.0.15(valibot@1.5.0(typescript@7.0.2))':
     dependencies:
       i18n-error-base: 0.0.8(valibot@1.5.0(typescript@7.0.2))
       maypromise: 0.0.4
       valibot: 1.5.0(typescript@7.0.2)
 
-  '@unikvs/memory@0.0.13(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))':
+  '@unikvs/memory@0.0.15(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))':
     dependencies:
       '@logtape/logtape': 2.4.2
-      '@unikvs/core': 0.0.13(valibot@1.5.0(typescript@7.0.2))
+      '@unikvs/core': 0.0.15(valibot@1.5.0(typescript@7.0.2))
       type-name: 2.0.2
+    transitivePeerDependencies:
+      - valibot
+
+  '@unikvs/utils@0.0.15(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))':
+    dependencies:
+      '@logtape/logtape': 2.4.2
+      '@unikvs/core': 0.0.15(valibot@1.5.0(typescript@7.0.2))
+      fast-utf8: 0.0.9(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))
+      filename-reserved-regex: 4.1.0
+      i18n-error-base: 0.0.8(valibot@1.5.0(typescript@7.0.2))
+      ninja-promise: 0.0.5
+      try-capture-stack-trace: 0.0.3
     transitivePeerDependencies:
       - valibot
 
@@ -8609,6 +8658,8 @@ snapshots:
   filelist@1.0.6:
     dependencies:
       minimatch: 5.1.9
+
+  filename-reserved-regex@4.1.0: {}
 
   finalhandler@2.1.1(supports-color@7.2.0):
     dependencies:
@@ -10341,11 +10392,11 @@ snapshots:
       ohash: 2.0.12
       undici: 8.11.2
 
-  unikvs@0.0.13(@logtape/logtape@2.4.2)(fast-utf8@0.0.7)(typescript@7.0.2)(valibot@1.5.0(typescript@7.0.2)):
+  unikvs@0.0.15(@logtape/logtape@2.4.2)(fast-utf8@0.0.7)(typescript@7.0.2)(valibot@1.5.0(typescript@7.0.2)):
     dependencies:
       '@logtape/logtape': 2.4.2
       '@tai-kun/valibot-extra-lab': 0.0.5(fast-utf8@0.0.7)(valibot@1.5.0(typescript@7.0.2))
-      '@unikvs/core': 0.0.13(valibot@1.5.0(typescript@7.0.2))
+      '@unikvs/core': 0.0.15(valibot@1.5.0(typescript@7.0.2))
       abort-signal-utils: 0.0.6(@logtape/logtape@2.4.2)
       asyncmux: 0.0.12(@logtape/logtape@2.4.2)(valibot@1.5.0(typescript@7.0.2))
       call-fn-once: 0.0.12(@logtape/logtape@2.4.2)(typescript@7.0.2)

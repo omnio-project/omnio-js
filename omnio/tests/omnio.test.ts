@@ -6,12 +6,13 @@ import {
   OperationAbortedError,
 } from "@omniojs/core";
 import { SqliteWasmIndex } from "@omniojs/idx-sqlite.wasm";
+import { ChecksumSha256 } from "@unikvs/checksum";
 import { Memory } from "@unikvs/memory";
 import { type Value, Builder, KeyNotFoundError } from "unikvs";
 import { ValiError } from "valibot";
 import { vi, test, describe } from "vite-plus/test";
 
-import type { IOmnioEntity } from "../src/entity.js";
+import type { IOmnioEntity, IOmnioEntityBuilder } from "../src/entity.js";
 import { Omnio } from "../src/omnio.js";
 
 /**
@@ -98,14 +99,46 @@ class FakeEmbedder implements IEmbedder {
 type TestMapping = Record<string, Value<Uint8Array>>;
 
 /**
- * 検証用の実体ストレージーを作ります。
+ * 検証用の実体ストレージーのビルダーを作ります。
  *
  * メモリー上にバイト列を保存します。
  *
- * @returns 開く前の実体ストレージーです。
+ * @returns 開く前の実体ストレージーを構築するビルダーです。
  */
-function createTestEntity(): IOmnioEntity {
-  return new Builder<TestMapping>().persist(new Memory()).build();
+function createTestEntityBuilder(): IOmnioEntityBuilder {
+  return new Builder<TestMapping>().persist(new Memory());
+}
+
+/**
+ * 構築後の実体ストレージーを検証できるようにしたビルダーを作ります。
+ *
+ * `Omnio` が構築する実体ストレージーをテストから直接操作する場合に使います。
+ *
+ * @returns 実体ストレージーを取得する関数と、そのビルダーです。
+ */
+function createInspectableTestEntity(): {
+  builder: IOmnioEntityBuilder;
+  getEntity: () => IOmnioEntity;
+} {
+  const builder = new Builder<TestMapping>().persist(new Memory());
+  let entity: IOmnioEntity | undefined;
+
+  return {
+    builder: {
+      build: (options) => {
+        entity = builder.build(options);
+
+        return entity;
+      },
+    },
+    getEntity: () => {
+      if (entity === undefined) {
+        throw new Error("実体ストレージーがまだ構築されていません。");
+      }
+
+      return entity;
+    },
+  };
 }
 
 /**
@@ -115,14 +148,14 @@ function createTestEntity(): IOmnioEntity {
  *
  * @param signal 処理を中断するための中断シグナルです。
  * @param index 検証に使うインデックスです。省略時は新しい索引を作ります。
- * @param entity 検証に使う実体ストレージーです。省略時は新しい実体ストレージーを作ります。
+ * @param entity 検証に使う実体ストレージーのビルダーです。省略時は新しいビルダーを作ります。
  *
  * @returns 開いた状態の Omnio です。
  */
 async function createTestOmnio(
   signal: AbortSignal,
   index: SqliteWasmIndex = new SqliteWasmIndex(),
-  entity: IOmnioEntity = createTestEntity(),
+  entity: IOmnioEntityBuilder = createTestEntityBuilder(),
 ): Promise<Omnio> {
   const omnio = new Omnio({
     index,
@@ -169,7 +202,7 @@ async function readAll(source: AsyncIterable<Uint8Array> | null): Promise<Uint8A
 describe("コンストラクター", () => {
   test("不正なオプションは ValiError を投げる", ({ expect }) => {
     // 準備：
-    const entity = createTestEntity();
+    const entity = createTestEntityBuilder();
     const embedder = new FakeEmbedder();
 
     // 実行と検証：
@@ -183,12 +216,31 @@ describe("コンストラクター", () => {
         }),
     ).toThrow(ValiError);
   });
+
+  test("実体ビルダーの build を実行する", ({ expect }) => {
+    // 準備：
+    const entity = new Builder<TestMapping>().persist(new Memory()).build();
+    const build = vi.fn<IOmnioEntityBuilder["build"]>(() => entity);
+    const builder: IOmnioEntityBuilder = { build };
+
+    // 実行：
+    const omnio = new Omnio({
+      index: new SqliteWasmIndex(),
+      entity: builder,
+      embedder: new FakeEmbedder(),
+    });
+
+    // 検証：
+    expect(build).toHaveBeenCalledOnce();
+    expect(build.mock.calls[0]?.[0]?.beforeAll?.[0]).toBeInstanceOf(ChecksumSha256);
+    expect(omnio.isOpen).toBe(false);
+  });
 });
 
 describe("open と close", () => {
   test("開くと利用可能になり閉じると操作できない", async ({ expect, signal }) => {
     // 準備：
-    const entity = new Builder<TestMapping>().persist(new Memory()).build();
+    const entity = new Builder<TestMapping>().persist(new Memory());
     const omnio = new Omnio({
       index: new SqliteWasmIndex(),
       entity,
@@ -377,7 +429,7 @@ describe("dirty 再インデックス", () => {
 
     const omnio = new Omnio({
       index,
-      entity: createTestEntity(),
+      entity: createTestEntityBuilder(),
       embedder: new FakeEmbedder(),
     });
 
@@ -434,7 +486,9 @@ describe("putObject と getObject", () => {
     expect(stored.key.key).toBe("k1");
     expect(stored.system.contentType).toBe("text/plain");
     expect(stored.system.size).toBe(3);
-    expect(stored.system.hash).toMatch(/^[0-9a-f]{64}$/u);
+    expect(stored.system.hash).toBe(
+      "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+    );
     expect(head?.description).toBe("cat on the mat");
     expect(head?.tags).toStrictEqual(["pet"]);
     expect(head?.userMetadata).toStrictEqual({ genre: "test" });
@@ -539,8 +593,8 @@ describe("putObject と getObject", () => {
 
   test("実体は UUID の entityId をキーに保存する", async ({ expect, signal }) => {
     // 準備：
-    const entity = createTestEntity();
-    const omnio = await createTestOmnio(signal, new SqliteWasmIndex(), entity);
+    const { builder, getEntity } = createInspectableTestEntity();
+    const omnio = await createTestOmnio(signal, new SqliteWasmIndex(), builder);
 
     // 実行：
     const stored = await omnio.putObject({
@@ -553,8 +607,8 @@ describe("putObject と getObject", () => {
     expect(stored.entityId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
     );
-    expect(await entity.get(stored.entityId)).toStrictEqual(new Uint8Array([1, 2, 3]));
-    await expect(entity.get("k")).rejects.toBeInstanceOf(KeyNotFoundError);
+    expect(await getEntity().get(stored.entityId)).toStrictEqual(new Uint8Array([1, 2, 3]));
+    await expect(getEntity().get("k")).rejects.toBeInstanceOf(KeyNotFoundError);
 
     // 後始末：
     await omnio.close(signal);
@@ -562,9 +616,9 @@ describe("putObject と getObject", () => {
 
   test("旧キーに保存された実体を entityId へ移行する", async ({ expect, signal }) => {
     // 準備：
-    const entity = createTestEntity();
+    const { builder, getEntity } = createInspectableTestEntity();
     const index = new SqliteWasmIndex();
-    const omnio = await createTestOmnio(signal, index, entity);
+    const omnio = await createTestOmnio(signal, index, builder);
     const entityId = crypto.randomUUID();
     const bytes = new Uint8Array([1, 2, 3]);
     await index.upsert({
@@ -583,7 +637,7 @@ describe("putObject と getObject", () => {
       },
       signal,
     });
-    await entity.set("legacy", bytes, { signal });
+    await getEntity().set("legacy", bytes, { signal });
 
     // 実行：
     const actual = await omnio.getObject("legacy", signal);
@@ -591,8 +645,8 @@ describe("putObject と getObject", () => {
     // 検証：
     expect(actual).toStrictEqual(bytes);
 
-    expect(await entity.get(entityId)).toStrictEqual(bytes);
-    expect(await entity.has("legacy")).toBe(false);
+    expect(await getEntity().get(entityId)).toStrictEqual(bytes);
+    expect(await getEntity().has("legacy")).toBe(false);
 
     // 後始末：
     await omnio.close(signal);
@@ -773,9 +827,9 @@ describe("deleteObject", () => {
 
   test("実体はバックグラウンドで削除し、完了後に索引からも消える", async ({ expect, signal }) => {
     // 準備：
-    const entity = createTestEntity();
+    const { builder, getEntity } = createInspectableTestEntity();
     const index = new SqliteWasmIndex();
-    const omnio = await createTestOmnio(signal, index, entity);
+    const omnio = await createTestOmnio(signal, index, builder);
     const stored = await omnio.putObject({
       key: "k",
       data: new Uint8Array([1, 2, 3]),
@@ -798,7 +852,7 @@ describe("deleteObject", () => {
     expect(deleted).toBe(true);
     expect(await omnio.getObject("k", signal)).toBeNull();
     await purged.promise;
-    expect(await entity.has(stored.entityId)).toBe(false);
+    expect(await getEntity().has(stored.entityId)).toBe(false);
     await expect(
       index.purge({
         key: stored.key,
