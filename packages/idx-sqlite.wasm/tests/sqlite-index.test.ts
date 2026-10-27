@@ -527,6 +527,120 @@ describe("delete", () => {
     });
   });
 
+  test("削除フラグを立てたレコードは取得・検索から除外し、purgeで物理削除する", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const object = createObject("k1", ["gone"]);
+    await index.upsert({
+      action: "upsert",
+      object,
+      signal,
+    });
+
+    // 実行：
+    const deleted = await index.delete({
+      key: object.key,
+      action: "delete",
+      signal,
+    });
+    const actual = await index.get({
+      key: object.key,
+      action: "get",
+      signal,
+    });
+    const byTag = await index.list({
+      action: "list",
+      filter: { tagsAny: ["gone"] },
+      signal,
+    });
+    const byVector = await index.search({
+      topK: 10,
+      action: "search",
+      signal,
+      vector: new Float32Array([1, 0, 0]),
+    });
+    const purged = await index.purge({
+      key: object.key,
+      action: "purge",
+      signal,
+      entityId: object.entityId,
+    });
+    const purgedAgain = await index.purge({
+      key: object.key,
+      action: "purge",
+      signal,
+      entityId: object.entityId,
+    });
+
+    // 検証：
+    expect(deleted).toBe(true);
+    expect(actual).toBeNull();
+    expect(byTag.items).toStrictEqual([]);
+    expect(byVector).toStrictEqual([]);
+    expect(purged).toBe(true);
+    expect(purgedAgain).toBe(false);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("削除フラグ付きのキーを再保存すると復元する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const first = createObject("k1");
+    await index.upsert({
+      action: "upsert",
+      object: first,
+      signal,
+    });
+    await index.delete({
+      key: first.key,
+      action: "delete",
+      signal,
+    });
+
+    // 実行：
+    const second = {
+      ...createObject("k1"),
+      entityId: crypto.randomUUID(),
+      description: "復元した説明",
+    };
+    await index.upsert({
+      action: "upsert",
+      object: second,
+      signal,
+    });
+
+    const actual = await index.get({
+      key: second.key,
+      action: "get",
+      signal,
+    });
+    const purgedOldEntity = await index.purge({
+      key: first.key,
+      action: "purge",
+      signal,
+      entityId: first.entityId,
+    });
+
+    // 検証：
+    expect(actual?.entityId).toBe(second.entityId);
+    expect(actual?.description).toBe("復元した説明");
+    expect(purgedOldEntity).toBe(false);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
   test("存在しないキーの削除は false である", async ({ expect, signal }) => {
     // 準備：
     const index = await createOpenedIndex(signal);

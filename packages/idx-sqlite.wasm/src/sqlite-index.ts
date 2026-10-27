@@ -209,7 +209,7 @@ function withMetadataFilter(
   query: SelectQueryBuilder<SqliteWasmDatabase, "journal", ObjectRow>,
   filter: MetadataFilter | undefined,
 ): SelectQueryBuilder<SqliteWasmDatabase, "journal", ObjectRow> {
-  let filtered = query;
+  let filtered = query.where("journal.record_type", "is not", "DELETE");
 
   if (filter?.contentTypes !== undefined && filter.contentTypes.length > 0) {
     filtered = filtered.where("journal.content_type", "in", [...filter.contentTypes]);
@@ -408,11 +408,12 @@ export class SqliteWasmIndex implements IObjectIndex {
     await kysely.transaction().execute(async (transaction) => {
       const existing = await transaction
         .selectFrom("journal")
-        .select("key")
+        .select(["key", "record_type"])
         .where("key", "=", key)
         .executeTakeFirst();
-      // S3 Metadata のジャーナルに合わせ、新規は CREATE、既存の更新は UPDATE_METADATA とします。
-      const recordType = existing === undefined ? "CREATE" : "UPDATE_METADATA";
+      // S3 Metadata のジャーナルに合わせ、新規と削除済みからの復元は CREATE、既存の更新は UPDATE_METADATA とします。
+      const recordType =
+        existing === undefined || existing.record_type === "DELETE" ? "CREATE" : "UPDATE_METADATA";
       const row = {
         key,
         hash: object.system.hash ?? null,
@@ -488,6 +489,7 @@ export class SqliteWasmIndex implements IObjectIndex {
       .selectFrom("journal")
       .selectAll()
       .where("key", "=", c.key.key)
+      .where("record_type", "is not", "DELETE")
       .executeTakeFirst();
 
     if (row === undefined) {
@@ -500,11 +502,11 @@ export class SqliteWasmIndex implements IObjectIndex {
   }
 
   /**
-   * オブジェクトを削除します。
+   * オブジェクトに削除フラグを立てます。
    *
    * @param c 削除する操作のコンテキストです。
    *
-   * @returns 削除した場合は true、存在しなかった場合は false です。
+   * @returns 削除フラグを立てた場合は true、存在しなかった場合は false です。
    */
   public async delete(c: IObjectIndex.DeleteContext): Promise<boolean> {
     c.signal.throwIfAborted();
@@ -512,9 +514,55 @@ export class SqliteWasmIndex implements IObjectIndex {
     using _lock = await asyncmux(this, c.signal);
 
     const kysely = this.#requireOpen("delete");
+    const recordTimestamp = new Date().toISOString();
+    const updated = await kysely.transaction().execute(async (transaction) => {
+      const result = await transaction
+        .updateTable("journal")
+        .set({
+          hash: null,
+          size: null,
+          embedding: null,
+          created_at: null,
+          updated_at: null,
+          description: null,
+          record_type: "DELETE",
+          content_type: null,
+          user_metadata: null,
+          embedding_dims: null,
+          embedding_model: null,
+          embedding_source: null,
+          record_timestamp: recordTimestamp,
+        })
+        .where("key", "=", c.key.key)
+        .where("record_type", "is not", "DELETE")
+        .executeTakeFirst();
+
+      await transaction.deleteFrom("object_tags").where("key", "=", c.key.key).execute();
+
+      return result.numUpdatedRows;
+    });
+
+    return typeof updated === "bigint" ? updated > 0n : updated > 0;
+  }
+
+  /**
+   * 削除フラグが立ったオブジェクトを物理削除します。
+   *
+   * @param c 物理削除する操作のコンテキストです。
+   *
+   * @returns 物理削除した場合は true、対象が存在しなかった場合は false です。
+   */
+  public async purge(c: IObjectIndex.PurgeContext): Promise<boolean> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux(this, c.signal);
+
+    const kysely = this.#requireOpen("purge");
     const result = await kysely
       .deleteFrom("journal")
       .where("key", "=", c.key.key)
+      .where("entity_id", "=", c.entityId)
+      .where("record_type", "=", "DELETE")
       .executeTakeFirst();
     const deleted = result.numDeletedRows;
 
@@ -554,7 +602,7 @@ export class SqliteWasmIndex implements IObjectIndex {
         .execute();
       const candidates = matched
         .filter((row) =>
-          matchesUserMetadata(parseJson(row.user_metadata, "list"), userMetadataFilter),
+          matchesUserMetadata(parseJson(row.user_metadata ?? "null", "list"), userMetadataFilter),
         )
         .slice(offset);
 
@@ -633,7 +681,10 @@ export class SqliteWasmIndex implements IObjectIndex {
 
       if (
         c.filter?.userMetadata !== undefined &&
-        !matchesUserMetadata(parseJson(row.user_metadata, "search"), c.filter.userMetadata)
+        !matchesUserMetadata(
+          parseJson(row.user_metadata ?? "null", "search"),
+          c.filter.userMetadata,
+        )
       ) {
         continue;
       }
@@ -783,6 +834,19 @@ export class SqliteWasmIndex implements IObjectIndex {
     embedding?: Float32Array,
   ): OmnioObject<TUserMetadata> {
     const decoded = embedding ?? this.#decodeRowEmbedding(row);
+
+    if (
+      row.content_type === null ||
+      row.size === null ||
+      row.created_at === null ||
+      row.updated_at === null ||
+      row.user_metadata === null
+    ) {
+      throw new DbQueryError({
+        cause: new Error("Active journal row has null data columns"),
+        operation,
+      });
+    }
 
     return {
       key: OmnioKey.parse(row.key),

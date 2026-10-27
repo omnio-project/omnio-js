@@ -2,11 +2,11 @@
  * `journal` テーブルの行です。
  */
 export type ObjectRow = {
-  /** コンテンツタイプです。 */
-  readonly content_type: string;
+  /** コンテンツタイプです。削除フラグ付きレコードでは null です。 */
+  readonly content_type: string | null;
 
-  /** 作成時刻です。ISO 8601 文字列で表します。 */
-  readonly created_at: string;
+  /** 作成時刻です。ISO 8601 文字列で表します。削除フラグ付きレコードでは null です。 */
+  readonly created_at: string | null;
 
   /** 任意のテキスト形式の説明文です。存在しない場合もあります。 */
   readonly description: string | null;
@@ -32,20 +32,20 @@ export type ObjectRow = {
   /** オブジェクトを一意に識別するキーです。 */
   readonly key: string;
 
-  /** レコードの種類です。`CREATE` または `UPDATE_METADATA` を保存します。 */
+  /** レコードの種類です。`CREATE`、`UPDATE_METADATA`、`DELETE` を保存します。 */
   readonly record_type: string;
 
   /** レコードの時刻です。ISO 8601 文字列で表します。 */
   readonly record_timestamp: string;
 
-  /** バイト列のサイズです。バイト単位で表します。 */
-  readonly size: number;
+  /** バイト列のサイズです。バイト単位で表します。削除フラグ付きレコードでは null です。 */
+  readonly size: number | null;
 
-  /** 更新時刻です。ISO 8601 文字列で表します。 */
-  readonly updated_at: string;
+  /** 更新時刻です。ISO 8601 文字列で表します。削除フラグ付きレコードでは null です。 */
+  readonly updated_at: string | null;
 
-  /** 利用者が自由に付与するメタデータです。JSON 文字列で表します。 */
-  readonly user_metadata: string;
+  /** 利用者が自由に付与するメタデータです。JSON 文字列で表します。削除フラグ付きレコードでは null です。 */
+  readonly user_metadata: string | null;
 };
 
 /**

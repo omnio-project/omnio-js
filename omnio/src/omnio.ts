@@ -297,7 +297,9 @@ const IOmnioEntitySchema = v.custom<IOmnioEntity>((input) =>
 
 /** インデックスのスキーマです。 */
 const IObjectIndexSchema = v.custom<IObjectIndex>((input) => {
-  if (!hasFunctions(input, ["open", "close", "upsert", "get", "delete", "list", "search"])) {
+  if (
+    !hasFunctions(input, ["open", "close", "upsert", "get", "delete", "list", "search", "purge"])
+  ) {
     return false;
   }
 
@@ -401,9 +403,19 @@ export class Omnio {
 
   readonly #embedder: IEmbedder;
 
+  #deletionTask: Promise<void> | undefined;
+
   #lifecycle: AbortController;
 
   #opened: boolean;
+
+  readonly #pendingDeletions = new Map<
+    string,
+    {
+      key: OmnioKey;
+      entityId: string;
+    }
+  >();
 
   /**
    * @param options データベースと埋め込み、ストレージーです。すべて必須です。
@@ -465,6 +477,11 @@ export class Omnio {
   public async close(signal?: AbortSignal): Promise<void> {
     const active = withLifecycleTimeout(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
+
+    while (this.#deletionTask !== undefined) {
+      await this.#deletionTask;
+      active.throwIfAborted();
+    }
 
     if (this.#opened) {
       this.#lifecycle.abort(new OperationAbortedError());
@@ -695,35 +712,22 @@ export class Omnio {
       action: "get",
       signal: active,
     });
-    let existed = false;
 
-    if (object !== null) {
-      const hasEntity = await this.#entity.has(object.entityId, { signal: active });
-
-      if (hasEntity) {
-        await this.#entity.delete(object.entityId, { signal: active });
-        existed = true;
-      }
-
-      const legacyKey = object.key.key;
-
-      if (legacyKey !== object.entityId) {
-        const hasLegacyEntity = await this.#entity.has(legacyKey, { signal: active });
-
-        if (hasLegacyEntity) {
-          await this.#entity.delete(legacyKey, { signal: active });
-          existed = true;
-        }
-      }
+    if (object === null) {
+      return false;
     }
 
-    const indexDeleted = await this.#index.delete({
+    const marked = await this.#index.delete({
       key: objectKey,
       action: "delete",
       signal: active,
     });
 
-    return existed || indexDeleted;
+    if (marked) {
+      this.#enqueueDeletion(object.key, object.entityId);
+    }
+
+    return marked;
   }
 
   /**
@@ -919,6 +923,109 @@ export class Omnio {
     return signal === undefined
       ? this.#lifecycle.signal
       : AbortSignal.any([signal, this.#lifecycle.signal]);
+  }
+
+  /**
+   * 削除フラグが立ったオブジェクトの実体削除を予約します。
+   *
+   * @param key 削除するオブジェクトのキーです。
+   * @param entityId 削除する実体 ID です。
+   */
+  #enqueueDeletion(key: OmnioKey, entityId: string): void {
+    this.#pendingDeletions.set(entityId, {
+      key,
+      entityId,
+    });
+    this.#scheduleDeletion();
+  }
+
+  /**
+   * 実体削除のバックグラウンド処理を開始します。
+   */
+  #scheduleDeletion(): void {
+    if (this.#deletionTask !== undefined) {
+      return;
+    }
+
+    this.#deletionTask = this.#runDeletionSchedule();
+  }
+
+  /**
+   * 実体削除のバックグラウンド処理を実行し、終了後に次の予約を確認します。
+   */
+  async #runDeletionSchedule(): Promise<void> {
+    try {
+      await this.#drainDeletions();
+    } catch {
+      // バックグラウンド処理の失敗は削除フラグを残して次の機会に委ねます。
+    } finally {
+      this.#deletionTask = undefined;
+
+      if (this.#pendingDeletions.size > 0) {
+        this.#scheduleDeletion();
+      }
+    }
+  }
+
+  /**
+   * 予約された実体削除を順番に実行します。
+   */
+  async #drainDeletions(): Promise<void> {
+    while (this.#pendingDeletions.size > 0) {
+      const entry = this.#pendingDeletions.entries().next().value;
+
+      if (entry === undefined) {
+        return;
+      }
+
+      const [entityId, task] = entry;
+      this.#pendingDeletions.delete(entityId);
+
+      try {
+        const signal = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+        using _lock = await asyncmux(this, signal);
+
+        if (!this.#opened) {
+          return;
+        }
+
+        await this.#purgeEntity(task.key, task.entityId, signal);
+      } catch {
+        // 失敗した場合は削除フラグを残し、後続の処理を継続します。
+      }
+    }
+  }
+
+  /**
+   * オブジェクトの実体を削除し、ObjectIndex の削除フラグ付きレコードを物理削除します。
+   *
+   * @param key 削除するオブジェクトのキーです。
+   * @param entityId 削除する実体 ID です。
+   * @param signal 処理を中断するための中断シグナルです。
+   */
+  async #purgeEntity(key: OmnioKey, entityId: string, signal: AbortSignal): Promise<void> {
+    const hasEntity = await this.#entity.has(entityId, { signal });
+
+    if (hasEntity) {
+      await this.#entity.delete(entityId, { signal });
+    }
+
+    const legacyKey = key.key;
+
+    if (legacyKey !== entityId) {
+      const hasLegacyEntity = await this.#entity.has(legacyKey, { signal });
+
+      if (hasLegacyEntity) {
+        await this.#entity.delete(legacyKey, { signal });
+      }
+    }
+
+    await this.#index.purge({
+      key,
+      action: "purge",
+      signal,
+      entityId,
+    });
   }
 
   /**

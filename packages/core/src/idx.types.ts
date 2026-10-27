@@ -51,6 +51,20 @@ export interface IDeleteContext extends IActionContext {
 }
 
 /**
+ * 削除フラグが立ったオブジェクトを物理削除する操作のコンテキストです。
+ */
+export interface IPurgeContext extends IActionContext {
+  /** 操作の種別です。 */
+  readonly action: "purge";
+
+  /** 物理削除するオブジェクトの実体 ID です。 */
+  readonly entityId: string;
+
+  /** 物理削除するオブジェクトのキーです。 */
+  readonly key: OmnioKey;
+}
+
+/**
  * オブジェクトを一覧する操作のコンテキストです。
  */
 export interface IListContext extends IActionContext {
@@ -143,6 +157,11 @@ export namespace IObjectIndex {
   export type OpenContext = IOpenContext;
 
   /**
+   * 物理削除する操作のコンテキストです。
+   */
+  export type PurgeContext = IPurgeContext;
+
+  /**
    * 検索する操作のコンテキストです。
    */
   export type SearchContext = ISearchContext;
@@ -213,13 +232,26 @@ export interface IObjectIndex {
   get<TUserMetadata>(c: IObjectIndex.GetContext): MaybePromise<OmnioObject<TUserMetadata> | null>;
 
   /**
-   * オブジェクトを削除します。
+   * オブジェクトに削除フラグを立てます。
+   *
+   * 実体の削除は行いません。削除フラグが立ったレコードは通常の取得や検索から除外されます。
    *
    * @param c 削除する操作のコンテキストです。
    *
-   * @returns 削除した場合は true、存在しなかった場合は false を解決する Promise です。
+   * @returns 削除フラグを立てた場合は true、存在しなかった場合は false を解決する Promise です。
    */
   delete(c: IObjectIndex.DeleteContext): MaybePromise<boolean>;
+
+  /**
+   * 削除フラグが立ったオブジェクトを物理削除します。
+   *
+   * `entityId` とキーが一致する削除フラグ付きレコードだけを削除します。
+   *
+   * @param c 物理削除する操作のコンテキストです。
+   *
+   * @returns 物理削除した場合は true、対象が存在しなかった場合は false を解決する Promise です。
+   */
+  purge(c: IObjectIndex.PurgeContext): MaybePromise<boolean>;
 
   /**
    * オブジェクトを一覧します。

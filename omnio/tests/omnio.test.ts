@@ -701,6 +701,47 @@ describe("deleteObject", () => {
     // 後始末：
     await omnio.close(signal);
   });
+
+  test("実体はバックグラウンドで削除し、完了後に索引からも消える", async ({ expect, signal }) => {
+    // 準備：
+    const entity = createTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, entity);
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1, 2, 3]),
+      contentType: "text/plain",
+    });
+    const purged = Promise.withResolvers<void>();
+    const originalPurge = index.purge.bind(index);
+    using _purge = vi.spyOn(index, "purge").mockImplementation(async (c) => {
+      const result = await originalPurge(c);
+
+      purged.resolve();
+
+      return result;
+    });
+
+    // 実行：
+    const deleted = await omnio.deleteObject("k", signal);
+
+    // 検証：
+    expect(deleted).toBe(true);
+    expect(await omnio.getObject("k", signal)).toBeNull();
+    await purged.promise;
+    expect(await entity.has(stored.entityId)).toBe(false);
+    await expect(
+      index.purge({
+        key: stored.key,
+        action: "purge",
+        signal,
+        entityId: stored.entityId,
+      }),
+    ).resolves.toBe(false);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
 });
 
 describe("listObjects", () => {

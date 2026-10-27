@@ -10,6 +10,7 @@ export type ContextAction =
   | "get"
   | "list"
   | "open"
+  | "purge"
   | "search"
   | "supports"
   | "upsert";
