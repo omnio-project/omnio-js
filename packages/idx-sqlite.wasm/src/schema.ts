@@ -1,5 +1,5 @@
 /**
- * `objects` テーブルの行です。
+ * `journal` テーブルの行です。
  */
 export type ObjectRow = {
   /** コンテンツタイプです。 */
@@ -55,7 +55,7 @@ export type ObjectTagRow = {
  */
 export type SqliteWasmDatabase = {
   /** オブジェクトの表です。 */
-  readonly objects: ObjectRow;
+  readonly journal: ObjectRow;
 
   /** タグの表です。 */
   readonly object_tags: ObjectTagRow;

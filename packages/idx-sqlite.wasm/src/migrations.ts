@@ -56,12 +56,58 @@ async function down001(db: Kysely<SqliteWasmDatabase>): Promise<void> {
 }
 
 /**
+ * `objects` テーブルを `journal` に改名し、関連インデックスを付け替えます。
+ *
+ * @param db kysely のインスタンスです。
+ */
+async function up002(db: Kysely<SqliteWasmDatabase>): Promise<void> {
+  await db.schema.dropIndex("objects_content_type_index").execute();
+  await db.schema.dropIndex("objects_created_at_index").execute();
+  await db.schema.alterTable("objects").renameTo("journal").execute();
+  await db.schema
+    .createIndex("journal_content_type_index")
+    .on("journal")
+    .column("content_type")
+    .execute();
+  await db.schema
+    .createIndex("journal_created_at_index")
+    .on("journal")
+    .column("created_at")
+    .execute();
+}
+
+/**
+ * `journal` テーブルを `objects` に戻し、関連インデックスを付け替えます。
+ *
+ * @param db kysely のインスタンスです。
+ */
+async function down002(db: Kysely<SqliteWasmDatabase>): Promise<void> {
+  await db.schema.dropIndex("journal_content_type_index").execute();
+  await db.schema.dropIndex("journal_created_at_index").execute();
+  await db.schema.alterTable("journal").renameTo("objects").execute();
+  await db.schema
+    .createIndex("objects_content_type_index")
+    .on("objects")
+    .column("content_type")
+    .execute();
+  await db.schema
+    .createIndex("objects_created_at_index")
+    .on("objects")
+    .column("created_at")
+    .execute();
+}
+
+/**
  * 適用するマイグレーションの一覧です。キー名の辞書順で実行します。
  */
 export const MIGRATIONS: Record<string, Migration> = {
   "001_create_objects": {
     up: up001,
     down: down001,
+  },
+  "002_rename_objects_to_journal": {
+    up: up002,
+    down: down002,
   },
 };
 

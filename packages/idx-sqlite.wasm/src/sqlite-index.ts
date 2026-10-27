@@ -206,21 +206,21 @@ function parseCursor(cursor: string | null | undefined): number {
  * @returns 絞り込んだクエリーです。
  */
 function withMetadataFilter(
-  query: SelectQueryBuilder<SqliteWasmDatabase, "objects", ObjectRow>,
+  query: SelectQueryBuilder<SqliteWasmDatabase, "journal", ObjectRow>,
   filter: MetadataFilter | undefined,
-): SelectQueryBuilder<SqliteWasmDatabase, "objects", ObjectRow> {
+): SelectQueryBuilder<SqliteWasmDatabase, "journal", ObjectRow> {
   let filtered = query;
 
   if (filter?.contentTypes !== undefined && filter.contentTypes.length > 0) {
-    filtered = filtered.where("objects.content_type", "in", [...filter.contentTypes]);
+    filtered = filtered.where("journal.content_type", "in", [...filter.contentTypes]);
   }
 
   if (filter?.createdAfter !== undefined) {
-    filtered = filtered.where("objects.created_at", ">=", filter.createdAfter);
+    filtered = filtered.where("journal.created_at", ">=", filter.createdAfter);
   }
 
   if (filter?.createdBefore !== undefined) {
-    filtered = filtered.where("objects.created_at", "<=", filter.createdBefore);
+    filtered = filtered.where("journal.created_at", "<=", filter.createdBefore);
   }
 
   if (filter?.fullText !== undefined && filter.fullText !== "") {
@@ -232,7 +232,7 @@ function withMetadataFilter(
 
   if (filter?.tagsAll !== undefined && filter.tagsAll.length > 0) {
     const tags = [...new Set(filter.tagsAll)];
-    filtered = filtered.where("objects.key", "in", (inner) =>
+    filtered = filtered.where("journal.key", "in", (inner) =>
       inner
         .selectFrom("object_tags")
         .select("object_tags.key")
@@ -244,7 +244,7 @@ function withMetadataFilter(
 
   if (filter?.tagsAny !== undefined && filter.tagsAny.length > 0) {
     const tags = [...new Set(filter.tagsAny)];
-    filtered = filtered.where("objects.key", "in", (inner) =>
+    filtered = filtered.where("journal.key", "in", (inner) =>
       inner
         .selectFrom("object_tags")
         .select("object_tags.key")
@@ -421,7 +421,7 @@ export class SqliteWasmIndex implements IObjectIndex {
     };
     await kysely.transaction().execute(async (transaction) => {
       await transaction
-        .insertInto("objects")
+        .insertInto("journal")
         .values(row)
         .onConflict((conflict) =>
           conflict.column("key").doUpdateSet({
@@ -471,7 +471,7 @@ export class SqliteWasmIndex implements IObjectIndex {
 
     const kysely = this.#requireOpen("get");
     const row = await kysely
-      .selectFrom("objects")
+      .selectFrom("journal")
       .selectAll()
       .where("key", "=", c.key.key)
       .executeTakeFirst();
@@ -499,7 +499,7 @@ export class SqliteWasmIndex implements IObjectIndex {
 
     const kysely = this.#requireOpen("delete");
     const result = await kysely
-      .deleteFrom("objects")
+      .deleteFrom("journal")
       .where("key", "=", c.key.key)
       .executeTakeFirst();
     const deleted = result.numDeletedRows;
@@ -535,7 +535,7 @@ export class SqliteWasmIndex implements IObjectIndex {
     const userMetadataFilter = c.filter?.userMetadata;
 
     if (userMetadataFilter !== undefined) {
-      const matched = await withMetadataFilter(kysely.selectFrom("objects").selectAll(), c.filter)
+      const matched = await withMetadataFilter(kysely.selectFrom("journal").selectAll(), c.filter)
         .orderBy("key")
         .execute();
       const candidates = matched
@@ -547,7 +547,7 @@ export class SqliteWasmIndex implements IObjectIndex {
       return await this.#toListResult<TUserMetadata>(kysely, candidates, limit, offset);
     }
 
-    const candidates = await withMetadataFilter(kysely.selectFrom("objects").selectAll(), c.filter)
+    const candidates = await withMetadataFilter(kysely.selectFrom("journal").selectAll(), c.filter)
       .orderBy("key")
       .limit(limit + 1)
       .offset(offset)
@@ -576,15 +576,15 @@ export class SqliteWasmIndex implements IObjectIndex {
       return [];
     }
 
-    const candidates = withMetadataFilter(kysely.selectFrom("objects").selectAll(), c.filter).where(
-      "objects.embedding",
+    const candidates = withMetadataFilter(kysely.selectFrom("journal").selectAll(), c.filter).where(
+      "journal.embedding",
       "is not",
       null,
     );
     const rows = await (
       c.embeddingModel === undefined
         ? candidates
-        : candidates.where("objects.embedding_model", "=", c.embeddingModel)
+        : candidates.where("journal.embedding_model", "=", c.embeddingModel)
     ).execute();
     const metric = c.metric ?? "cosine";
     const scored: {
@@ -731,7 +731,7 @@ export class SqliteWasmIndex implements IObjectIndex {
   /**
    * 行の埋め込みを復号し、次元数を検証します。
    *
-   * @param row `objects` テーブルの行です。
+   * @param row `journal` テーブルの行です。
    *
    * @returns 復号した埋め込みベクトル、埋め込みがない場合は undefined です。
    */
@@ -755,7 +755,7 @@ export class SqliteWasmIndex implements IObjectIndex {
   /**
    * 行をオブジェクトに変換します。
    *
-   * @param row `objects` テーブルの行です。
+   * @param row `journal` テーブルの行です。
    * @param tags タグの一覧です。
    * @param operation 実行中の操作名です。
    * @param embedding 事前に復号した埋め込みベクトルです。省略時は行から復号します。

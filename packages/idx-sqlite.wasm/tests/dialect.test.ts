@@ -24,50 +24,46 @@ function requireMigration(name: string): Migration {
 }
 
 describe("SqliteWasmDialect", () => {
-  test("外部キーを有効にし、親の削除で子をカスケード削除する", async ({ expect }) => {
+  test("objects を journal に改名しても外部キーを維持する", async ({ expect }) => {
     // 準備：
-    const migration = requireMigration("001_create_objects");
+    const migration001 = requireMigration("001_create_objects");
+    const migration002 = requireMigration("002_rename_objects_to_journal");
     const sqlite3 = await initSqliteWasm();
     const db = new Kysely<SqliteWasmDatabase>({
       dialect: new SqliteWasmDialect(new sqlite3.oo1.DB(":memory:", "c")),
     });
 
     try {
-      await migration.up(db);
-      await db
-        .insertInto("objects")
-        .values({
-          key: "k1",
-          hash: null,
-          size: 3,
-          embedding: null,
-          created_at: "2026-01-01T00:00:00Z",
-          updated_at: "2026-01-01T00:00:00Z",
-          description: null,
-          content_type: "text/plain",
-          user_metadata: "{}",
-          embedding_dims: null,
-          embedding_model: null,
-          embedding_source: null,
-        })
-        .execute();
-      await db
-        .insertInto("object_tags")
-        .values({
-          key: "k1",
-          tag: "red",
-        })
-        .execute();
+      await migration001.up(db);
+      await sql`
+        insert into objects (
+          key,
+          content_type,
+          size,
+          user_metadata,
+          created_at,
+          updated_at
+        )
+        values ('k1', 'text/plain', 3, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+      `.execute(db);
+      await sql`
+        insert into object_tags (key, tag)
+        values ('k1', 'red')
+      `.execute(db);
+
+      await migration002.up(db);
 
       // 実行：
+      const journal = await db.selectFrom("journal").selectAll().execute();
       const pragma = await sql<{ foreign_keys: number }>`pragma foreign_keys`.execute(db);
 
-      await db.deleteFrom("objects").where("key", "=", "k1").execute();
+      await db.deleteFrom("journal").where("key", "=", "k1").execute();
       const children = await sql<{ count: number }>`
         select count(*) as count from object_tags
       `.execute(db);
 
       // 検証：
+      expect(journal).toHaveLength(1);
       expect(pragma.rows[0]?.foreign_keys).toBe(1);
       expect(children.rows[0]?.count).toBe(0);
     } finally {
