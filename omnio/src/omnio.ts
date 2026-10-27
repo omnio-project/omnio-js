@@ -666,6 +666,101 @@ export class Omnio {
   }
 
   /**
+   * オブジェクトを複製します。
+   *
+   * 実体のバイト列とメタデータを複製先へコピーします。
+   * 複製先が既に存在する場合は上書きし、元の作成時刻と実体 ID を引き継ぎます。
+   * 同じキーを指定した場合は何もせず、元のオブジェクトを返します。
+   *
+   * @param sourceKey 複製元のキーです。
+   * @param destinationKey 複製先のキーです。
+   * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
+   *
+   * @returns 複製したオブジェクト、複製元が存在しない場合は null です。
+   */
+  public async copyObject<TUserMetadata = Record<string, unknown>>(
+    sourceKey: OmnioKey | string,
+    destinationKey: OmnioKey | string,
+    signal?: AbortSignal,
+  ): Promise<OmnioObject<TUserMetadata> | null> {
+    this.#requireOpen("copyObject");
+
+    const sourceObjectKey = toOmnioKey(v.parse(OmnioKeySchema, sourceKey));
+    const destinationObjectKey = toOmnioKey(v.parse(OmnioKeySchema, destinationKey));
+    const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
+    active.throwIfAborted();
+
+    using _lock = await asyncmux.readonly(this, active);
+
+    const source = await this.#index.get<TUserMetadata>({
+      key: sourceObjectKey,
+      action: "get",
+      signal: active,
+    });
+
+    if (source === null) {
+      return null;
+    }
+
+    if (sourceObjectKey.key === destinationObjectKey.key) {
+      return source;
+    }
+
+    const bytes = await this.#readEntityBytes(source.entityId, active);
+
+    if (bytes === null) {
+      return null;
+    }
+
+    const existing = await this.#index.get<TUserMetadata>({
+      key: destinationObjectKey,
+      action: "get",
+      signal: active,
+    });
+    const now = new Date().toISOString();
+    const entityId =
+      existing === null || existing.entityId === "" ? crypto.randomUUID() : existing.entityId;
+    const previousBytes =
+      existing === null
+        ? undefined
+        : ((await this.#readEntityBytes(existing.entityId, active)) ?? undefined);
+
+    try {
+      await this.#entity.set(entityId, bytes, { signal: active });
+
+      const object: OmnioObject<TUserMetadata> = {
+        key: destinationObjectKey,
+        tags: [...source.tags],
+        system: {
+          hash: source.system.hash,
+          size: bytes.byteLength,
+          createdAt: existing?.system.createdAt ?? now,
+          updatedAt: now,
+          contentType: source.system.contentType,
+          hashAlgorithm: source.system.hashAlgorithm,
+        },
+        entityId,
+        embedding: source.embedding,
+        description: source.description,
+        userMetadata: source.userMetadata,
+        embeddingDims: source.embeddingDims,
+        embeddingModel: source.embeddingModel,
+        embeddingSource: source.embeddingSource,
+      };
+      await this.#index.upsert({
+        action: "upsert",
+        object,
+        signal: active,
+      });
+
+      return object;
+    } catch (ex) {
+      await this.#restoreEntity(entityId, previousBytes).catch(() => undefined);
+      throw ex;
+    }
+  }
+
+  /**
    * オブジェクトの変更可能なメタデータだけを更新します。
    *
    * 実体ストレージーは変更しません。サイズ、ハッシュ、作成時刻、実体 ID は更新できません。

@@ -863,6 +863,130 @@ describe("putObject と getObject", () => {
   });
 });
 
+describe("copyObject", () => {
+  test("実体とメタデータを複製する", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    const source = await omnio.putObject({
+      key: "source",
+      data: new Uint8Array([1, 2, 3]),
+      tags: ["pet"],
+      contentType: "text/plain",
+      description: "cat on the mat",
+      userMetadata: { genre: "test" },
+    });
+
+    // 実行：
+    const copied = await omnio.copyObject("source", "dest", signal);
+
+    // 検証：
+    expect(copied?.key.key).toBe("dest");
+    expect(copied?.entityId).not.toBe(source.entityId);
+    expect(copied?.system.size).toBe(source.system.size);
+    expect(copied?.system.hash).toBe(source.system.hash);
+    expect(copied?.system.hashAlgorithm).toBe(source.system.hashAlgorithm);
+    expect(copied?.system.contentType).toBe(source.system.contentType);
+    expect(copied?.description).toBe(source.description);
+    expect(copied?.tags).toStrictEqual(source.tags);
+    expect(copied?.userMetadata).toStrictEqual(source.userMetadata);
+    expect(copied?.embedding).toStrictEqual(source.embedding);
+    expect(await omnio.getObject("source", signal)).toStrictEqual(new Uint8Array([1, 2, 3]));
+    expect(await omnio.getObject("dest", signal)).toStrictEqual(new Uint8Array([1, 2, 3]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("複製先が存在する場合は上書きする", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    await omnio.putObject({
+      key: "source",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+
+    const destination = await omnio.putObject({
+      key: "dest",
+      data: new Uint8Array([9]),
+      contentType: "application/octet-stream",
+      userMetadata: { version: 1 },
+    });
+
+    // 実行：
+    const copied = await omnio.copyObject("source", "dest", signal);
+
+    // 検証：
+    expect(copied?.entityId).toBe(destination.entityId);
+    expect(copied?.system.createdAt).toBe(destination.system.createdAt);
+    expect(copied?.system.contentType).toBe("text/plain");
+    expect(copied?.userMetadata).toStrictEqual({});
+
+    expect(await omnio.getObject("dest", signal)).toStrictEqual(new Uint8Array([1]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("同じキーを指定した場合は元のオブジェクトを返す", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    const source = await omnio.putObject({
+      key: "source",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+
+    // 実行：
+    const copied = await omnio.copyObject("source", "source", signal);
+
+    // 検証：
+    expect(copied).toStrictEqual(source);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("複製元が存在しない場合は null を返す", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+
+    // 実行と検証：
+    expect(await omnio.copyObject("missing", "dest", signal)).toBeNull();
+    expect(await omnio.hasObject("dest", signal)).toBe(false);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("索引保存に失敗したら複製先の実体を元に戻す", async ({ expect, signal }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index);
+    await omnio.putObject({
+      key: "source",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    await omnio.putObject({
+      key: "dest",
+      data: new Uint8Array([9]),
+      contentType: "text/plain",
+    });
+
+    const failure = new Error("upsert failed");
+    using _upsert = vi.spyOn(index, "upsert").mockRejectedValueOnce(failure);
+
+    // 実行と検証：
+    await expect(omnio.copyObject("source", "dest", signal)).rejects.toBe(failure);
+
+    expect(await omnio.getObject("dest", signal)).toStrictEqual(new Uint8Array([9]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+});
+
 describe("updateObjectMetadata", () => {
   test("変更可能なメタデータだけを更新する", async ({ expect, signal }) => {
     // 準備：
