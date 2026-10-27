@@ -46,7 +46,7 @@ jobs:
       - name: "mise をセットアップ"
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
 
-      - name: "依存関係をインストール（ルート）"
+      - name: "依存関係をインストール"
         run: pnpm i
 
       - name: "内部依存パッケージのビルド"
