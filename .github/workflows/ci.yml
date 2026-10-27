@@ -32,6 +32,18 @@ jobs:
             directory: "omnio"
     timeout-minutes: 30
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: omnio
+        options: >-
+          --health-cmd "pg_isready -U postgres -d omnio"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     container:
       # pnpm-workspace.yaml の playwright と同じバージョンに合わせます。
       # ブラウザーとシステム依存関係が導入済みのため、apt 処理は不要です。
@@ -163,6 +175,7 @@ jobs:
         env:
           # Firefox は HOME が現在のユーザー所有でないと起動できません。
           HOME: /root
+          DATABASE_URL: postgres://postgres:postgres@postgres:5432/omnio
         working-directory: ${{ matrix.package.directory }}
 
       - name: "カバレッジをアップロード"

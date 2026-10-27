@@ -1,7 +1,7 @@
 {
   "name": "@omniojs/idx-postgresql.node",
   "version": "0.0.0",
-  "description": "",
+  "description": "PostgreSQL による Omnio.js 用 ObjectIndex です。",
   "homepage": "https://omnio-project.github.io/omnio-js/",
   "license": "MIT",
   "repository": {
@@ -26,7 +26,15 @@
   "scripts": {
     "build": "vp -C .config pack"
   },
+  "dependencies": {
+    "@omniojs/core": "workspace:*",
+    "asyncmux": "^0.0.12",
+    "kysely": "^0.29.7",
+    "pg": "^8.23.1",
+    "valibot": "^1.0.0"
+  },
   "devDependencies": {
+    "@types/pg": "^8.23.1",
     "@vitest/coverage-v8": "catalog:",
     "vite-plus": "catalog:"
   },
