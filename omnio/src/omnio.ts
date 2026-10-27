@@ -404,8 +404,9 @@ const OptionalListObjectsOptionsSchema = v.optional(ListObjectsOptionsSchema);
  *
  * 実体の保存先に unikvs ビルダー、メタデータとベクトルの保存先に `IObjectIndex`、自然言語検索に `IEmbedder` を使います。
  *
- * すべての非同期メソッドは `asyncmux` によりインスタンス単位で排他します。
+ * `open` と `close` は `asyncmux` の排他ロックを、それ以外のメソッドは `asyncmux.readonly` の共有ロックを使います。
  * データの整合性のためではなく、`open` や `close` などのライフサイクルと操作が同時実行されないためです。
+ * その他の操作同士は共有ロックのため並行して実行できます。
  *
  * `open` と `close` は、シグナルを省略した場合に 30 秒でタイムアウトします。指定した場合はそのシグナルに従います。
  * それ以外のメソッドは、呼び出し側のシグナルと `close` 時に中断されるライフサイクルシグナルを合成し、先に中断された方に従います。
@@ -561,7 +562,7 @@ export class Omnio {
     const active = this.#activeSignal(parsed.signal);
     active.throwIfAborted();
 
-    using _lock = await asyncmux(this, active);
+    using _lock = await asyncmux.readonly(this, active);
 
     const key = toOmnioKey(parsed.key);
     const bytes = await toBytes(parsed.data);
@@ -643,7 +644,7 @@ export class Omnio {
     const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
-    using _lock = await asyncmux(this, active);
+    using _lock = await asyncmux.readonly(this, active);
 
     const object = await this.#index.get<unknown>({
       key: objectKey,
@@ -678,7 +679,7 @@ export class Omnio {
     const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
-    using _lock = await asyncmux(this, active);
+    using _lock = await asyncmux.readonly(this, active);
 
     const object = await this.#index.get<unknown>({
       key: objectKey,
@@ -711,7 +712,7 @@ export class Omnio {
     const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
-    using _lock = await asyncmux(this, active);
+    using _lock = await asyncmux.readonly(this, active);
 
     return await this.#index.get<TUserMetadata>({
       key: objectKey,
@@ -737,7 +738,7 @@ export class Omnio {
     const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
-    using _lock = await asyncmux(this, active);
+    using _lock = await asyncmux.readonly(this, active);
 
     return await this.#index.has({
       key: objectKey,
@@ -761,7 +762,7 @@ export class Omnio {
     const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
-    using _lock = await asyncmux(this, active);
+    using _lock = await asyncmux.readonly(this, active);
 
     const object = await this.#index.get<unknown>({
       key: objectKey,
@@ -808,7 +809,7 @@ export class Omnio {
     const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
-    using _lock = await asyncmux(this, active);
+    using _lock = await asyncmux.readonly(this, active);
 
     return await this.#index.list<TUserMetadata>({
       limit: parsedOptions?.limit,
@@ -835,7 +836,7 @@ export class Omnio {
     const active = this.#activeSignal(parsed.signal);
     active.throwIfAborted();
 
-    using _lock = await asyncmux(this, active);
+    using _lock = await asyncmux.readonly(this, active);
 
     const query = parsed.query;
     let vector: Float32Array;
@@ -903,7 +904,7 @@ export class Omnio {
     const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
-    using _lock = await asyncmux(this, active);
+    using _lock = await asyncmux.readonly(this, active);
 
     const object = await this.#index.get<TUserMetadata>({
       key: objectKey,
@@ -1024,7 +1025,7 @@ export class Omnio {
         this.#lifecycle.signal,
         AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
       ]);
-      using _lock = await asyncmux(this, signal);
+      using _lock = await asyncmux.readonly(this, signal);
 
       if (!this.#opened) {
         return;
@@ -1116,7 +1117,7 @@ export class Omnio {
 
       try {
         const signal = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
-        using _lock = await asyncmux(this, signal);
+        using _lock = await asyncmux.readonly(this, signal);
 
         if (!this.#opened) {
           return;

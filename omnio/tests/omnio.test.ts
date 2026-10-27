@@ -394,6 +394,68 @@ describe("open と close", () => {
   });
 });
 
+describe("排他制御", () => {
+  test("読み取り操作は並行して実行できる", async ({ expect, signal }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index);
+    const firstStarted = Promise.withResolvers<void>();
+    const secondStarted = Promise.withResolvers<void>();
+    using get = vi
+      .spyOn(index, "get")
+      .mockImplementationOnce(async () => {
+        firstStarted.resolve();
+        await secondStarted.promise;
+
+        return null;
+      })
+      .mockImplementationOnce(async () => {
+        secondStarted.resolve();
+        await firstStarted.promise;
+
+        return null;
+      });
+
+    // 実行：
+    const [first, second] = await Promise.all([
+      omnio.headObject("a", signal),
+      omnio.headObject("b", signal),
+    ]);
+
+    // 検証：
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(first).toBeNull();
+    expect(second).toBeNull();
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("close は実行中の操作の完了を待つ", async ({ expect, signal }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index);
+    const release = Promise.withResolvers<void>();
+    using _get = vi.spyOn(index, "get").mockImplementation(async () => {
+      await release.promise;
+
+      return null;
+    });
+
+    // 実行：
+    const loading = omnio.headObject("k", signal);
+    const closing = omnio.close(signal);
+    const opening = omnio.isOpen;
+    release.resolve();
+    await loading;
+    await closing;
+
+    // 検証：
+    expect(opening).toBe(true);
+    expect(omnio.isOpen).toBe(false);
+  });
+});
+
 describe("dirty 再インデックス", () => {
   test("open 時に古いモデルの埋め込みをバックグラウンドで作り直す", async ({ expect, signal }) => {
     // 準備：
