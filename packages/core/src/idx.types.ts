@@ -40,6 +40,17 @@ export interface IGetContext extends IActionContext {
 }
 
 /**
+ * オブジェクトのメタデータが存在するか確認する操作のコンテキストです。
+ */
+export interface IHasContext extends IActionContext {
+  /** 操作の種別です。 */
+  readonly action: "has";
+
+  /** 確認するオブジェクトのキーです。 */
+  readonly key: OmnioKey;
+}
+
+/**
  * オブジェクトを削除する操作のコンテキストです。
  */
 export interface IDeleteContext extends IActionContext {
@@ -158,6 +169,11 @@ export namespace IObjectIndex {
   export type GetContext = IGetContext;
 
   /**
+   * オブジェクトのメタデータが存在するか確認する操作のコンテキストです。
+   */
+  export type HasContext = IHasContext;
+
+  /**
    * 一覧する操作のコンテキストです。
    */
   export type ListContext = IListContext;
@@ -262,6 +278,18 @@ export interface IObjectIndex {
    * @returns 取得したオブジェクト、存在しない場合は null を解決する Promise です。
    */
   get<TUserMetadata>(c: IObjectIndex.GetContext): MaybePromise<OmnioObject<TUserMetadata> | null>;
+
+  /**
+   * オブジェクトのメタデータが存在するかを確認します。
+   *
+   * メタデータの取得や実体の読み取りを行わない、軽量な存在確認です。
+   * 削除フラグが立ったオブジェクトは存在しないものとして扱います。
+   *
+   * @param c 存在確認する操作のコンテキストです。
+   *
+   * @returns 存在する場合は true、存在しない場合は false を解決する Promise です。
+   */
+  has(c: IObjectIndex.HasContext): MaybePromise<boolean>;
 
   /**
    * オブジェクトに削除フラグを立てます。

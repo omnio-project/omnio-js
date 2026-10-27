@@ -801,6 +801,46 @@ describe("putObject と getObject", () => {
   });
 });
 
+describe("hasObject", () => {
+  test("索引に存在するかを返す", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+
+    // 実行と検証：
+    expect(await omnio.hasObject("k", signal)).toBe(false);
+    await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    expect(await omnio.hasObject("k", signal)).toBe(true);
+    await omnio.deleteObject("k", signal);
+    expect(await omnio.hasObject("k", signal)).toBe(false);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("実体ストレージーは参照しない", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const omnio = await createTestOmnio(signal, new SqliteWasmIndex(), builder);
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1, 2, 3]),
+      contentType: "text/plain",
+    });
+    await getEntity().delete(stored.entityId, { signal });
+
+    // 実行と検証：
+    expect(await omnio.getObject("k", signal)).toBeNull();
+    expect(await omnio.hasObject("k", signal)).toBe(true);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+});
+
 describe("deleteObject", () => {
   test("削除すると取得できなくなる", async ({ expect, signal }) => {
     // 準備：

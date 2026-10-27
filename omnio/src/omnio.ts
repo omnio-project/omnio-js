@@ -308,6 +308,7 @@ const IObjectIndexSchema = v.custom<IObjectIndex>((input) => {
       "close",
       "upsert",
       "get",
+      "has",
       "delete",
       "list",
       "search",
@@ -715,6 +716,32 @@ export class Omnio {
     return await this.#index.get<TUserMetadata>({
       key: objectKey,
       action: "get",
+      signal: active,
+    });
+  }
+
+  /**
+   * オブジェクトのメタデータが存在するかを確認します。
+   *
+   * 実体ストレージーは参照しません。削除フラグが立ったオブジェクトは存在しないものとして扱います。
+   *
+   * @param key 確認するキーです。
+   * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
+   *
+   * @returns メタデータが存在する場合は true、存在しない場合は false です。
+   */
+  public async hasObject(key: OmnioKey | string, signal?: AbortSignal): Promise<boolean> {
+    this.#requireOpen("hasObject");
+
+    const objectKey = toOmnioKey(v.parse(OmnioKeySchema, key));
+    const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
+    active.throwIfAborted();
+
+    using _lock = await asyncmux(this, active);
+
+    return await this.#index.has({
+      key: objectKey,
+      action: "has",
       signal: active,
     });
   }

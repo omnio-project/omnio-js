@@ -8,6 +8,7 @@ export type ContextAction =
   | "embedMany"
   | "embedText"
   | "get"
+  | "has"
   | "list"
   | "listDirty"
   | "markDirty"

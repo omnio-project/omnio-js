@@ -503,6 +503,29 @@ export class SqliteWasmIndex implements IObjectIndex {
   }
 
   /**
+   * オブジェクトのメタデータが存在するかを確認します。
+   *
+   * @param c 存在確認する操作のコンテキストです。
+   *
+   * @returns 存在する場合は true、存在しない場合は false です。
+   */
+  public async has(c: IObjectIndex.HasContext): Promise<boolean> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux(this, c.signal);
+
+    const kysely = this.#requireOpen("has");
+    const row = await kysely
+      .selectFrom("journal")
+      .select("key")
+      .where("key", "=", c.key.key)
+      .where("record_type", "is not", "DELETE")
+      .executeTakeFirst();
+
+    return row !== undefined;
+  }
+
+  /**
    * オブジェクトに削除フラグを立てます。
    *
    * @param c 削除する操作のコンテキストです。

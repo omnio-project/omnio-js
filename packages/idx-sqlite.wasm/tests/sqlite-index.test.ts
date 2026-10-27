@@ -489,6 +489,52 @@ describe("upsert と get", () => {
   });
 });
 
+describe("has", () => {
+  test("存在する場合だけ true を返す", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: createObject("k1"),
+      signal,
+    });
+
+    // 実行と検証：
+    expect(
+      await index.has({
+        key: OmnioKey.parse("k1"),
+        action: "has",
+        signal,
+      }),
+    ).toBe(true);
+    expect(
+      await index.has({
+        key: OmnioKey.parse("missing"),
+        action: "has",
+        signal,
+      }),
+    ).toBe(false);
+    await index.delete({
+      key: OmnioKey.parse("k1"),
+      action: "delete",
+      signal,
+    });
+    expect(
+      await index.has({
+        key: OmnioKey.parse("k1"),
+        action: "has",
+        signal,
+      }),
+    ).toBe(false);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+});
+
 describe("delete", () => {
   test("削除すると取得できなくなりタグも消える", async ({ expect, signal }) => {
     // 準備：
