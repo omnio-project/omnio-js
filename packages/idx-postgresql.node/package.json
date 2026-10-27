@@ -1,0 +1,34 @@
+{
+  "name": "@omniojs/idx-postgresql.node",
+  "version": "0.0.0",
+  "description": "",
+  "homepage": "https://omnio-project.github.io/omnio-js/",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/omnio-project/omnio-js",
+    "directory": "packages/idx-postgresql.node"
+  },
+  "files": [
+    "dist",
+    "src",
+    "package.json",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "vp -C .config pack"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "readme": "README.md"
+}

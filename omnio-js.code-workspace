@@ -10,16 +10,20 @@
       "path": "packages/core",
     },
     {
-      "name": "@omniojs/idx-pglite",
-      "path": "packages/idx-pglite",
-    },
-    {
       "name": "@omniojs/idx-sqlite.wasm",
       "path": "packages/idx-sqlite.wasm",
     },
     {
       "name": "@omniojs/idx-sqlite.node",
       "path": "packages/idx-sqlite.node",
+    },
+    {
+      "name": "@omniojs/idx-pglite",
+      "path": "packages/idx-pglite",
+    },
+    {
+      "name": "@omniojs/idx-postgresql.node",
+      "path": "packages/idx-postgresql.node",
     },
     {
       "name": "@omniojs/emb-gemma2",

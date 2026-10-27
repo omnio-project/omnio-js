@@ -4,6 +4,7 @@ packages:
     "omnio",
     "packages/emb-gemma2",
     "packages/idx-pglite",
+    "packages/idx-postgresql.node",
     "packages/idx-sqlite.node",
     "packages/idx-sqlite.wasm",
     "website",
