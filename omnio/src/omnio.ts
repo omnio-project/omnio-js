@@ -1,3 +1,4 @@
+// oxlint-disable import/no-namespace
 import {
   type IEmbedder,
   type EmbedSource,
@@ -6,11 +7,17 @@ import {
   type IndexedObject,
   type MetadataFilter,
   OmnioKey,
+  TagsSchema,
   DbNotOpenError,
+  TimestampSchema,
+  ContentTypeSchema,
+  DescriptionSchema,
+  UserMetadataSchema,
   OperationAbortedError,
 } from "@omniojs/core";
 import { asyncmux } from "asyncmux";
 import { type IValueStream, KeyNotFoundError } from "unikvs";
+import * as v from "valibot";
 
 import type { IOmnioEntity } from "./entity.js";
 
@@ -225,6 +232,155 @@ async function nullIfKeyNotFound<T>(load: () => Promise<T>): Promise<T | null> {
 }
 
 /**
+ * 非 null のオブジェクトかを確認します。
+ *
+ * @param value 確認する値です。
+ *
+ * @returns 非 null のオブジェクトの場合は true、そうでない場合は false です。
+ */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * 指定したメソッドを持つオブジェクトかを確認します。
+ *
+ * @param value 確認する値です。
+ * @param names メソッド名の一覧です。
+ *
+ * @returns すべてのメソッドを持つ場合は true、そうでない場合は false です。
+ */
+function hasFunctions(value: unknown, names: readonly string[]): value is Record<string, unknown> {
+  return isObject(value) && names.every((name) => typeof value[name] === "function");
+}
+
+/** 省略可能な中断シグナルのスキーマです。 */
+const OptionalAbortSignalSchema = v.optional(v.instance(AbortSignal));
+
+/** オブジェクトキーのスキーマです。文字列の内容は OmnioKey で検証します。 */
+const OmnioKeySchema = v.union([v.string(), v.instance(OmnioKey)]);
+
+/** バイト列のスキーマです。 */
+const Uint8ArraySchema = v.instance(Uint8Array);
+
+/** Blob のスキーマです。 */
+const BlobSchema = v.instance(Blob);
+
+/** ReadableStream のスキーマです。 */
+const ReadableStreamSchema = v.custom<ReadableStream<Uint8Array>>(
+  (input) => input instanceof ReadableStream,
+);
+
+/** 保存データのスキーマです。 */
+const DataSchema = v.union([Uint8ArraySchema, BlobSchema, ReadableStreamSchema]);
+
+/** 空でない埋め込みベクトルのスキーマです。 */
+const EmbeddingSchema = v.pipe(
+  v.instance(Float32Array),
+  v.check((input) => input.length > 0),
+);
+
+/** 埋め込み器の能力情報を検証するスキーマです。 */
+const EmbedderInfoSchema = v.object({
+  dims: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
+  name: v.pipe(v.string(), v.minLength(1)),
+  maxTokens: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(1))),
+  modalities: v.array(v.string()),
+  normalized: v.boolean(),
+  multilingual: v.boolean(),
+});
+
+/** 実体ストレージーのスキーマです。 */
+const IOmnioEntitySchema = v.custom<IOmnioEntity>((input) =>
+  hasFunctions(input, ["open", "close", "has", "get", "set", "delete", "stream"]),
+);
+
+/** インデックスのスキーマです。 */
+const IObjectIndexSchema = v.custom<IObjectIndex>((input) => {
+  if (!hasFunctions(input, ["open", "close", "upsert", "get", "delete", "list", "search"])) {
+    return false;
+  }
+
+  return typeof input["isOpen"] === "boolean";
+});
+
+/** 埋め込み器のスキーマです。 */
+const IEmbedderSchema = v.custom<IEmbedder>((input) => {
+  if (!hasFunctions(input, ["embed", "embedMany", "embedText", "supports"])) {
+    return false;
+  }
+
+  const info = v.safeParse(EmbedderInfoSchema, input["info"]);
+
+  return info.success && info.output.modalities.includes("text");
+});
+
+/** `Omnio` のコンストラクター引数を検証するスキーマです。 */
+const OmnioOptionsSchema = v.object({
+  index: IObjectIndexSchema,
+  entity: IOmnioEntitySchema,
+  embedder: IEmbedderSchema,
+});
+
+/** メタデータの絞り込み条件を検証するスキーマです。 */
+const MetadataFilterSchema = v.object({
+  tagsAll: v.optional(TagsSchema),
+  tagsAny: v.optional(TagsSchema),
+  fullText: v.optional(v.string()),
+  contentTypes: v.optional(v.array(ContentTypeSchema)),
+  createdAfter: v.optional(TimestampSchema),
+  userMetadata: v.optional(v.record(v.string(), v.unknown())),
+  createdBefore: v.optional(TimestampSchema),
+});
+
+/** オブジェクト保存の入力を検証するスキーマです。 */
+const PutObjectInputSchema = v.object({
+  key: OmnioKeySchema,
+  data: DataSchema,
+  tags: v.optional(TagsSchema),
+  embed: v.optional(v.boolean()),
+  signal: OptionalAbortSignalSchema,
+  embedding: v.optional(EmbeddingSchema),
+  contentType: ContentTypeSchema,
+  description: v.optional(DescriptionSchema),
+  userMetadata: v.optional(UserMetadataSchema),
+});
+
+/** 意味検索のクエリーを検証するスキーマです。 */
+const ObjectSearchQuerySchema = v.union([
+  v.object({
+    text: v.pipe(v.string(), v.minLength(1)),
+  }),
+  v.object({
+    image: v.union([Uint8ArraySchema, BlobSchema]),
+    mimeType: v.optional(v.pipe(v.string(), v.minLength(1))),
+  }),
+  v.object({
+    vector: EmbeddingSchema,
+  }),
+]);
+
+/** 意味検索の入力を検証するスキーマです。 */
+const SearchObjectsInputSchema = v.object({
+  topK: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(0))),
+  query: ObjectSearchQuerySchema,
+  filter: v.optional(MetadataFilterSchema),
+  signal: OptionalAbortSignalSchema,
+  minScore: v.optional(v.pipe(v.number(), v.finite())),
+  includeEmbedding: v.optional(v.boolean()),
+});
+
+/** 一覧のオプションを検証するスキーマです。 */
+const ListObjectsOptionsSchema = v.object({
+  limit: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(0))),
+  cursor: v.optional(v.nullable(v.string())),
+  filter: v.optional(MetadataFilterSchema),
+});
+
+/** 省略可能な一覧オプションのスキーマです。 */
+const OptionalListObjectsOptionsSchema = v.optional(ListObjectsOptionsSchema);
+
+/**
  * オブジェクトストレージーのように動作する IO 層のファサードです。
  *
  * 実体の保存先に unikvs、メタデータとベクトルの保存先に `IObjectIndex`、自然言語検索に `IEmbedder` を使います。
@@ -235,6 +391,8 @@ async function nullIfKeyNotFound<T>(load: () => Promise<T>): Promise<T | null> {
  * `open` と `close` は、シグナルを省略した場合に 30 秒でタイムアウトします。指定した場合はそのシグナルに従います。
  * それ以外のメソッドは、呼び出し側のシグナルと `close` 時に中断されるライフサイクルシグナルを合成し、先に中断された方に従います。
  * シグナルを省略した場合はライフサイクルシグナルを使います。
+ *
+ * 公開メソッドの入力値は valibot により検証します。
  */
 export class Omnio {
   readonly #entity: IOmnioEntity;
@@ -251,9 +409,11 @@ export class Omnio {
    * @param options データベースと埋め込み、ストレージーです。すべて必須です。
    */
   public constructor(options: OmnioOptions) {
-    this.#entity = options.entity;
-    this.#index = options.index;
-    this.#embedder = options.embedder;
+    const parsed = v.parse(OmnioOptionsSchema, options);
+    this.#entity = parsed.entity;
+    this.#index = parsed.index;
+    this.#embedder = parsed.embedder;
+
     this.#lifecycle = new AbortController();
     this.#opened = false;
   }
@@ -271,7 +431,7 @@ export class Omnio {
    * @param signal 処理を中断するための中断シグナルです。省略時は 30 秒でタイムアウトします。
    */
   public async open(signal?: AbortSignal): Promise<void> {
-    const active = withLifecycleTimeout(signal);
+    const active = withLifecycleTimeout(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
@@ -303,7 +463,7 @@ export class Omnio {
    * @param signal 処理を中断するための中断シグナルです。省略時は 30 秒でタイムアウトします。
    */
   public async close(signal?: AbortSignal): Promise<void> {
-    const active = withLifecycleTimeout(signal);
+    const active = withLifecycleTimeout(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
     if (this.#opened) {
@@ -337,14 +497,15 @@ export class Omnio {
   ): Promise<OmnioObject<TUserMetadata>> {
     this.#requireOpen("putObject");
 
-    const active = this.#activeSignal(input.signal);
+    const parsed = v.parse(PutObjectInputSchema, input);
+    const active = this.#activeSignal(parsed.signal);
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
 
-    const key = toOmnioKey(input.key);
+    const key = toOmnioKey(parsed.key);
     const keyString = key.key;
-    const bytes = await toBytes(input.data);
+    const bytes = await toBytes(parsed.data);
 
     active.throwIfAborted();
 
@@ -358,10 +519,10 @@ export class Omnio {
     let embeddingModel: string | undefined;
     let embeddingSource: EmbedSource | undefined;
 
-    if (input.embedding !== undefined) {
-      embedding = input.embedding;
-    } else if ((input.embed ?? true) && input.description !== undefined) {
-      const embedded = await this.#embedDescription(input.description, active);
+    if (parsed.embedding !== undefined) {
+      embedding = parsed.embedding;
+    } else if ((parsed.embed ?? true) && parsed.description !== undefined) {
+      const embedded = await this.#embedDescription(parsed.description, active);
       embedding = embedded.embedding;
       embeddingModel = embedded.embeddingModel;
       embeddingSource = embedded.embeddingSource;
@@ -369,17 +530,17 @@ export class Omnio {
 
     const object: OmnioObject<TUserMetadata> = {
       key,
-      tags: [...(input.tags ?? [])],
+      tags: [...(parsed.tags ?? [])],
       system: {
         hash: await sha256Hex(bytes),
         size: bytes.byteLength,
         createdAt: existing?.system.createdAt ?? now,
         updatedAt: now,
-        contentType: input.contentType,
+        contentType: parsed.contentType,
       },
       embedding,
-      description: input.description,
-      userMetadata: input.userMetadata ?? ({} as TUserMetadata),
+      description: parsed.description,
+      userMetadata: (parsed.userMetadata ?? {}) as TUserMetadata,
       embeddingDims: embedding === undefined ? undefined : embedding.length,
       embeddingModel,
       embeddingSource,
@@ -413,12 +574,13 @@ export class Omnio {
   public async getObject(key: OmnioKey | string, signal?: AbortSignal): Promise<Uint8Array | null> {
     this.#requireOpen("getObject");
 
-    const active = this.#activeSignal(signal);
+    const objectKey = toOmnioKey(v.parse(OmnioKeySchema, key));
+    const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
 
-    return await nullIfKeyNotFound(() => this.#entity.get(toOmnioKey(key).key, { signal: active }));
+    return await nullIfKeyNotFound(() => this.#entity.get(objectKey.key, { signal: active }));
   }
 
   /**
@@ -437,14 +599,13 @@ export class Omnio {
   ): Promise<IValueStream<Uint8Array> | null> {
     this.#requireOpen("streamObject");
 
-    const active = this.#activeSignal(signal);
+    const objectKey = toOmnioKey(v.parse(OmnioKeySchema, key));
+    const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
 
-    return await nullIfKeyNotFound(() =>
-      this.#entity.stream(toOmnioKey(key).key, { signal: active }),
-    );
+    return await nullIfKeyNotFound(() => this.#entity.stream(objectKey.key, { signal: active }));
   }
 
   /**
@@ -461,13 +622,14 @@ export class Omnio {
   ): Promise<OmnioObject<TUserMetadata> | null> {
     this.#requireOpen("headObject");
 
-    const active = this.#activeSignal(signal);
+    const objectKey = toOmnioKey(v.parse(OmnioKeySchema, key));
+    const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
 
     return await this.#index.get<TUserMetadata>({
-      key: toOmnioKey(key),
+      key: objectKey,
       action: "get",
       signal: active,
     });
@@ -484,13 +646,14 @@ export class Omnio {
   public async deleteObject(key: OmnioKey | string, signal?: AbortSignal): Promise<boolean> {
     this.#requireOpen("deleteObject");
 
-    const active = this.#activeSignal(signal);
+    const objectKey = toOmnioKey(v.parse(OmnioKeySchema, key));
+    const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
 
-    const objectKey = toOmnioKey(key);
     const existed = await this.#entity.has(objectKey.key, { signal: active });
+
     await this.#entity.delete(objectKey.key, { signal: active });
 
     const indexDeleted = await this.#index.delete({
@@ -520,16 +683,17 @@ export class Omnio {
   ): Promise<IObjectIndex.ListResult<TUserMetadata>> {
     this.#requireOpen("listObjects");
 
-    const active = this.#activeSignal(signal);
+    const parsedOptions = v.parse(OptionalListObjectsOptionsSchema, options);
+    const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
 
     return await this.#index.list<TUserMetadata>({
-      limit: options?.limit,
+      limit: parsedOptions?.limit,
       action: "list",
-      cursor: options?.cursor,
-      filter: options?.filter,
+      cursor: parsedOptions?.cursor,
+      filter: parsedOptions?.filter,
       signal: active,
     });
   }
@@ -546,12 +710,13 @@ export class Omnio {
   ): Promise<IndexedObject<TUserMetadata>[]> {
     this.#requireOpen("searchObjects");
 
-    const active = this.#activeSignal(input.signal);
+    const parsed = v.parse(SearchObjectsInputSchema, input);
+    const active = this.#activeSignal(parsed.signal);
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
 
-    const query = input.query;
+    const query = parsed.query;
     let vector: Float32Array;
     let embeddingModel: string | undefined;
 
@@ -580,16 +745,16 @@ export class Omnio {
     }
 
     const results = await this.#index.search<TUserMetadata>({
-      topK: input.topK ?? 20,
+      topK: parsed.topK ?? 20,
       action: "search",
-      filter: input.filter,
+      filter: parsed.filter,
       signal: active,
       vector,
-      minScore: input.minScore,
+      minScore: parsed.minScore,
       embeddingModel,
     });
 
-    if (input.includeEmbedding === false) {
+    if (parsed.includeEmbedding === false) {
       return results.map((item) => ({
         ...item,
         embedding: undefined,
@@ -613,12 +778,12 @@ export class Omnio {
   ): Promise<OmnioObject<TUserMetadata> | null> {
     this.#requireOpen("reindexObject");
 
-    const active = this.#activeSignal(signal);
+    const objectKey = toOmnioKey(v.parse(OmnioKeySchema, key));
+    const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
     using _lock = await asyncmux(this, active);
 
-    const objectKey = toOmnioKey(key);
     const object = await this.#index.get<TUserMetadata>({
       key: objectKey,
       action: "get",

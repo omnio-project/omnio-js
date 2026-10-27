@@ -28,7 +28,8 @@
   "dependencies": {
     "@omniojs/core": "workspace:*",
     "asyncmux": "^0.0.12",
-    "unikvs": "^0.0.13"
+    "unikvs": "^0.0.13",
+    "valibot": "^1.5.0"
   },
   "devDependencies": {
     "@omniojs/idx-sqlite.wasm": "workspace:*",

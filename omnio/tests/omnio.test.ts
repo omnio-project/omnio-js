@@ -8,6 +8,7 @@ import {
 import { SqliteWasmIndex } from "@omniojs/idx-sqlite.wasm";
 import { Memory } from "@unikvs/memory";
 import { type Value, Builder } from "unikvs";
+import { ValiError } from "valibot";
 import { vi, test, describe } from "vite-plus/test";
 
 import type { IOmnioEntity } from "../src/entity.js";
@@ -164,6 +165,25 @@ async function readAll(source: AsyncIterable<Uint8Array> | null): Promise<Uint8A
 
   return bytes;
 }
+
+describe("コンストラクター", () => {
+  test("不正なオプションは ValiError を投げる", ({ expect }) => {
+    // 準備：
+    const entity = createTestEntity();
+    const embedder = new FakeEmbedder();
+
+    // 実行と検証：
+    expect(() => new Omnio({} as never)).toThrow(ValiError);
+    expect(
+      () =>
+        new Omnio({
+          index: {} as never,
+          entity,
+          embedder,
+        }),
+    ).toThrow(ValiError);
+  });
+});
 
 describe("open と close", () => {
   test("開くと利用可能になり閉じると操作できない", async ({ expect, signal }) => {
@@ -572,6 +592,50 @@ describe("putObject と getObject", () => {
     // 後始末：
     await omnio.close(signal);
   });
+
+  test("コンテンツタイプを小文字に正規化する", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+
+    // 実行：
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "Text/Plain",
+    });
+
+    // 検証：
+    expect(stored.system.contentType).toBe("text/plain");
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("不正な保存入力を ValiError にする", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    const tags = Array.from({ length: 11 }, (_, index) => `tag-${index}`);
+
+    // 実行と検証：
+    await expect(
+      omnio.putObject({
+        key: "k",
+        data: "invalid" as never,
+        contentType: "text/plain",
+      }),
+    ).rejects.toBeInstanceOf(ValiError);
+    await expect(
+      omnio.putObject({
+        key: "k",
+        data: new Uint8Array([1]),
+        tags,
+        contentType: "text/plain",
+      }),
+    ).rejects.toBeInstanceOf(ValiError);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
 });
 
 describe("deleteObject", () => {
@@ -638,6 +702,17 @@ describe("listObjects", () => {
     expect(first.nextCursor).not.toBeNull();
     expect(second.items.map((item) => item.key.key)).toStrictEqual(["c"]);
     expect(second.nextCursor).toBeNull();
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("不正な一覧条件を ValiError にする", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+
+    // 実行と検証：
+    await expect(omnio.listObjects({ limit: -1 }, signal)).rejects.toBeInstanceOf(ValiError);
 
     // 後始末：
     await omnio.close(signal);
@@ -805,6 +880,29 @@ describe("searchObjects", () => {
     // 検証：
     expect(actual).not.toHaveLength(0);
     expect(actual[0]?.embedding).toBeUndefined();
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("不正な検索入力を ValiError にする", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+
+    // 実行と検証：
+    await expect(
+      omnio.searchObjects({
+        topK: -1,
+        query: { text: "cat" },
+        signal,
+      }),
+    ).rejects.toBeInstanceOf(ValiError);
+    await expect(
+      omnio.searchObjects({
+        query: { vector: new Float32Array() },
+        signal,
+      }),
+    ).rejects.toBeInstanceOf(ValiError);
 
     // 後始末：
     await omnio.close(signal);

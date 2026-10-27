@@ -65,6 +65,9 @@ importers:
       unikvs:
         specifier: ^0.0.13
         version: 0.0.13(@logtape/logtape@2.4.2)(fast-utf8@0.0.7)(typescript@7.0.2)(valibot@1.5.0(typescript@7.0.2))
+      valibot:
+        specifier: ^1.5.0
+        version: 1.5.0(typescript@7.0.2)
     devDependencies:
       '@omniojs/idx-sqlite.wasm':
         specifier: workspace:*
