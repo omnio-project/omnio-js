@@ -31,29 +31,32 @@ const SLASH = 47;
  * ```
  */
 export class OmnioKey {
+  // 一覧取得などで大量に生成するため、`#` ではなく TypeScript の private を使います。
+  // ES2020 への変換時に WeakMap ベースのヘルパーが入るのを避けるためです。
+
   /** オブジェクトキーの UTF-8 バイト列です。 */
-  readonly #buffer: Uint8Array<ArrayBuffer>;
+  private readonly buffer: Uint8Array<ArrayBuffer>;
 
   /** オブジェクトキーの完全な文字列表現です。 */
-  readonly #string: string;
+  private readonly keyText: string;
 
   /** キーセグメントの配列です。 */
-  #segments: readonly string[] | undefined;
+  private segmentList: readonly string[] | undefined;
 
   /** 接頭辞です。 */
-  #prefix: string | undefined;
+  private prefixText: string | undefined;
 
   /** ベース名の UTF-8 バイト列です。 */
-  #basebuff: Uint8Array<ArrayBuffer> | null | undefined;
+  private baseBuffer: Uint8Array<ArrayBuffer> | null | undefined;
 
   /** ベース名です。 */
-  #basename: string | undefined;
+  private basenameText: string | undefined;
 
   /** 拡張子なしのオブジェクト名です。 */
-  #filename: string | undefined;
+  private filenameText: string | undefined;
 
   /** 拡張子です。 */
-  #extname: string | undefined;
+  private extensionText: string | undefined;
 
   /**
    * @param objectKey オブジェクトキー文字列です。
@@ -65,8 +68,8 @@ export class OmnioKey {
       throw new InvalidOmnioKeyError({ input: objectKey });
     }
 
-    this.#buffer = utf8.encode(parsed.output);
-    this.#string = parsed.output;
+    this.buffer = utf8.encode(parsed.output);
+    this.keyText = parsed.output;
   }
 
   /**
@@ -114,7 +117,7 @@ export class OmnioKey {
    * オブジェクトキーです。
    */
   public get key(): string {
-    return this.#string;
+    return this.keyText;
   }
 
   /**
@@ -128,8 +131,8 @@ export class OmnioKey {
    * ```
    */
   public get segments(): [...string[], string] {
-    if (this.#segments === undefined) {
-      const bytes = this.#buffer;
+    if (this.segmentList === undefined) {
+      const bytes = this.buffer;
       const segments: string[] = [];
       let start = 0;
 
@@ -141,12 +144,12 @@ export class OmnioKey {
       }
 
       segments.push(utf8.decode(bytes.subarray(start)));
-      this.#basebuff = bytes.subarray(start);
-      this.#segments = segments;
+      this.baseBuffer = bytes.subarray(start);
+      this.segmentList = segments;
     }
 
     // 破壊的に変更されないように、常にコピーを返します。
-    return this.#segments.slice() as [...string[], string];
+    return this.segmentList.slice() as [...string[], string];
   }
 
   /**
@@ -161,12 +164,12 @@ export class OmnioKey {
    * ```
    */
   public get prefix(): string {
-    if (this.#prefix === undefined) {
+    if (this.prefixText === undefined) {
       const head = this.segments.slice(0, -1);
-      this.#prefix = head.length === 0 ? "" : `${head.join("/")}/`;
+      this.prefixText = head.length === 0 ? "" : `${head.join("/")}/`;
     }
 
-    return this.#prefix;
+    return this.prefixText;
   }
 
   /**
@@ -178,7 +181,7 @@ export class OmnioKey {
    * ```
    */
   public get basename(): string {
-    return (this.#basename ??= this.segments.at(-1) ?? "");
+    return (this.basenameText ??= this.segments.at(-1) ?? "");
   }
 
   /**
@@ -194,11 +197,11 @@ export class OmnioKey {
    * ```
    */
   public get filename(): string {
-    if (this.#filename === undefined) {
+    if (this.filenameText === undefined) {
       // segments の計算で basebuff も確定します。
       this.segments;
 
-      const basebuff = this.#basebuff ?? new Uint8Array();
+      const basebuff = this.baseBuffer ?? new Uint8Array();
       const lastDotIndex = basebuff.lastIndexOf(DOT);
       let filename: string;
       let extname: string;
@@ -213,12 +216,12 @@ export class OmnioKey {
         extname = utf8.decode(basebuff.subarray(lastDotIndex));
       }
 
-      this.#filename = filename;
-      this.#extname = extname;
-      this.#basebuff = null;
+      this.filenameText = filename;
+      this.extensionText = extname;
+      this.baseBuffer = null;
     }
 
-    return this.#filename;
+    return this.filenameText;
   }
 
   /**
@@ -231,12 +234,12 @@ export class OmnioKey {
    * ```
    */
   public get extname(): string {
-    if (this.#extname === undefined) {
+    if (this.extensionText === undefined) {
       // filename ゲッターを呼び出すことで、同時に拡張子の解析も行われます。
       this.filename;
     }
 
-    return this.#extname ?? "";
+    return this.extensionText ?? "";
   }
 
   /**
@@ -250,7 +253,7 @@ export class OmnioKey {
    * ```
    */
   public toJSON(): string {
-    return this.#string;
+    return this.keyText;
   }
 
   /**
@@ -264,6 +267,6 @@ export class OmnioKey {
    * ```
    */
   public toString(): string {
-    return this.#string;
+    return this.keyText;
   }
 }

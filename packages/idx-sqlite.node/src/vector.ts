@@ -38,6 +38,40 @@ export function decodeEmbedding(bytes: Uint8Array): Float32Array {
 }
 
 /**
+ * 保存用のバイト列を、既存の埋め込みベクトルへ書き込みます。
+ *
+ * 検索時に行ごとの `Float32Array` を確保しないため、作業用のベクトルを再利用します。
+ *
+ * @param bytes リトルエンディアンのバイト列です。
+ * @param target 書き込み先のベクトルです。長さはバイト列と一致している必要があります。
+ *
+ * @returns 書き込み先のベクトルです。
+ */
+export function decodeEmbeddingInto(bytes: Uint8Array, target: Float32Array): Float32Array {
+  if (bytes.byteLength % 4 !== 0) {
+    throw new DbQueryError({
+      cause: new Error(
+        `Invalid embedding bytes: length must be a multiple of 4, but got ${bytes.byteLength}`,
+      ),
+      operation: "decode",
+    });
+  }
+
+  if (bytes.byteLength !== target.byteLength) {
+    throw new DbQueryError({
+      cause: new Error(
+        `Invalid embedding buffer: expected ${target.byteLength} bytes, but got ${bytes.byteLength}`,
+      ),
+      operation: "decode",
+    });
+  }
+
+  new Uint8Array(target.buffer, target.byteOffset, target.byteLength).set(bytes);
+
+  return target;
+}
+
+/**
  * コサイン類似度を求めます。
  *
  * @param query 検索クエリーのベクトルです。

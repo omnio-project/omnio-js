@@ -7,6 +7,7 @@ import {
   decodeEmbedding,
   encodeEmbedding,
   cosineSimilarity,
+  decodeEmbeddingInto,
 } from "../src/vector.js";
 
 describe("encodeEmbedding と decodeEmbedding", () => {
@@ -38,6 +39,30 @@ describe("encodeEmbedding と decodeEmbedding", () => {
 
     // 実行と検証：
     expect(() => decodeEmbedding(bytes)).toThrow();
+  });
+});
+
+describe("decodeEmbeddingInto", () => {
+  test("作業用のベクトルへ復号する", ({ expect }) => {
+    // 準備：
+    const vector = new Float32Array([1, -2.5, 3.25]);
+    const target = new Float32Array(vector.length);
+
+    // 実行：
+    const actual = decodeEmbeddingInto(encodeEmbedding(vector), target);
+
+    // 検証：
+    expect(actual).toBe(target);
+    expect(actual).toStrictEqual(vector);
+  });
+
+  test("長さが一致しない作業用ベクトルはエラーを投げる", ({ expect }) => {
+    // 準備：
+    const bytes = encodeEmbedding(new Float32Array([1, 2]));
+    const target = new Float32Array(1);
+
+    // 実行と検証：
+    expect(() => decodeEmbeddingInto(bytes, target)).toThrow();
   });
 });
 

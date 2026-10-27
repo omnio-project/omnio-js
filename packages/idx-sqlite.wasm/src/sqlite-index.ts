@@ -18,7 +18,7 @@ import * as v from "valibot";
 import { type SqliteWasmHandle, initSqliteWasm, SqliteWasmDialect } from "./dialect.js";
 import { SqliteWasmMigrationProvider } from "./migrations.js";
 import type { ObjectRow, SqliteWasmDatabase } from "./schema.js";
-import { scoreVector, decodeEmbedding, encodeEmbedding } from "./vector.js";
+import { scoreVector, decodeEmbedding, encodeEmbedding, decodeEmbeddingInto } from "./vector.js";
 
 /**
  * `SqliteWasmIndex` のオプションです。
@@ -205,10 +205,10 @@ function parseCursor(cursor: string | null | undefined): number {
  *
  * @returns 絞り込んだクエリーです。
  */
-function withMetadataFilter(
-  query: SelectQueryBuilder<SqliteWasmDatabase, "journal", ObjectRow>,
+function withMetadataFilter<T>(
+  query: SelectQueryBuilder<SqliteWasmDatabase, "journal", T>,
   filter: MetadataFilter | undefined,
-): SelectQueryBuilder<SqliteWasmDatabase, "journal", ObjectRow> {
+): SelectQueryBuilder<SqliteWasmDatabase, "journal", T> {
   let filtered = query.where("journal.record_type", "is not", "DELETE");
 
   if (filter?.contentTypes !== undefined && filter.contentTypes.length > 0) {
@@ -899,7 +899,12 @@ export class SqliteWasmIndex implements IObjectIndex {
       return [];
     }
 
-    const candidates = withMetadataFilter(kysely.selectFrom("journal").selectAll(), c.filter)
+    const candidates = withMetadataFilter(
+      kysely
+        .selectFrom("journal")
+        .select(["key", "embedding", "embedding_dims", "embedding_model", "user_metadata"]),
+      c.filter,
+    )
       .where("journal.dirty", "=", 0)
       .where("journal.embedding", "is not", null);
     const rows = await (
@@ -909,12 +914,16 @@ export class SqliteWasmIndex implements IObjectIndex {
     ).execute();
     const metric = c.metric ?? "cosine";
     const scored: {
-      row: ObjectRow;
+      row: (typeof rows)[number];
       score: number;
     }[] = [];
+    // 行ごとにベクトルを確保すると GC が増えるため、検索中は作業用のベクトルを使い回します。
+    const scratch = new Float32Array(c.vector.length);
 
     for (const row of rows) {
-      if (row.embedding === null) {
+      const bytes = row.embedding;
+
+      if (bytes === null) {
         continue;
       }
 
@@ -922,17 +931,29 @@ export class SqliteWasmIndex implements IObjectIndex {
         continue;
       }
 
-      const vector = this.#decodeRowEmbedding(row);
+      const length = bytes.byteLength / 4;
 
-      if (vector === undefined) {
+      if (!Number.isInteger(length)) {
+        // 不正なバイト長は、通常の復号と同じエラーにします。
+        decodeEmbedding(bytes);
+
         continue;
       }
 
-      if (vector.length !== c.vector.length) {
+      if (row.embedding_dims !== null && row.embedding_dims !== length) {
+        throw new VectorDimensionMismatchError({
+          actual: length,
+          expected: row.embedding_dims,
+        });
+      }
+
+      if (length !== c.vector.length) {
         continue;
       }
 
-      const score = scoreVector(metric, c.vector, vector);
+      decodeEmbeddingInto(bytes, scratch);
+
+      const score = scoreVector(metric, c.vector, scratch);
 
       if (c.minScore !== undefined && score < c.minScore) {
         continue;
@@ -957,16 +978,34 @@ export class SqliteWasmIndex implements IObjectIndex {
     scored.sort((left, right) => right.score - left.score);
 
     const top = scored.slice(0, c.topK);
-    const tags = await this.#loadTags(
-      kysely,
-      top.map(({ row }) => row.key),
-    );
+
+    if (top.length === 0) {
+      return [];
+    }
+
+    const topKeys = top.map(({ row }) => row.key);
+    const fullRows = await kysely
+      .selectFrom("journal")
+      .selectAll()
+      .where("key", "in", topKeys)
+      .execute();
+    const rowsByKey = new Map(fullRows.map((row) => [row.key, row]));
+    const tags = await this.#loadTags(kysely, topKeys);
 
     return top.map(({ row, score }) => {
-      const vector = this.#decodeRowEmbedding(row);
+      const full = rowsByKey.get(row.key);
+
+      if (full === undefined) {
+        throw new DbQueryError({
+          cause: new Error("Search result row disappeared"),
+          operation: "search",
+        });
+      }
+
+      const vector = this.#decodeRowEmbedding(full);
 
       return {
-        ...this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "search", vector),
+        ...this.#toObject<TUserMetadata>(full, tags.get(full.key) ?? [], "search", vector),
         score,
       };
     });

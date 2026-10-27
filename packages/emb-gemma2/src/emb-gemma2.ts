@@ -508,13 +508,25 @@ export class Gemma2Embedder implements IEmbedder {
     }
 
     const vectors: Float32Array[] = [];
+    const data = output.data;
+
+    // モデルの出力は通常 Float32Array です。
+    // 要素ごとに Number へ変換するより、ビューを切り出して複製する方が高速です。
+    if (data instanceof Float32Array) {
+      for (let index = 0; index < count; index += 1) {
+        const offset = index * features;
+        vectors.push(this.#finalizeVector(data.subarray(offset, offset + features)));
+      }
+
+      return vectors;
+    }
 
     for (let index = 0; index < count; index += 1) {
       const offset = index * features;
       const native = new Float32Array(features);
 
       for (let position = 0; position < features; position += 1) {
-        native[position] = Number(output.data[offset + position]);
+        native[position] = Number(data[offset + position]);
       }
 
       vectors.push(this.#finalizeVector(native));
