@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 import type { Migration, MigrationProvider } from "kysely/migration";
 
 import type { SqliteWasmDatabase } from "./schema.js";
@@ -98,12 +98,43 @@ async function down002(db: Kysely<SqliteWasmDatabase>): Promise<void> {
 }
 
 /**
+ * `journal` テーブルに記録の種類と時刻を追加します。
+ *
+ * @param db kysely のインスタンスです。
+ */
+async function up003(db: Kysely<SqliteWasmDatabase>): Promise<void> {
+  await db.schema
+    .alterTable("journal")
+    .addColumn("record_type", "text", (column) => column.notNull().defaultTo("CREATE"))
+    .execute();
+  await db.schema
+    .alterTable("journal")
+    .addColumn("record_timestamp", "text", (column) => column.notNull().defaultTo(""))
+    .execute();
+  await sql`update journal set record_timestamp = updated_at`.execute(db);
+}
+
+/**
+ * `journal` テーブルから記録の種類と時刻を削除します。
+ *
+ * @param db kysely のインスタンスです。
+ */
+async function down003(db: Kysely<SqliteWasmDatabase>): Promise<void> {
+  await db.schema.alterTable("journal").dropColumn("record_timestamp").execute();
+  await db.schema.alterTable("journal").dropColumn("record_type").execute();
+}
+
+/**
  * 適用するマイグレーションの一覧です。キー名の辞書順で実行します。
  */
 export const MIGRATIONS: Record<string, Migration> = {
   "001_create_objects": {
     up: up001,
     down: down001,
+  },
+  "003_add_record_metadata": {
+    up: up003,
+    down: down003,
   },
   "002_rename_objects_to_journal": {
     up: up002,

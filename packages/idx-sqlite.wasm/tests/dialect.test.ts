@@ -24,10 +24,11 @@ function requireMigration(name: string): Migration {
 }
 
 describe("SqliteWasmDialect", () => {
-  test("objects を journal に改名しても外部キーを維持する", async ({ expect }) => {
+  test("既存データを journal に移行し、記録メタデータと外部キーを維持する", async ({ expect }) => {
     // 準備：
     const migration001 = requireMigration("001_create_objects");
     const migration002 = requireMigration("002_rename_objects_to_journal");
+    const migration003 = requireMigration("003_add_record_metadata");
     const sqlite3 = await initSqliteWasm();
     const db = new Kysely<SqliteWasmDatabase>({
       dialect: new SqliteWasmDialect(new sqlite3.oo1.DB(":memory:", "c")),
@@ -52,6 +53,7 @@ describe("SqliteWasmDialect", () => {
       `.execute(db);
 
       await migration002.up(db);
+      await migration003.up(db);
 
       // 実行：
       const journal = await db.selectFrom("journal").selectAll().execute();
@@ -64,6 +66,8 @@ describe("SqliteWasmDialect", () => {
 
       // 検証：
       expect(journal).toHaveLength(1);
+      expect(journal[0]?.record_type).toBe("CREATE");
+      expect(journal[0]?.record_timestamp).toBe("2026-01-01T00:00:00Z");
       expect(pragma.rows[0]?.foreign_keys).toBe(1);
       expect(children.rows[0]?.count).toBe(0);
     } finally {

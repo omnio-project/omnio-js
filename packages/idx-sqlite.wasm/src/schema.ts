@@ -29,6 +29,12 @@ export type ObjectRow = {
   /** オブジェクトを一意に識別するキーです。 */
   readonly key: string;
 
+  /** レコードの種類です。`CREATE` または `UPDATE_METADATA` を保存します。 */
+  readonly record_type: string;
+
+  /** レコードの時刻です。ISO 8601 文字列で表します。 */
+  readonly record_timestamp: string;
+
   /** バイト列のサイズです。バイト単位で表します。 */
   readonly size: number;
 

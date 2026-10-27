@@ -405,21 +405,30 @@ export class SqliteWasmIndex implements IObjectIndex {
 
     const key = object.key.key;
     const tags = [...new Set(object.tags)];
-    const row = {
-      key,
-      hash: object.system.hash ?? null,
-      size: object.system.size,
-      embedding,
-      created_at: object.system.createdAt,
-      updated_at: object.system.updatedAt,
-      description: object.description ?? null,
-      content_type: object.system.contentType,
-      user_metadata: stringifyJson(object.userMetadata, "upsert"),
-      embedding_dims: embeddingDims,
-      embedding_model: embeddingModel,
-      embedding_source: embeddingSource,
-    };
     await kysely.transaction().execute(async (transaction) => {
+      const existing = await transaction
+        .selectFrom("journal")
+        .select("key")
+        .where("key", "=", key)
+        .executeTakeFirst();
+      // S3 Metadata のジャーナルに合わせ、新規は CREATE、既存の更新は UPDATE_METADATA とします。
+      const recordType = existing === undefined ? "CREATE" : "UPDATE_METADATA";
+      const row = {
+        key,
+        hash: object.system.hash ?? null,
+        size: object.system.size,
+        embedding,
+        created_at: object.system.createdAt,
+        updated_at: object.system.updatedAt,
+        description: object.description ?? null,
+        record_type: recordType,
+        content_type: object.system.contentType,
+        user_metadata: stringifyJson(object.userMetadata, "upsert"),
+        embedding_dims: embeddingDims,
+        embedding_model: embeddingModel,
+        embedding_source: embeddingSource,
+        record_timestamp: object.system.updatedAt,
+      };
       await transaction
         .insertInto("journal")
         .values(row)
@@ -431,14 +440,17 @@ export class SqliteWasmIndex implements IObjectIndex {
             created_at: row.created_at,
             updated_at: row.updated_at,
             description: row.description,
+            record_type: row.record_type,
             content_type: row.content_type,
             user_metadata: row.user_metadata,
             embedding_dims: row.embedding_dims,
             embedding_model: row.embedding_model,
             embedding_source: row.embedding_source,
+            record_timestamp: row.record_timestamp,
           }),
         )
         .execute();
+
       await transaction.deleteFrom("object_tags").where("key", "=", key).execute();
 
       if (tags.length > 0) {
