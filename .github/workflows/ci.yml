@@ -37,6 +37,12 @@ jobs:
       - name: "チェックアウト"
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
+      - name: "CLI ツールをインストール"
+        run: |
+          # Playwright イメージには gh と jq が含まれていないため、CI 処理用に導入します。
+          apt-get update
+          apt-get install -y --no-install-recommends gh jq
+
       - name: "mise をセットアップ"
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
 
@@ -131,7 +137,7 @@ jobs:
 
           for rel_path in ${ordered_dep_dirs[@]+"${ordered_dep_dirs[@]}"}; do
             [ -n "$rel_path" ] || continue
-            dep_name=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["name"])' "${root_dir}/${rel_path}/package.json")
+            dep_name=$(jq -r .name "${root_dir}/${rel_path}/package.json")
             echo "${rel_path} で内部依存パッケージ ${dep_name} をビルドします"
             (cd "${root_dir}/${rel_path}" && npm run build)
             echo
