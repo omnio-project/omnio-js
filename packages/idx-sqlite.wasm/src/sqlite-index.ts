@@ -234,10 +234,10 @@ function withMetadataFilter(
     const tags = [...new Set(filter.tagsAll)];
     filtered = filtered.where("journal.key", "in", (inner) =>
       inner
-        .selectFrom("object_tags")
-        .select("object_tags.key")
-        .where("object_tags.tag", "in", tags)
-        .groupBy("object_tags.key")
+        .selectFrom("object_tag")
+        .select("object_tag.key")
+        .where("object_tag.tag", "in", tags)
+        .groupBy("object_tag.key")
         .having(sql<boolean>`count(*) = ${tags.length}`),
     );
   }
@@ -245,10 +245,7 @@ function withMetadataFilter(
   if (filter?.tagsAny !== undefined && filter.tagsAny.length > 0) {
     const tags = [...new Set(filter.tagsAny)];
     filtered = filtered.where("journal.key", "in", (inner) =>
-      inner
-        .selectFrom("object_tags")
-        .select("object_tags.key")
-        .where("object_tags.tag", "in", tags),
+      inner.selectFrom("object_tag").select("object_tag.key").where("object_tag.tag", "in", tags),
     );
   }
 
@@ -456,11 +453,11 @@ export class SqliteWasmIndex implements IObjectIndex {
         )
         .execute();
 
-      await transaction.deleteFrom("object_tags").where("key", "=", key).execute();
+      await transaction.deleteFrom("object_tag").where("key", "=", key).execute();
 
       if (tags.length > 0) {
         await transaction
-          .insertInto("object_tags")
+          .insertInto("object_tag")
           .values(
             tags.map((tag) => ({
               key,
@@ -540,7 +537,7 @@ export class SqliteWasmIndex implements IObjectIndex {
         .where("record_type", "is not", "DELETE")
         .executeTakeFirst();
 
-      await transaction.deleteFrom("object_tags").where("key", "=", c.key.key).execute();
+      await transaction.deleteFrom("object_tag").where("key", "=", c.key.key).execute();
 
       return result.numUpdatedRows;
     });
@@ -816,7 +813,7 @@ export class SqliteWasmIndex implements IObjectIndex {
     }
 
     const rows = await kysely
-      .selectFrom("object_tags")
+      .selectFrom("object_tag")
       .select(["key", "tag"])
       .where("key", "in", [...keys])
       .orderBy("key")

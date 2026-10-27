@@ -61,13 +61,13 @@ describe("SqliteWasmDialect", () => {
         )
       `.execute(db);
       await sql`
-        insert into object_tags (key, tag)
+        insert into object_tag (key, tag)
         values ('k1', 'red')
       `.execute(db);
 
       // 実行：
       const journal = await db.selectFrom("journal").selectAll().execute();
-      const tags = await db.selectFrom("object_tags").selectAll().execute();
+      const tags = await db.selectFrom("object_tag").selectAll().execute();
       const columns = await sql<{
         name: string;
         notnull: number;
@@ -78,7 +78,7 @@ describe("SqliteWasmDialect", () => {
 
       await db.deleteFrom("journal").where("key", "=", "k1").execute();
       const children = await sql<{ count: number }>`
-        select count(*) as count from object_tags
+        select count(*) as count from object_tag
       `.execute(db);
 
       // 検証：

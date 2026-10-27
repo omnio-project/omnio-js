@@ -52,7 +52,7 @@ export type ObjectRow = {
 };
 
 /**
- * `object_tags` テーブルの行です。
+ * `object_tag` テーブルの行です。
  */
 export type ObjectTagRow = {
   /** タグが付いたオブジェクトのキーです。 */
@@ -70,5 +70,5 @@ export type SqliteWasmDatabase = {
   readonly journal: ObjectRow;
 
   /** タグの表です。 */
-  readonly object_tags: ObjectTagRow;
+  readonly object_tag: ObjectTagRow;
 };

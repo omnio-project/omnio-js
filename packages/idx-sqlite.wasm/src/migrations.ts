@@ -4,7 +4,7 @@ import type { Migration, MigrationProvider } from "kysely/migration";
 import type { SqliteWasmDatabase } from "./schema.js";
 
 /**
- * `journal` 表と `object_tags` 表を作成します。
+ * `journal` 表と `object_tag` 表を作成します。
  *
  * @param db kysely のインスタンスです。
  */
@@ -29,14 +29,14 @@ async function up001(db: Kysely<SqliteWasmDatabase>): Promise<void> {
     .addColumn("updated_at", "text")
     .execute();
   await db.schema
-    .createTable("object_tags")
+    .createTable("object_tag")
     .addColumn("key", "text", (column) =>
       column.notNull().references("journal.key").onDelete("cascade"),
     )
     .addColumn("tag", "text", (column) => column.notNull())
-    .addPrimaryKeyConstraint("object_tags_pkey", ["key", "tag"])
+    .addPrimaryKeyConstraint("object_tag_pkey", ["key", "tag"])
     .execute();
-  await db.schema.createIndex("object_tags_tag_index").on("object_tags").column("tag").execute();
+  await db.schema.createIndex("object_tag_tag_index").on("object_tag").column("tag").execute();
   await db.schema
     .createIndex("journal_content_type_index")
     .on("journal")
@@ -56,12 +56,12 @@ async function up001(db: Kysely<SqliteWasmDatabase>): Promise<void> {
 }
 
 /**
- * `journal` 表と `object_tags` 表を削除します。
+ * `journal` 表と `object_tag` 表を削除します。
  *
  * @param db kysely のインスタンスです。
  */
 async function down001(db: Kysely<SqliteWasmDatabase>): Promise<void> {
-  await db.schema.dropTable("object_tags").execute();
+  await db.schema.dropTable("object_tag").execute();
   await db.schema.dropTable("journal").execute();
 }
 
