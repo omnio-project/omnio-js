@@ -663,6 +663,85 @@ describe("delete", () => {
   });
 });
 
+describe("dirty", () => {
+  test("モデルが異なる説明付きオブジェクトに dirty を立て、検索から除外する", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const object = createObject("k1", ["pet"]);
+    await index.upsert({
+      action: "upsert",
+      object,
+      signal,
+    });
+
+    // 実行：
+    const marked = await index.markDirty({
+      action: "markDirty",
+      signal,
+      embeddingModel: "next-model",
+    });
+    const markedAgain = await index.markDirty({
+      action: "markDirty",
+      signal,
+      embeddingModel: "test-model",
+    });
+    const dirty = await index.listDirty({
+      action: "listDirty",
+      signal,
+    });
+    const hidden = await index.search({
+      topK: 10,
+      action: "search",
+      signal,
+      vector: new Float32Array([1, 0, 0]),
+      embeddingModel: "test-model",
+    });
+
+    await index.upsert({
+      action: "upsert",
+      object: {
+        ...object,
+        embeddingModel: "next-model",
+        embeddingSource: {
+          kind: "description",
+          model: "next-model",
+        },
+      },
+      signal,
+    });
+
+    const remaining = await index.listDirty({
+      action: "listDirty",
+      signal,
+    });
+    const visible = await index.search({
+      topK: 10,
+      action: "search",
+      signal,
+      vector: new Float32Array([1, 0, 0]),
+      embeddingModel: "next-model",
+    });
+
+    // 検証：
+    expect(marked).toBe(1);
+    expect(markedAgain).toBe(0);
+    expect(keysOf(dirty)).toStrictEqual(["k1"]);
+    expect(dirty[0]?.description).toBe(object.description);
+    expect(hidden).toStrictEqual([]);
+    expect(remaining).toStrictEqual([]);
+    expect(keysOf(visible)).toStrictEqual(["k1"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+});
+
 describe("list", () => {
   test("キー順にページ分けして取得する", async ({ expect, signal }) => {
     // 準備：

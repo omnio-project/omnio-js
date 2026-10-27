@@ -23,6 +23,9 @@ export type ObjectRow = {
   /** 埋め込みベクトルの由来です。JSON 文字列で表します。存在しない場合もあります。 */
   readonly embedding_source: string | null;
 
+  /** 再インデックスが必要な場合は 1、不要な場合は 0 です。 */
+  readonly dirty: number;
+
   /** バイト列のハッシュ値です。存在しない場合もあります。 */
   readonly hash: string | null;
 

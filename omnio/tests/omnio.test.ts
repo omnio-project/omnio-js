@@ -342,6 +342,75 @@ describe("open と close", () => {
   });
 });
 
+describe("dirty 再インデックス", () => {
+  test("open 時に古いモデルの埋め込みをバックグラウンドで作り直す", async ({ expect, signal }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    await index.open({
+      action: "open",
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: {
+        key: OmnioKey.parse("k"),
+        tags: ["pet"],
+        system: {
+          size: 3,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          contentType: "text/plain",
+        },
+        entityId: crypto.randomUUID(),
+        embedding: new Float32Array([0, 1]),
+        description: "cat on the mat",
+        userMetadata: {},
+        embeddingDims: 2,
+        embeddingModel: "old-model",
+        embeddingSource: {
+          kind: "description",
+          model: "old-model",
+        },
+      },
+      signal,
+    });
+
+    const omnio = new Omnio({
+      index,
+      entity: createTestEntity(),
+      embedder: new FakeEmbedder(),
+    });
+
+    // 実行：
+    await omnio.open(signal);
+    await vi.waitFor(
+      async () => {
+        const head = await omnio.headObject("k", signal);
+        expect(head?.embeddingModel).toBe("fake-model");
+        expect(head?.embedding).toStrictEqual(new Float32Array([1, 0]));
+
+        const actual = await omnio.searchObjects({
+          topK: 10,
+          query: { text: "cat" },
+          signal,
+        });
+        expect(actual.map((item) => item.key.key)).toStrictEqual(["k"]);
+      },
+      { timeout: 5000 },
+    );
+
+    // 検証：
+    const head = await omnio.headObject("k", signal);
+    expect(head?.embeddingSource).toStrictEqual({
+      kind: "description",
+      model: "fake-model",
+    });
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+});
+
 describe("putObject と getObject", () => {
   test("保存したバイト列をそのまま取得する", async ({ expect, signal }) => {
     // 準備：

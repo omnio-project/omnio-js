@@ -298,7 +298,18 @@ const IOmnioEntitySchema = v.custom<IOmnioEntity>((input) =>
 /** インデックスのスキーマです。 */
 const IObjectIndexSchema = v.custom<IObjectIndex>((input) => {
   if (
-    !hasFunctions(input, ["open", "close", "upsert", "get", "delete", "list", "search", "purge"])
+    !hasFunctions(input, [
+      "open",
+      "close",
+      "upsert",
+      "get",
+      "delete",
+      "list",
+      "search",
+      "purge",
+      "listDirty",
+      "markDirty",
+    ])
   ) {
     return false;
   }
@@ -417,6 +428,8 @@ export class Omnio {
     }
   >();
 
+  #reindexTask: Promise<void> | undefined;
+
   /**
    * @param options データベースと埋め込み、ストレージーです。すべて必須です。
    */
@@ -459,7 +472,18 @@ export class Omnio {
         action: "open",
         signal: active,
       });
+      await this.#index.markDirty({
+        action: "markDirty",
+        signal: active,
+        embeddingModel: this.#embedder.info.name,
+      });
     } catch (ex) {
+      await Promise.resolve(
+        this.#index.close({
+          action: "close",
+          signal: AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
+        }),
+      ).catch(() => undefined);
       await this.#entity
         .close({ signal: AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS) })
         .catch(() => undefined);
@@ -467,6 +491,7 @@ export class Omnio {
     }
 
     this.#opened = true;
+    this.#scheduleReindex();
   }
 
   /**
@@ -485,6 +510,13 @@ export class Omnio {
 
     if (this.#opened) {
       this.#lifecycle.abort(new OperationAbortedError());
+
+      const reindexTask = this.#reindexTask;
+
+      if (reindexTask !== undefined) {
+        await reindexTask;
+        active.throwIfAborted();
+      }
     }
 
     using _lock = await asyncmux(this, active);
@@ -855,11 +887,32 @@ export class Omnio {
       signal: active,
     });
 
-    if (object === null || object.description === undefined) {
+    if (object === null) {
+      return null;
+    }
+
+    return await this.#reindexStoredObject(object, active);
+  }
+
+  /**
+   * 保存済みオブジェクトの埋め込みを作り直します。
+   *
+   * 説明文がない場合は何も変更せず、そのまま返します。
+   *
+   * @param object 埋め込みを作り直すオブジェクトです。
+   * @param signal 処理を中断するための中断シグナルです。
+   *
+   * @returns 更新したオブジェクトです。
+   */
+  async #reindexStoredObject<TUserMetadata>(
+    object: OmnioObject<TUserMetadata>,
+    signal: AbortSignal,
+  ): Promise<OmnioObject<TUserMetadata>> {
+    if (object.description === undefined) {
       return object;
     }
 
-    const embedded = await this.#embedDescription(object.description, active);
+    const embedded = await this.#embedDescription(object.description, signal);
     const reindexed: OmnioObject<TUserMetadata> = {
       ...object,
       embedding: embedded.embedding,
@@ -874,7 +927,7 @@ export class Omnio {
     await this.#index.upsert({
       action: "upsert",
       object: reindexed,
-      signal: active,
+      signal,
     });
 
     return reindexed;
@@ -910,6 +963,62 @@ export class Omnio {
         model: this.#embedder.info.name,
       },
     };
+  }
+
+  /**
+   * dirty フラグが立ったオブジェクトの再インデックスを開始します。
+   */
+  #scheduleReindex(): void {
+    if (this.#reindexTask !== undefined) {
+      return;
+    }
+
+    this.#reindexTask = this.#runReindexSchedule();
+  }
+
+  /**
+   * バックグラウンドの再インデックスを実行し、終了後にタスクを解放します。
+   */
+  async #runReindexSchedule(): Promise<void> {
+    try {
+      await this.#drainDirtyObjects();
+    } catch {
+      // 失敗したオブジェクトは dirty フラグを残し、次回の open に委ねます。
+    } finally {
+      this.#reindexTask = undefined;
+    }
+  }
+
+  /**
+   * dirty フラグが立ったオブジェクトを 1 件ずつ再インデックスします。
+   *
+   * 1 件ごとにロックを解放し、他の操作を妨げないようにします。
+   */
+  async #drainDirtyObjects(): Promise<void> {
+    for (;;) {
+      const signal = AbortSignal.any([
+        this.#lifecycle.signal,
+        AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
+      ]);
+      using _lock = await asyncmux(this, signal);
+
+      if (!this.#opened) {
+        return;
+      }
+
+      const dirty = await this.#index.listDirty<unknown>({
+        limit: 1,
+        action: "listDirty",
+        signal,
+      });
+      const object = dirty[0];
+
+      if (object === undefined || object.description === undefined) {
+        return;
+      }
+
+      await this.#reindexStoredObject(object, signal);
+    }
   }
 
   /**

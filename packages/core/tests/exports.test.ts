@@ -109,6 +109,8 @@ describe("exports", () => {
     expectTypeOf<dbTypes.IDeleteContext>().toEqualTypeOf<core.IDeleteContext>();
     expectTypeOf<dbTypes.IPurgeContext>().toEqualTypeOf<core.IPurgeContext>();
     expectTypeOf<dbTypes.IListContext>().toEqualTypeOf<core.IListContext>();
+    expectTypeOf<dbTypes.IListDirtyContext>().toEqualTypeOf<core.IListDirtyContext>();
+    expectTypeOf<dbTypes.IMarkDirtyContext>().toEqualTypeOf<core.IMarkDirtyContext>();
     expectTypeOf<dbTypes.ISearchContext>().toEqualTypeOf<core.ISearchContext>();
     expectTypeOf<dbTypes.IndexedObject>().toEqualTypeOf<core.IndexedObject>();
     expectTypeOf<dbTypes.VectorMetric>().toEqualTypeOf<core.VectorMetric>();

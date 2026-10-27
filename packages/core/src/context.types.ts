@@ -9,6 +9,8 @@ export type ContextAction =
   | "embedText"
   | "get"
   | "list"
+  | "listDirty"
+  | "markDirty"
   | "open"
   | "purge"
   | "search"

@@ -82,6 +82,28 @@ export interface IListContext extends IActionContext {
 }
 
 /**
+ * 再インデックスが必要なオブジェクトに dirty フラグを立てる操作のコンテキストです。
+ */
+export interface IMarkDirtyContext extends IActionContext {
+  /** 操作の種別です。 */
+  readonly action: "markDirty";
+
+  /** 現在使っている埋め込みモデル名です。 */
+  readonly embeddingModel: string;
+}
+
+/**
+ * dirty フラグが立ったオブジェクトを一覧する操作のコンテキストです。
+ */
+export interface IListDirtyContext extends IActionContext {
+  /** 操作の種別です。 */
+  readonly action: "listDirty";
+
+  /** 取得する最大件数です。 */
+  readonly limit?: number | undefined;
+}
+
+/**
  * ベクトル検索する操作のコンテキストです。
  */
 export interface ISearchContext extends IActionContext {
@@ -150,6 +172,16 @@ export namespace IObjectIndex {
     /** 次の取得に使うカーソルです。続きがない場合は null です。 */
     readonly nextCursor: string | null;
   };
+
+  /**
+   * dirty フラグが立ったオブジェクトを一覧する操作のコンテキストです。
+   */
+  export type ListDirtyContext = IListDirtyContext;
+
+  /**
+   * 再インデックスが必要なオブジェクトに dirty フラグを立てる操作のコンテキストです。
+   */
+  export type MarkDirtyContext = IMarkDirtyContext;
 
   /**
    * 開く操作のコンテキストです。
@@ -265,7 +297,33 @@ export interface IObjectIndex {
   ): MaybePromise<IObjectIndex.ListResult<TUserMetadata>>;
 
   /**
+   * 埋め込みモデルが変わったオブジェクトに dirty フラグを立てます。
+   *
+   * 保存済みの埋め込みモデルが `embeddingModel` と異なり、説明文を持つ有効なオブジェクトが対象です。
+   *
+   * @param c dirty フラグを立てる操作のコンテキストです。
+   *
+   * @returns dirty フラグを立てた件数を解決する Promise です。
+   */
+  markDirty(c: IObjectIndex.MarkDirtyContext): MaybePromise<number>;
+
+  /**
+   * dirty フラグが立ったオブジェクトを一覧します。
+   *
+   * 再インデックスできるよう、説明文を持つ有効なオブジェクトだけを返します。
+   *
+   * @param c dirty フラグが立ったオブジェクトを一覧する操作のコンテキストです。
+   *
+   * @returns dirty フラグが立ったオブジェクト一覧を解決する Promise です。
+   */
+  listDirty<TUserMetadata>(
+    c: IObjectIndex.ListDirtyContext,
+  ): MaybePromise<OmnioObject<TUserMetadata>[]>;
+
+  /**
    * ベクトル検索します。
+   *
+   * dirty フラグまたは削除フラグが立ったオブジェクトは結果に含めません。
    *
    * @param c 検索する操作のコンテキストです。
    *

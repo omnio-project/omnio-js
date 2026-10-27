@@ -86,6 +86,7 @@ describe("SqliteWasmDialect", () => {
       expect(journal[0]?.entity_id).toBe("00000000-0000-4000-8000-000000000001");
       expect(journal[0]?.record_type).toBe("CREATE");
       expect(journal[0]?.record_timestamp).toBe("2026-01-01T00:00:00Z");
+      expect(journal[0]?.dirty).toBe(0);
       expect(tags).toStrictEqual([
         {
           key: "k1",
@@ -98,6 +99,7 @@ describe("SqliteWasmDialect", () => {
       expect(notNull.get("entity_id")).toBe(1);
       expect(notNull.get("record_type")).toBe(1);
       expect(notNull.get("record_timestamp")).toBe(1);
+      expect(notNull.get("dirty")).toBe(1);
       expect(notNull.get("content_type")).toBe(0);
       expect(notNull.get("size")).toBe(0);
       expect(notNull.get("user_metadata")).toBe(0);

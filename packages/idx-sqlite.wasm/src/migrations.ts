@@ -23,6 +23,7 @@ async function up001(db: Kysely<SqliteWasmDatabase>): Promise<void> {
     .addColumn("embedding_model", "text")
     .addColumn("embedding_dims", "integer")
     .addColumn("embedding_source", "text")
+    .addColumn("dirty", "integer", (column) => column.notNull().defaultTo(0))
     .addColumn("embedding", "blob")
     .addColumn("created_at", "text")
     .addColumn("updated_at", "text")

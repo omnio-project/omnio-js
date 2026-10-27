@@ -418,6 +418,7 @@ export class SqliteWasmIndex implements IObjectIndex {
         key,
         hash: object.system.hash ?? null,
         size: object.system.size,
+        dirty: 0,
         embedding,
         entity_id: object.entityId,
         created_at: object.system.createdAt,
@@ -438,6 +439,7 @@ export class SqliteWasmIndex implements IObjectIndex {
           conflict.column("key").doUpdateSet({
             hash: row.hash,
             size: row.size,
+            dirty: 0,
             embedding: row.embedding,
             entity_id: row.entity_id,
             created_at: row.created_at,
@@ -521,6 +523,7 @@ export class SqliteWasmIndex implements IObjectIndex {
         .set({
           hash: null,
           size: null,
+          dirty: 0,
           embedding: null,
           created_at: null,
           updated_at: null,
@@ -619,6 +622,72 @@ export class SqliteWasmIndex implements IObjectIndex {
   }
 
   /**
+   * 埋め込みモデルが変わったオブジェクトに dirty フラグを立てます。
+   *
+   * @param c dirty フラグを立てる操作のコンテキストです。
+   *
+   * @returns dirty フラグを立てた件数です。
+   */
+  public async markDirty(c: IObjectIndex.MarkDirtyContext): Promise<number> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux(this, c.signal);
+
+    const kysely = this.#requireOpen("markDirty");
+    const result = await kysely
+      .updateTable("journal")
+      .set({ dirty: 1 })
+      .where("record_type", "is not", "DELETE")
+      .where("description", "is not", null)
+      .where("embedding_model", "is not", null)
+      .where("embedding_model", "!=", c.embeddingModel)
+      .executeTakeFirst();
+    const updated = result.numUpdatedRows;
+
+    return typeof updated === "bigint" ? Number(updated) : updated;
+  }
+
+  /**
+   * dirty フラグが立ったオブジェクトを一覧します。
+   *
+   * @param c dirty フラグが立ったオブジェクトを一覧する操作のコンテキストです。
+   *
+   * @returns dirty フラグが立ったオブジェクト一覧です。
+   */
+  public async listDirty<TUserMetadata>(
+    c: IObjectIndex.ListDirtyContext,
+  ): Promise<OmnioObject<TUserMetadata>[]> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux(this, c.signal);
+
+    const kysely = this.#requireOpen("listDirty");
+    const limit = c.limit ?? 100;
+
+    if (limit <= 0) {
+      return [];
+    }
+
+    const rows = await kysely
+      .selectFrom("journal")
+      .selectAll()
+      .where("dirty", "=", 1)
+      .where("record_type", "is not", "DELETE")
+      .where("description", "is not", null)
+      .orderBy("key")
+      .limit(limit)
+      .execute();
+    const tags = await this.#loadTags(
+      kysely,
+      rows.map((row) => row.key),
+    );
+
+    return rows.map((row) =>
+      this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "listDirty"),
+    );
+  }
+
+  /**
    * ベクトル検索します。
    *
    * @param c 検索する操作のコンテキストです。
@@ -638,11 +707,9 @@ export class SqliteWasmIndex implements IObjectIndex {
       return [];
     }
 
-    const candidates = withMetadataFilter(kysely.selectFrom("journal").selectAll(), c.filter).where(
-      "journal.embedding",
-      "is not",
-      null,
-    );
+    const candidates = withMetadataFilter(kysely.selectFrom("journal").selectAll(), c.filter)
+      .where("journal.dirty", "=", 0)
+      .where("journal.embedding", "is not", null);
     const rows = await (
       c.embeddingModel === undefined
         ? candidates
