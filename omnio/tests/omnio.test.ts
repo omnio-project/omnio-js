@@ -987,6 +987,113 @@ describe("copyObject", () => {
   });
 });
 
+describe("renameObject", () => {
+  test("キーを変更し、実体とメタデータを維持する", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    const source = await omnio.putObject({
+      key: "source",
+      data: new Uint8Array([1, 2, 3]),
+      tags: ["pet"],
+      contentType: "text/plain",
+      description: "cat on the mat",
+      userMetadata: { genre: "test" },
+    });
+
+    // 実行：
+    const renamed = await omnio.renameObject("source", "dest", signal);
+
+    // 検証：
+    expect(renamed?.key.key).toBe("dest");
+    expect(renamed?.entityId).toBe(source.entityId);
+    expect(renamed?.system.createdAt).toBe(source.system.createdAt);
+    expect(renamed?.system.size).toBe(source.system.size);
+    expect(renamed?.system.hash).toBe(source.system.hash);
+    expect(renamed?.system.hashAlgorithm).toBe(source.system.hashAlgorithm);
+    expect(renamed?.system.contentType).toBe(source.system.contentType);
+    expect(renamed?.description).toBe(source.description);
+    expect(renamed?.tags).toStrictEqual(source.tags);
+    expect(renamed?.userMetadata).toStrictEqual(source.userMetadata);
+    expect(await omnio.getObject("source", signal)).toBeNull();
+    expect(await omnio.getObject("dest", signal)).toStrictEqual(new Uint8Array([1, 2, 3]));
+    expect(await omnio.hasObject("source", signal)).toBe(false);
+    expect(await omnio.hasObject("dest", signal)).toBe(true);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("変更先が存在する場合は上書きし、変更先の実体を削除する", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const omnio = await createTestOmnio(signal, new SqliteWasmIndex(), builder);
+    const source = await omnio.putObject({
+      key: "source",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    const destination = await omnio.putObject({
+      key: "dest",
+      data: new Uint8Array([9]),
+      contentType: "application/octet-stream",
+      userMetadata: { version: 1 },
+    });
+
+    // 実行：
+    const renamed = await omnio.renameObject("source", "dest", signal);
+
+    // 検証：
+    expect(renamed?.entityId).toBe(source.entityId);
+    expect(renamed?.system.createdAt).toBe(source.system.createdAt);
+    expect(renamed?.system.contentType).toBe("text/plain");
+    expect(renamed?.userMetadata).toStrictEqual({});
+    expect(await omnio.getObject("dest", signal)).toStrictEqual(new Uint8Array([1]));
+    expect(await getEntity().has(source.entityId)).toBe(true);
+    await vi.waitFor(async () => {
+      expect(await getEntity().has(destination.entityId)).toBe(false);
+    });
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("同じキーを指定した場合は元のオブジェクトを返す", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    const source = await omnio.putObject({
+      key: "source",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+
+    // 実行：
+    const renamed = await omnio.renameObject("source", "source", signal);
+
+    // 検証：
+    expect(renamed).toStrictEqual(source);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("変更元が存在しない場合は null を返す", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    await omnio.putObject({
+      key: "dest",
+      data: new Uint8Array([9]),
+      contentType: "text/plain",
+    });
+
+    // 実行と検証：
+    expect(await omnio.renameObject("missing", "dest", signal)).toBeNull();
+    expect(await omnio.getObject("dest", signal)).toStrictEqual(new Uint8Array([9]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+});
+
 describe("updateObjectMetadata", () => {
   test("変更可能なメタデータだけを更新する", async ({ expect, signal }) => {
     // 準備：

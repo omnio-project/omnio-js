@@ -560,6 +560,87 @@ export class SqliteWasmIndex implements IObjectIndex {
   }
 
   /**
+   * オブジェクトのキーを変更します。
+   *
+   * @param c キーを変更する操作のコンテキストです。
+   *
+   * @returns キーを変更したオブジェクト、変更元が存在しない場合は null です。
+   */
+  public async rename<TUserMetadata>(
+    c: IObjectIndex.RenameContext,
+  ): Promise<IObjectIndex.RenameResult<TUserMetadata> | null> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux(this, c.signal);
+
+    const kysely = this.#requireOpen("rename");
+
+    return await kysely.transaction().execute(async (transaction) => {
+      const sourceRow = await transaction
+        .selectFrom("journal")
+        .selectAll()
+        .where("key", "=", c.sourceKey.key)
+        .where("record_type", "is not", "DELETE")
+        .executeTakeFirst();
+
+      if (sourceRow === undefined) {
+        return null;
+      }
+
+      const tagRows = await transaction
+        .selectFrom("object_tag")
+        .select("tag")
+        .where("key", "=", c.sourceKey.key)
+        .orderBy("tag")
+        .execute();
+      const tags = tagRows.map((row) => row.tag);
+
+      if (c.sourceKey.key === c.destinationKey.key) {
+        return {
+          object: this.#toObject<TUserMetadata>(sourceRow, tags, "rename"),
+        };
+      }
+
+      const destinationRow = await transaction
+        .selectFrom("journal")
+        .select(["key", "entity_id"])
+        .where("key", "=", c.destinationKey.key)
+        .executeTakeFirst();
+      const renamedRow: ObjectRow = {
+        ...sourceRow,
+        key: c.destinationKey.key,
+        record_type: "UPDATE_METADATA",
+        record_timestamp: c.updatedAt,
+        updated_at: c.updatedAt,
+      };
+
+      if (destinationRow !== undefined) {
+        await transaction.deleteFrom("journal").where("key", "=", c.destinationKey.key).execute();
+      }
+
+      await transaction.deleteFrom("journal").where("key", "=", c.sourceKey.key).execute();
+      await transaction.insertInto("journal").values(renamedRow).execute();
+
+      if (tags.length > 0) {
+        await transaction
+          .insertInto("object_tag")
+          .values(
+            tags.map((tag) => ({
+              key: c.destinationKey.key,
+              tag,
+            })),
+          )
+          .execute();
+      }
+
+      return {
+        object: this.#toObject<TUserMetadata>(renamedRow, tags, "rename"),
+        replacedEntityId: destinationRow?.entity_id,
+      };
+    });
+  }
+
+  /**
    * オブジェクトを取得します。
    *
    * @param c 取得する操作のコンテキストです。

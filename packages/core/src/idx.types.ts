@@ -45,6 +45,34 @@ export interface IUpdateMetadataContext<
 }
 
 /**
+ * オブジェクトのキーを変更する操作のコンテキストです。
+ */
+export interface IRenameContext extends IActionContext {
+  /** 操作の種別です。 */
+  readonly action: "rename";
+
+  /** 変更元のキーです。 */
+  readonly sourceKey: OmnioKey;
+
+  /** 変更先のキーです。 */
+  readonly destinationKey: OmnioKey;
+
+  /** 更新時刻です。ISO 8601 文字列で表します。 */
+  readonly updatedAt: string;
+}
+
+/**
+ * キー変更の結果です。
+ */
+export type IRenameResult<TUserMetadata = Record<string, unknown>> = {
+  /** キーを変更したオブジェクトです。 */
+  readonly object: OmnioObject<TUserMetadata>;
+
+  /** 変更先に存在したオブジェクトの実体 ID です。存在しない場合もあります。 */
+  readonly replacedEntityId?: string | undefined;
+};
+
+/**
  * オブジェクトを取得する操作のコンテキストです。
  */
 export interface IGetContext extends IActionContext {
@@ -241,6 +269,16 @@ export namespace IObjectIndex {
    */
   export type UpdateMetadataContext<TUserMetadata = Record<string, unknown>> =
     IUpdateMetadataContext<TUserMetadata>;
+
+  /**
+   * オブジェクトのキーを変更する操作のコンテキストです。
+   */
+  export type RenameContext = IRenameContext;
+
+  /**
+   * キー変更の結果です。
+   */
+  export type RenameResult<TUserMetadata = Record<string, unknown>> = IRenameResult<TUserMetadata>;
 }
 
 /**
@@ -305,6 +343,20 @@ export interface IObjectIndex {
   updateMetadata<TUserMetadata>(
     c: IObjectIndex.UpdateMetadataContext<TUserMetadata>,
   ): MaybePromise<OmnioObject<TUserMetadata> | null>;
+
+  /**
+   * オブジェクトのキーを変更します。
+   *
+   * 実体のバイト列は移動せず、同じ実体 ID を維持します。
+   * 変更先が存在する場合は上書きし、変更先の実体 ID を `replacedEntityId` で返します。
+   *
+   * @param c キーを変更する操作のコンテキストです。
+   *
+   * @returns キーを変更したオブジェクト、変更元が存在しない場合は null を解決する Promise です。
+   */
+  rename<TUserMetadata>(
+    c: IObjectIndex.RenameContext,
+  ): MaybePromise<IObjectIndex.RenameResult<TUserMetadata> | null>;
 
   /**
    * オブジェクトを取得します。

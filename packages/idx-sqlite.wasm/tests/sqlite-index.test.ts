@@ -644,6 +644,128 @@ describe("updateMetadata", () => {
   });
 });
 
+describe("rename", () => {
+  test("キーとタグを変更し、実体とメタデータを維持する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const object = createObject("old", ["a", "b"]);
+    await index.upsert({
+      action: "upsert",
+      object,
+      signal,
+    });
+
+    // 実行：
+    const result = await index.rename({
+      action: "rename",
+      signal,
+      sourceKey: OmnioKey.parse("old"),
+      updatedAt: "2026-02-01T00:00:00Z",
+      destinationKey: OmnioKey.parse("new"),
+    });
+    const actual = await index.get({
+      key: OmnioKey.parse("new"),
+      action: "get",
+      signal,
+    });
+
+    // 検証：
+    expect(result?.replacedEntityId).toBeUndefined();
+    expect(result?.object.entityId).toBe(object.entityId);
+    expect(result?.object.system.size).toBe(object.system.size);
+    expect(result?.object.system.hash).toBe(object.system.hash);
+    expect(result?.object.system.hashAlgorithm).toBe(object.system.hashAlgorithm);
+    expect(result?.object.system.createdAt).toBe(object.system.createdAt);
+    expect(result?.object.system.updatedAt).toBe("2026-02-01T00:00:00Z");
+    expect(result?.object.tags).toStrictEqual(["a", "b"]);
+    expect(actual).toStrictEqual(result?.object);
+
+    expect(
+      await index.get({
+        key: OmnioKey.parse("old"),
+        action: "get",
+        signal,
+      }),
+    ).toBeNull();
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("変更先が存在する場合は上書きする", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const source = createObject("source", ["source-tag"]);
+    const destination = createObject("dest", ["dest-tag"]);
+    await index.upsert({
+      action: "upsert",
+      object: source,
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: destination,
+      signal,
+    });
+
+    // 実行：
+    const result = await index.rename({
+      action: "rename",
+      signal,
+      sourceKey: OmnioKey.parse("source"),
+      updatedAt: "2026-02-01T00:00:00Z",
+      destinationKey: OmnioKey.parse("dest"),
+    });
+    const bySourceTag = await index.list({
+      action: "list",
+      filter: { tagsAny: ["source-tag"] },
+      signal,
+    });
+    const byDestinationTag = await index.list({
+      action: "list",
+      filter: { tagsAny: ["dest-tag"] },
+      signal,
+    });
+
+    // 検証：
+    expect(result?.replacedEntityId).toBe(destination.entityId);
+    expect(result?.object.entityId).toBe(source.entityId);
+    expect(keysOf(bySourceTag.items)).toStrictEqual(["dest"]);
+    expect(byDestinationTag.items).toStrictEqual([]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("変更元が存在しない場合は null を返す", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+
+    // 実行と検証：
+    expect(
+      await index.rename({
+        action: "rename",
+        signal,
+        sourceKey: OmnioKey.parse("missing"),
+        updatedAt: "2026-02-01T00:00:00Z",
+        destinationKey: OmnioKey.parse("dest"),
+      }),
+    ).toBeNull();
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+});
+
 describe("delete", () => {
   test("削除すると取得できなくなりタグも消える", async ({ expect, signal }) => {
     // 準備：

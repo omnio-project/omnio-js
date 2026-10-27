@@ -14,6 +14,7 @@ export type ContextAction =
   | "markDirty"
   | "open"
   | "purge"
+  | "rename"
   | "search"
   | "supports"
   | "updateMetadata"

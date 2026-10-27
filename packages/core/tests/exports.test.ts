@@ -106,6 +106,8 @@ describe("exports", () => {
     expectTypeOf<dbTypes.IObjectIndex>().toEqualTypeOf<core.IObjectIndex>();
     expectTypeOf<dbTypes.IUpsertContext>().toEqualTypeOf<core.IUpsertContext>();
     expectTypeOf<dbTypes.IUpdateMetadataContext>().toEqualTypeOf<core.IUpdateMetadataContext>();
+    expectTypeOf<dbTypes.IRenameContext>().toEqualTypeOf<core.IRenameContext>();
+    expectTypeOf<dbTypes.IRenameResult>().toEqualTypeOf<core.IRenameResult>();
     expectTypeOf<dbTypes.IGetContext>().toEqualTypeOf<core.IGetContext>();
     expectTypeOf<dbTypes.IHasContext>().toEqualTypeOf<core.IHasContext>();
     expectTypeOf<dbTypes.IDeleteContext>().toEqualTypeOf<core.IDeleteContext>();

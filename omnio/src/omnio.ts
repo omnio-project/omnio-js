@@ -333,6 +333,7 @@ const IObjectIndexSchema = v.custom<IObjectIndex>((input) => {
       "close",
       "upsert",
       "updateMetadata",
+      "rename",
       "get",
       "has",
       "delete",
@@ -758,6 +759,62 @@ export class Omnio {
       await this.#restoreEntity(entityId, previousBytes).catch(() => undefined);
       throw ex;
     }
+  }
+
+  /**
+   * オブジェクトのキーを変更します。
+   *
+   * 実体のバイト列は移動せず、同じ実体 ID を維持します。
+   * 変更先が既に存在する場合は上書きし、変更先の実体はバックグラウンドで削除します。
+   * 同じキーを指定した場合は何もせず、元のオブジェクトを返します。
+   *
+   * @param sourceKey 変更元のキーです。
+   * @param destinationKey 変更先のキーです。
+   * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
+   *
+   * @returns キーを変更したオブジェクト、変更元が存在しない場合は null です。
+   */
+  public async renameObject<TUserMetadata = Record<string, unknown>>(
+    sourceKey: OmnioKey | string,
+    destinationKey: OmnioKey | string,
+    signal?: AbortSignal,
+  ): Promise<OmnioObject<TUserMetadata> | null> {
+    this.#requireOpen("renameObject");
+
+    const sourceObjectKey = toOmnioKey(v.parse(OmnioKeySchema, sourceKey));
+    const destinationObjectKey = toOmnioKey(v.parse(OmnioKeySchema, destinationKey));
+    const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
+    active.throwIfAborted();
+
+    using _lock = await asyncmux.readonly(this, active);
+
+    if (sourceObjectKey.key === destinationObjectKey.key) {
+      return await this.#index.get<TUserMetadata>({
+        key: sourceObjectKey,
+        action: "get",
+        signal: active,
+      });
+    }
+
+    const renamed = await this.#index.rename<TUserMetadata>({
+      action: "rename",
+      signal: active,
+      sourceKey: sourceObjectKey,
+      updatedAt: new Date().toISOString(),
+      destinationKey: destinationObjectKey,
+    });
+
+    if (renamed === null) {
+      return null;
+    }
+
+    const replacedEntityId = renamed.replacedEntityId;
+
+    if (replacedEntityId !== undefined && replacedEntityId !== renamed.object.entityId) {
+      this.#enqueueDeletion(destinationObjectKey, replacedEntityId);
+    }
+
+    return renamed.object;
   }
 
   /**
