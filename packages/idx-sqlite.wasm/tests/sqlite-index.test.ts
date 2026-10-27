@@ -51,6 +51,7 @@ function createObject(key: string, tags: readonly string[] = []): OmnioObject {
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-02T00:00:00Z",
       contentType: "text/plain",
+      hashAlgorithm: "sha256",
     },
     entityId: crypto.randomUUID(),
     embedding: new Float32Array([1, 0, 0]),

@@ -26,6 +26,13 @@ import type { IOmnioEntity, IOmnioEntityBuilder } from "./entity.js";
 const DEFAULT_LIFECYCLE_TIMEOUT_MS = 30_000;
 
 /**
+ * 実体ストレージーの保存時に使うハッシュアルゴリズムの識別子です。
+ *
+ * `ChecksumSha256` が計算するハッシュの識別子と一致させます。
+ */
+const ENTITY_HASH_ALGORITHM = "sha256";
+
+/**
  * ライフサイクル操作で使う中断シグナルを返します。
  *
  * @param signal 呼び出し側が指定した中断シグナルです。
@@ -597,6 +604,7 @@ export class Omnio {
           createdAt: existing?.system.createdAt ?? now,
           updatedAt: now,
           contentType: parsed.contentType,
+          hashAlgorithm: ENTITY_HASH_ALGORITHM,
         },
         entityId,
         embedding,

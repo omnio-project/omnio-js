@@ -44,6 +44,7 @@ describe("SqliteWasmDialect", () => {
           record_timestamp,
           content_type,
           size,
+          hash_algorithm,
           user_metadata,
           created_at,
           updated_at
@@ -55,6 +56,7 @@ describe("SqliteWasmDialect", () => {
           '2026-01-01T00:00:00Z',
           'text/plain',
           3,
+          'sha256',
           '{}',
           '2026-01-01T00:00:00Z',
           '2026-01-01T00:00:00Z'
@@ -87,6 +89,7 @@ describe("SqliteWasmDialect", () => {
       expect(journal[0]?.record_type).toBe("CREATE");
       expect(journal[0]?.record_timestamp).toBe("2026-01-01T00:00:00Z");
       expect(journal[0]?.dirty).toBe(0);
+      expect(journal[0]?.hash_algorithm).toBe("sha256");
       expect(tags).toStrictEqual([
         {
           key: "k1",
@@ -102,6 +105,7 @@ describe("SqliteWasmDialect", () => {
       expect(notNull.get("dirty")).toBe(1);
       expect(notNull.get("content_type")).toBe(0);
       expect(notNull.get("size")).toBe(0);
+      expect(notNull.get("hash_algorithm")).toBe(0);
       expect(notNull.get("user_metadata")).toBe(0);
       expect(notNull.get("created_at")).toBe(0);
       expect(notNull.get("updated_at")).toBe(0);

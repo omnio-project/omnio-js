@@ -489,7 +489,9 @@ describe("putObject と getObject", () => {
     expect(stored.system.hash).toBe(
       "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
     );
+    expect(stored.system.hashAlgorithm).toBe("sha256");
     expect(head?.description).toBe("cat on the mat");
+    expect(head?.system.hashAlgorithm).toBe("sha256");
     expect(head?.tags).toStrictEqual(["pet"]);
     expect(head?.userMetadata).toStrictEqual({ genre: "test" });
     expect(head?.embedding).toStrictEqual(new Float32Array([1, 0]));

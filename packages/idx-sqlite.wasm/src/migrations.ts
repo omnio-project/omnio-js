@@ -18,6 +18,7 @@ async function up001(db: Kysely<SqliteWasmDatabase>): Promise<void> {
     .addColumn("content_type", "text")
     .addColumn("size", "integer")
     .addColumn("hash", "text")
+    .addColumn("hash_algorithm", "text")
     .addColumn("description", "text")
     .addColumn("user_metadata", "text")
     .addColumn("embedding_model", "text")

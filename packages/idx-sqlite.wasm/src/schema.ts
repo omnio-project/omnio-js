@@ -29,6 +29,13 @@ export type ObjectRow = {
   /** バイト列のハッシュ値です。存在しない場合もあります。 */
   readonly hash: string | null;
 
+  /**
+   * ハッシュ値の計算に使ったアルゴリズムです。存在しない場合もあります。
+   *
+   * `"sha256"` のような識別子を保存します。
+   */
+  readonly hash_algorithm: string | null;
+
   /** 実体ストレージー上のキーです。UUID で表します。 */
   readonly entity_id: string;
 

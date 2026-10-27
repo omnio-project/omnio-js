@@ -13,6 +13,13 @@ export type OmnioSystemMetadata = {
   /** バイト列のハッシュ値です。存在しない場合もあります。 */
   readonly hash?: string | undefined;
 
+  /**
+   * ハッシュ値の計算に使ったアルゴリズムです。存在しない場合もあります。
+   *
+   * `"sha256"` のような識別子で表します。ハッシュ値はアルゴリズムごとの形式で表現します。
+   */
+  readonly hashAlgorithm?: string | undefined;
+
   /** バイト列のサイズです。バイト単位で表します。 */
   readonly size: number;
 
