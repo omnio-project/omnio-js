@@ -1,10 +1,11 @@
 packages:
   [
-    "omnio",
     "packages/core",
-    "packages/idx-pglite",
-    "packages/idx-sqlite.wasm",
+    "omnio",
     "packages/emb-gemma2",
+    "packages/idx-pglite",
+    "packages/idx-sqlite.node",
+    "packages/idx-sqlite.wasm",
     "website",
   ]
 

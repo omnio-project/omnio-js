@@ -3,10 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "workspaces": [
-    "omnio",
     "packages/core",
+    "omnio",
     "packages/emb-gemma2",
     "packages/idx-pglite",
+    "packages/idx-sqlite.node",
     "packages/idx-sqlite.wasm",
     "website"
   ],

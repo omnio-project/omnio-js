@@ -18,6 +18,10 @@
       "path": "packages/idx-sqlite.wasm",
     },
     {
+      "name": "@omniojs/idx-sqlite.node",
+      "path": "packages/idx-sqlite.node",
+    },
+    {
       "name": "@omniojs/emb-gemma2",
       "path": "packages/emb-gemma2",
     },

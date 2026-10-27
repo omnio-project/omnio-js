@@ -22,6 +22,8 @@ jobs:
             directory: "packages/idx-pglite"
           - name: "idx-sqlite.wasm"
             directory: "packages/idx-sqlite.wasm"
+          - name: "idx-sqlite.node"
+            directory: "packages/idx-sqlite.node"
           - name: "emb-gemma2"
             directory: "packages/emb-gemma2"
           - name: "omnio"
