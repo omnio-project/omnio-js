@@ -24,42 +24,46 @@ function requireMigration(name: string): Migration {
 }
 
 describe("SqliteWasmDialect", () => {
-  test("既存データを journal に移行し、entity ID・記録メタデータ・外部キーを維持する", async ({
-    expect,
-  }) => {
+  test("単一のマイグレーションで journal スキーマを作成する", async ({ expect }) => {
     // 準備：
-    const migration001 = requireMigration("001_create_objects");
-    const migration002 = requireMigration("002_rename_objects_to_journal");
-    const migration003 = requireMigration("003_add_record_metadata");
-    const migration004 = requireMigration("004_add_entity_id");
-    const migration005 = requireMigration("005_allow_delete_tombstones");
+    expect(Object.keys(MIGRATIONS)).toStrictEqual(["001_create_journal"]);
+
+    const migration = requireMigration("001_create_journal");
     const sqlite3 = await initSqliteWasm();
     const db = new Kysely<SqliteWasmDatabase>({
       dialect: new SqliteWasmDialect(new sqlite3.oo1.DB(":memory:", "c")),
     });
 
     try {
-      await migration001.up(db);
+      await migration.up(db);
       await sql`
-        insert into objects (
+        insert into journal (
           key,
+          entity_id,
+          record_type,
+          record_timestamp,
           content_type,
           size,
           user_metadata,
           created_at,
           updated_at
         )
-        values ('k1', 'text/plain', 3, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+        values (
+          'k1',
+          '00000000-0000-4000-8000-000000000001',
+          'CREATE',
+          '2026-01-01T00:00:00Z',
+          'text/plain',
+          3,
+          '{}',
+          '2026-01-01T00:00:00Z',
+          '2026-01-01T00:00:00Z'
+        )
       `.execute(db);
       await sql`
         insert into object_tags (key, tag)
         values ('k1', 'red')
       `.execute(db);
-
-      await migration002.up(db);
-      await migration003.up(db);
-      await migration004.up(db);
-      await migration005.up(db);
 
       // 実行：
       const journal = await db.selectFrom("journal").selectAll().execute();
@@ -79,17 +83,15 @@ describe("SqliteWasmDialect", () => {
 
       // 検証：
       expect(journal).toHaveLength(1);
+      expect(journal[0]?.entity_id).toBe("00000000-0000-4000-8000-000000000001");
+      expect(journal[0]?.record_type).toBe("CREATE");
+      expect(journal[0]?.record_timestamp).toBe("2026-01-01T00:00:00Z");
       expect(tags).toStrictEqual([
         {
           key: "k1",
           tag: "red",
         },
       ]);
-      expect(journal[0]?.entity_id).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
-      );
-      expect(journal[0]?.record_type).toBe("CREATE");
-      expect(journal[0]?.record_timestamp).toBe("2026-01-01T00:00:00Z");
 
       const notNull = new Map(columns.rows.map((column) => [column.name, column.notnull]));
       expect(notNull.get("key")).toBe(1);
