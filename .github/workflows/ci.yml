@@ -28,6 +28,11 @@ jobs:
             directory: "omnio"
     timeout-minutes: 30
     runs-on: ubuntu-latest
+    container:
+      # pnpm-workspace.yaml の playwright と同じバージョンに合わせます。
+      # ブラウザーとシステム依存関係が導入済みのため、apt 処理は不要です。
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --ipc=host --init
     steps:
       - name: "チェックアウト"
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -126,30 +131,11 @@ jobs:
 
           for rel_path in ${ordered_dep_dirs[@]+"${ordered_dep_dirs[@]}"}; do
             [ -n "$rel_path" ] || continue
-            dep_name=$(jq -r .name "${root_dir}/${rel_path}/package.json")
+            dep_name=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["name"])' "${root_dir}/${rel_path}/package.json")
             echo "${rel_path} で内部依存パッケージ ${dep_name} をビルドします"
             (cd "${root_dir}/${rel_path}" && npm run build)
             echo
           done
-
-      - name: "依存関係をインストール（パッケージ）"
-        timeout-minutes: 28
-        run: |
-          if grep -q "playwright" package.json; then
-            # apt 処理の停止に備えて、制限時間付きで再試行します。
-            for attempt in 1 2 3; do
-              code=0
-              timeout 9m npx playwright install --with-deps || code=$?
-              if [ "$code" -eq 0 ]; then
-                break
-              fi
-              if [ "$attempt" -eq 3 ]; then
-                exit "$code"
-              fi
-              sleep 10
-            done
-          fi
-        working-directory: ${{ matrix.package.directory }}
 
       - name: "テスト準備"
         run: |
