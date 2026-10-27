@@ -504,7 +504,6 @@ export class Omnio {
     using _lock = await asyncmux(this, active);
 
     const key = toOmnioKey(parsed.key);
-    const keyString = key.key;
     const bytes = await toBytes(parsed.data);
 
     active.throwIfAborted();
@@ -515,6 +514,8 @@ export class Omnio {
       signal: active,
     });
     const now = new Date().toISOString();
+    const entityId =
+      existing === null || existing.entityId === "" ? crypto.randomUUID() : existing.entityId;
     let embedding: Float32Array | undefined;
     let embeddingModel: string | undefined;
     let embeddingSource: EmbedSource | undefined;
@@ -538,6 +539,7 @@ export class Omnio {
         updatedAt: now,
         contentType: parsed.contentType,
       },
+      entityId,
       embedding,
       description: parsed.description,
       userMetadata: (parsed.userMetadata ?? {}) as TUserMetadata,
@@ -546,17 +548,19 @@ export class Omnio {
       embeddingSource,
     };
     const previousBytes =
-      (await nullIfKeyNotFound(() => this.#entity.get(keyString, { signal: active }))) ?? undefined;
+      existing === null
+        ? undefined
+        : ((await this.#readEntityBytes(existing, active)) ?? undefined);
 
     try {
-      await this.#entity.set(keyString, bytes, { signal: active });
+      await this.#entity.set(entityId, bytes, { signal: active });
       await this.#index.upsert({
         action: "upsert",
         object,
         signal: active,
       });
     } catch (ex) {
-      await this.#restoreEntity(keyString, previousBytes).catch(() => undefined);
+      await this.#restoreEntity(entityId, previousBytes).catch(() => undefined);
       throw ex;
     }
 
@@ -580,7 +584,17 @@ export class Omnio {
 
     using _lock = await asyncmux(this, active);
 
-    return await nullIfKeyNotFound(() => this.#entity.get(objectKey.key, { signal: active }));
+    const object = await this.#index.get<unknown>({
+      key: objectKey,
+      action: "get",
+      signal: active,
+    });
+
+    if (object === null) {
+      return null;
+    }
+
+    return await this.#readEntityBytes(object, active);
   }
 
   /**
@@ -605,7 +619,31 @@ export class Omnio {
 
     using _lock = await asyncmux(this, active);
 
-    return await nullIfKeyNotFound(() => this.#entity.stream(objectKey.key, { signal: active }));
+    const object = await this.#index.get<unknown>({
+      key: objectKey,
+      action: "get",
+      signal: active,
+    });
+
+    if (object === null) {
+      return null;
+    }
+
+    const stream = await nullIfKeyNotFound(() =>
+      this.#entity.stream(object.entityId, { signal: active }),
+    );
+
+    if (stream !== null) {
+      return stream;
+    }
+
+    const legacyKey = object.key.key;
+
+    if (legacyKey === object.entityId) {
+      return null;
+    }
+
+    return await nullIfKeyNotFound(() => this.#entity.stream(legacyKey, { signal: active }));
   }
 
   /**
@@ -652,9 +690,32 @@ export class Omnio {
 
     using _lock = await asyncmux(this, active);
 
-    const existed = await this.#entity.has(objectKey.key, { signal: active });
+    const object = await this.#index.get<unknown>({
+      key: objectKey,
+      action: "get",
+      signal: active,
+    });
+    let existed = false;
 
-    await this.#entity.delete(objectKey.key, { signal: active });
+    if (object !== null) {
+      const hasEntity = await this.#entity.has(object.entityId, { signal: active });
+
+      if (hasEntity) {
+        await this.#entity.delete(object.entityId, { signal: active });
+        existed = true;
+      }
+
+      const legacyKey = object.key.key;
+
+      if (legacyKey !== object.entityId) {
+        const hasLegacyEntity = await this.#entity.has(legacyKey, { signal: active });
+
+        if (hasLegacyEntity) {
+          await this.#entity.delete(legacyKey, { signal: active });
+          existed = true;
+        }
+      }
+    }
 
     const indexDeleted = await this.#index.delete({
       key: objectKey,
@@ -861,24 +922,62 @@ export class Omnio {
   }
 
   /**
+   * 実体のバイト列を取得します。
+   *
+   * 旧キーにのみ実体が存在する場合は、entityId のキーへ移行します。
+   *
+   * @param object 取得するオブジェクトです。
+   * @param signal 処理を中断するための中断シグナルです。
+   *
+   * @returns バイト列、存在しない場合は null です。
+   */
+  async #readEntityBytes(
+    object: Pick<OmnioObject<unknown>, "entityId" | "key">,
+    signal: AbortSignal,
+  ): Promise<Uint8Array | null> {
+    const bytes = await nullIfKeyNotFound(() => this.#entity.get(object.entityId, { signal }));
+
+    if (bytes !== null) {
+      return bytes;
+    }
+
+    const legacyKey = object.key.key;
+
+    if (legacyKey === object.entityId) {
+      return null;
+    }
+
+    const legacyBytes = await nullIfKeyNotFound(() => this.#entity.get(legacyKey, { signal }));
+
+    if (legacyBytes === null) {
+      return null;
+    }
+
+    await this.#entity.set(object.entityId, legacyBytes, { signal });
+    await this.#entity.delete(legacyKey, { signal }).catch(() => undefined);
+
+    return legacyBytes;
+  }
+
+  /**
    * 失敗した保存の実体を元の状態に戻します。
    *
    * 保存前のバイト列があればそれを書き戻し、ない場合は削除します。
    * 補償処理には既定のタイムアウトを設定し、close 時の中断の影響を受けないようにします。
    *
-   * @param key 復元するキーです。
+   * @param entityId 復元する実体キーです。
    * @param previousBytes 保存前のバイト列です。存在しない場合もあります。
    */
-  async #restoreEntity(key: string, previousBytes: Uint8Array | undefined): Promise<void> {
+  async #restoreEntity(entityId: string, previousBytes: Uint8Array | undefined): Promise<void> {
     const signal = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
 
     if (previousBytes !== undefined) {
-      await this.#entity.set(key, previousBytes, { signal });
+      await this.#entity.set(entityId, previousBytes, { signal });
 
       return;
     }
 
-    await this.#entity.delete(key, { signal });
+    await this.#entity.delete(entityId, { signal });
   }
 
   /**

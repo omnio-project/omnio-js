@@ -52,6 +52,7 @@ function createObject(key: string, tags: readonly string[] = []): OmnioObject {
       updatedAt: "2026-01-02T00:00:00Z",
       contentType: "text/plain",
     },
+    entityId: crypto.randomUUID(),
     embedding: new Float32Array([1, 0, 0]),
     description: `${key} の説明文`,
     userMetadata: { genre: "test" },

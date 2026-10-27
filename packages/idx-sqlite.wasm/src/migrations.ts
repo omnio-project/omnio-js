@@ -125,9 +125,52 @@ async function down003(db: Kysely<SqliteWasmDatabase>): Promise<void> {
 }
 
 /**
+ * `journal` テーブルに実体ストレージーのキーを追加します。
+ *
+ * @param db kysely のインスタンスです。
+ */
+async function up004(db: Kysely<SqliteWasmDatabase>): Promise<void> {
+  await db.schema
+    .alterTable("journal")
+    .addColumn("entity_id", "text", (column) => column.notNull().defaultTo(""))
+    .execute();
+
+  const rows = await db.selectFrom("journal").select("key").execute();
+
+  for (const row of rows) {
+    await db
+      .updateTable("journal")
+      .set({ entity_id: crypto.randomUUID() })
+      .where("key", "=", row.key)
+      .execute();
+  }
+
+  await db.schema
+    .createIndex("journal_entity_id_index")
+    .on("journal")
+    .column("entity_id")
+    .unique()
+    .execute();
+}
+
+/**
+ * `journal` テーブルから実体ストレージーのキーを削除します。
+ *
+ * @param db kysely のインスタンスです。
+ */
+async function down004(db: Kysely<SqliteWasmDatabase>): Promise<void> {
+  await db.schema.dropIndex("journal_entity_id_index").execute();
+  await db.schema.alterTable("journal").dropColumn("entity_id").execute();
+}
+
+/**
  * 適用するマイグレーションの一覧です。キー名の辞書順で実行します。
  */
 export const MIGRATIONS: Record<string, Migration> = {
+  "004_add_entity_id": {
+    up: up004,
+    down: down004,
+  },
   "001_create_objects": {
     up: up001,
     down: down001,

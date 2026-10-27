@@ -26,6 +26,9 @@ export type ObjectRow = {
   /** バイト列のハッシュ値です。存在しない場合もあります。 */
   readonly hash: string | null;
 
+  /** 実体ストレージー上のキーです。UUID で表します。 */
+  readonly entity_id: string;
+
   /** オブジェクトを一意に識別するキーです。 */
   readonly key: string;
 

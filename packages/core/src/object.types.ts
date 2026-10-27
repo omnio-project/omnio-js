@@ -72,6 +72,9 @@ export type OmnioObject<TUserMetadata = Record<string, unknown>> = {
   /** 埋め込みベクトルの由来です。未生成の場合もあります。 */
   readonly embeddingSource?: EmbedSource | undefined;
 
+  /** 実体ストレージー上のキーです。UUID で表します。 */
+  readonly entityId: string;
+
   /** オブジェクトを一意に識別するキーです。 */
   readonly key: OmnioKey;
 

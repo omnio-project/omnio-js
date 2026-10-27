@@ -7,7 +7,7 @@ import {
 } from "@omniojs/core";
 import { SqliteWasmIndex } from "@omniojs/idx-sqlite.wasm";
 import { Memory } from "@unikvs/memory";
-import { type Value, Builder } from "unikvs";
+import { type Value, Builder, KeyNotFoundError } from "unikvs";
 import { ValiError } from "valibot";
 import { vi, test, describe } from "vite-plus/test";
 
@@ -461,7 +461,69 @@ describe("putObject と getObject", () => {
 
     // 検証：
     expect(second.system.createdAt).toBe(first.system.createdAt);
+    expect(second.entityId).toBe(first.entityId);
     expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([1, 2]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("実体は UUID の entityId をキーに保存する", async ({ expect, signal }) => {
+    // 準備：
+    const entity = createTestEntity();
+    const omnio = await createTestOmnio(signal, new SqliteWasmIndex(), entity);
+
+    // 実行：
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1, 2, 3]),
+      contentType: "text/plain",
+    });
+
+    // 検証：
+    expect(stored.entityId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
+    );
+    expect(await entity.get(stored.entityId)).toStrictEqual(new Uint8Array([1, 2, 3]));
+    await expect(entity.get("k")).rejects.toBeInstanceOf(KeyNotFoundError);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("旧キーに保存された実体を entityId へ移行する", async ({ expect, signal }) => {
+    // 準備：
+    const entity = createTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, entity);
+    const entityId = crypto.randomUUID();
+    const bytes = new Uint8Array([1, 2, 3]);
+    await index.upsert({
+      action: "upsert",
+      object: {
+        key: OmnioKey.parse("legacy"),
+        tags: [],
+        system: {
+          size: bytes.byteLength,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          contentType: "text/plain",
+        },
+        entityId,
+        userMetadata: {},
+      },
+      signal,
+    });
+    await entity.set("legacy", bytes, { signal });
+
+    // 実行：
+    const actual = await omnio.getObject("legacy", signal);
+
+    // 検証：
+    expect(actual).toStrictEqual(bytes);
+
+    expect(await entity.get(entityId)).toStrictEqual(bytes);
+    expect(await entity.has("legacy")).toBe(false);
 
     // 後始末：
     await omnio.close(signal);
@@ -500,32 +562,6 @@ describe("putObject と getObject", () => {
     expect(head?.system.contentType).toBe("text/plain");
     expect(head?.userMetadata).toStrictEqual({ version: 1 });
     expect(head?.embedding).toStrictEqual(new Float32Array([1, 0]));
-
-    // 後始末：
-    await omnio.close(signal);
-  });
-
-  test("索引にない既存実体の上書きに失敗しても実体を残す", async ({ expect, signal }) => {
-    // 準備：
-    const entity = createTestEntity();
-    const index = new SqliteWasmIndex();
-    const omnio = await createTestOmnio(signal, index, entity);
-    await entity.set("orphan", new Uint8Array([1, 2, 3]));
-
-    const failure = new Error("upsert failed");
-    using _upsert = vi.spyOn(index, "upsert").mockRejectedValueOnce(failure);
-
-    // 実行と検証：
-    await expect(
-      omnio.putObject({
-        key: "orphan",
-        data: new Uint8Array([9]),
-        contentType: "text/plain",
-      }),
-    ).rejects.toBe(failure);
-
-    expect(await omnio.getObject("orphan", signal)).toStrictEqual(new Uint8Array([1, 2, 3]));
-    expect(await omnio.headObject("orphan", signal)).toBeNull();
 
     // 後始末：
     await omnio.close(signal);
