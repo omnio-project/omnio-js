@@ -30,13 +30,7 @@ export type UnsupportedModalityErrorMeta = {
 /**
  * `UnsupportedModalityError` のコンストラクター引数です。
  */
-export type UnsupportedModalityErrorArgs = ErrorOptions & {
-  /** 要求されたモダリティー名です。 */
-  readonly actual: string;
-
-  /** 対応しているモダリティー名の一覧です。 */
-  readonly supported: readonly string[];
-};
+export type UnsupportedModalityErrorArgs = ErrorOptions & UnsupportedModalityErrorMeta;
 
 /**
  * 埋め込み器が対応していないモダリティーを要求したことを示すエラーです。

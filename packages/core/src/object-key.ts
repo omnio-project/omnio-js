@@ -87,13 +87,8 @@ export class OmnioKey {
    * ```
    */
   public static check(objectKey: string): boolean {
-    try {
-      // インスタンス化を試みることで、バリデーションの確認を行います。
-      // 解析後のフルキーが元の入力と一致するかを確認することで、妥当性を判断します。
-      return new OmnioKey(objectKey).key === objectKey;
-    } catch {
-      return false;
-    }
+    // インスタンスを生成せず、オブジェクトキーの検証だけを行います。
+    return safeParse(ObjectKeySchema, objectKey).success;
   }
 
   /**

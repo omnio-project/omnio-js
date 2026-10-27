@@ -18,6 +18,8 @@ jobs:
         package:
           - name: "core"
             directory: "packages/core"
+          - name: "idx-sql"
+            directory: "packages/idx-sql"
           - name: "idx-sqlite.wasm"
             directory: "packages/idx-sqlite.wasm"
           - name: "idx-sqlite.node"

@@ -59,6 +59,24 @@ function isWellFormedUtf8(input: string): boolean {
   return utf8.decode(utf8.encode(input)) === input;
 }
 
+/**
+ * 長さと UTF-8 の妥当性を検証する文字列スキーマを作ります。
+ *
+ * @param maxChars 最大文字数です。
+ * @param maxBytes 最大バイト数です。
+ *
+ * @returns 検証済みの文字列スキーマです。
+ */
+function utf8String(maxChars: number, maxBytes: number): GenericSchema<string, string> {
+  return pipe(
+    string(),
+    minLength(1),
+    maxLength(maxChars),
+    check(isWellFormedUtf8),
+    check((input) => getUtf8ByteLength(input) <= maxBytes),
+  );
+}
+
 /** オブジェクトキーの文字列表現の入力型です。 */
 export type ObjectKeyLike = string;
 
@@ -76,11 +94,7 @@ export type ObjectKey = string & Brand<"ObjectKey">;
  * ```
  */
 export const ObjectKeySchema: GenericSchema<ObjectKeyLike, ObjectKey> = pipe(
-  string(),
-  minLength(1),
-  maxLength(MAX_OBJECT_KEY_LENGTH),
-  check(isWellFormedUtf8),
-  check((input) => getUtf8ByteLength(input) <= MAX_OBJECT_KEY_BYTES),
+  utf8String(MAX_OBJECT_KEY_LENGTH, MAX_OBJECT_KEY_BYTES),
   brand("ObjectKey"),
 );
 
@@ -101,11 +115,7 @@ export type Tag = string & Brand<"Tag">;
  * ```
  */
 export const TagSchema: GenericSchema<TagLike, Tag> = pipe(
-  string(),
-  minLength(1),
-  maxLength(MAX_TAG_LENGTH),
-  check(isWellFormedUtf8),
-  check((input) => getUtf8ByteLength(input) <= MAX_TAG_BYTES),
+  utf8String(MAX_TAG_LENGTH, MAX_TAG_BYTES),
   brand("Tag"),
 );
 

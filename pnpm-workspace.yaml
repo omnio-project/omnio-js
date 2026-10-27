@@ -1,6 +1,7 @@
 packages:
   [
     "packages/core",
+    "packages/idx-sql",
     "omnio",
     "packages/emb-gemma2",
     "packages/idx-pglite",

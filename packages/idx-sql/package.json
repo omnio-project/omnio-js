@@ -1,0 +1,39 @@
+{
+  "name": "@omniojs/idx-sql",
+  "version": "0.0.0",
+  "description": "SQL データベースによる Omnio.js 用 ObjectIndex の共通実装です。",
+  "homepage": "https://omnio-project.github.io/omnio-js/",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/omnio-project/omnio-js",
+    "directory": "packages/idx-sql"
+  },
+  "files": [
+    "dist",
+    "src",
+    "package.json",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "vp -C .config pack"
+  },
+  "dependencies": {
+    "@omniojs/core": "workspace:*",
+    "asyncmux": "^0.0.12",
+    "kysely": "^0.29.7"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "readme": "README.md"
+}

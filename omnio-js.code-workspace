@@ -10,6 +10,10 @@
       "path": "packages/core",
     },
     {
+      "name": "@omniojs/idx-sql",
+      "path": "packages/idx-sql",
+    },
+    {
       "name": "@omniojs/idx-sqlite.wasm",
       "path": "packages/idx-sqlite.wasm",
     },

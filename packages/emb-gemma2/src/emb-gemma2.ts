@@ -10,6 +10,7 @@ import type {
 } from "@huggingface/transformers";
 import {
   type IEmbedder,
+  type EmbedInput,
   type EmbedderInfo,
   ModelLoadError,
   EmbedFailedError,
@@ -169,25 +170,9 @@ export class Gemma2Embedder implements IEmbedder {
 
     using _lock = await asyncmux(this, c.signal);
 
-    if (c.input.kind === "text") {
-      const vectors = await this.#embedBatch([c.input.text], c.signal);
+    const vectors = await this.#embedInputs([c.input], c.signal);
 
-      return this.#requireVector(vectors[0], "text");
-    }
-
-    if (c.input.kind === "image") {
-      const rawImage = await this.#decodeImage(c.input.data, c.input.mimeType, c.signal);
-      const vectors = await this.#embedImages([rawImage], c.signal);
-
-      return this.#requireVector(vectors[0], "image");
-    }
-
-    const kind: string = (c.input as { kind: string }).kind;
-
-    throw new UnsupportedModalityError({
-      actual: kind,
-      supported: ["text", "image"],
-    });
+    return this.#requireVector(vectors[0], c.input.kind);
   }
 
   /**
@@ -202,6 +187,37 @@ export class Gemma2Embedder implements IEmbedder {
 
     using _lock = await asyncmux(this, c.signal);
 
+    return await this.#embedInputs(c.inputs, c.signal);
+  }
+
+  /**
+   * テキストを埋め込みます。
+   *
+   * @param c テキストを埋め込む操作のコンテキストです。
+   *
+   * @returns 埋め込みベクトルを解決する Promise です。
+   */
+  public async embedText(c: IEmbedder.EmbedTextContext): Promise<Float32Array> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux(this, c.signal);
+
+    const vectors = await this.#embedBatch([c.text], c.signal);
+
+    return this.#requireVector(vectors[0], "text");
+  }
+
+  /**
+   * 複数の入力をテキストと画像に振り分けて埋め込みます。
+   *
+   * 結果は入力と同じ順序で返します。
+   *
+   * @param inputs 埋め込む入力の一覧です。
+   * @param signal 処理を中断するための中断シグナルです。
+   *
+   * @returns 入力と同じ順序の埋め込みベクトルの一覧です。
+   */
+  async #embedInputs(inputs: readonly EmbedInput[], signal: AbortSignal): Promise<Float32Array[]> {
     const texts: {
       text: string;
       index: number;
@@ -211,7 +227,7 @@ export class Gemma2Embedder implements IEmbedder {
       index: number;
     }[] = [];
 
-    for (const [index, input] of c.inputs.entries()) {
+    for (const [index, input] of inputs.entries()) {
       if (input.kind === "text") {
         texts.push({
           text: input.text,
@@ -223,7 +239,7 @@ export class Gemma2Embedder implements IEmbedder {
 
       if (input.kind === "image") {
         images.push({
-          image: await this.#decodeImage(input.data, input.mimeType, c.signal),
+          image: await this.#decodeImage(input.data, input.mimeType, signal),
           index,
         });
 
@@ -247,14 +263,14 @@ export class Gemma2Embedder implements IEmbedder {
         ? []
         : await this.#embedBatch(
             texts.map((entry) => entry.text),
-            c.signal,
+            signal,
           );
     const imageVectors =
       images.length === 0
         ? []
         : await this.#embedImages(
             images.map((entry) => entry.image),
-            c.signal,
+            signal,
           );
     const vectors: Float32Array[] = [];
 
@@ -267,23 +283,6 @@ export class Gemma2Embedder implements IEmbedder {
     }
 
     return vectors;
-  }
-
-  /**
-   * テキストを埋め込みます。
-   *
-   * @param c テキストを埋め込む操作のコンテキストです。
-   *
-   * @returns 埋め込みベクトルを解決する Promise です。
-   */
-  public async embedText(c: IEmbedder.EmbedTextContext): Promise<Float32Array> {
-    c.signal.throwIfAborted();
-
-    using _lock = await asyncmux(this, c.signal);
-
-    const vectors = await this.#embedBatch([c.text], c.signal);
-
-    return this.#requireVector(vectors[0], "text");
   }
 
   /**
