@@ -105,6 +105,7 @@ describe("exports", () => {
     // 実行と検証：
     expectTypeOf<dbTypes.IObjectIndex>().toEqualTypeOf<core.IObjectIndex>();
     expectTypeOf<dbTypes.IUpsertContext>().toEqualTypeOf<core.IUpsertContext>();
+    expectTypeOf<dbTypes.IUpdateMetadataContext>().toEqualTypeOf<core.IUpdateMetadataContext>();
     expectTypeOf<dbTypes.IGetContext>().toEqualTypeOf<core.IGetContext>();
     expectTypeOf<dbTypes.IHasContext>().toEqualTypeOf<core.IHasContext>();
     expectTypeOf<dbTypes.IDeleteContext>().toEqualTypeOf<core.IDeleteContext>();
@@ -138,6 +139,7 @@ describe("exports", () => {
     // 実行と検証：
     expectTypeOf<objectTypes.OmnioObject>().toEqualTypeOf<core.OmnioObject>();
     expectTypeOf<objectTypes.OmnioSystemMetadata>().toEqualTypeOf<core.OmnioSystemMetadata>();
+    expectTypeOf<objectTypes.ObjectMetadataPatch>().toEqualTypeOf<core.ObjectMetadataPatch>();
     expectTypeOf<objectTypes.EmbedSource>().toEqualTypeOf<core.EmbedSource>();
     expectTypeOf<objectTypes.MetadataFilter>().toEqualTypeOf<core.MetadataFilter>();
   });

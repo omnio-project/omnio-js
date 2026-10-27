@@ -5,6 +5,7 @@ export type {
   PutObjectInput,
   ObjectSearchQuery,
   SearchObjectsInput,
+  UpdateObjectMetadataInput,
 } from "./omnio.js";
 export { Omnio } from "./omnio.js";
 

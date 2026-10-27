@@ -28,6 +28,29 @@ export type OmnioSystemMetadata = {
 };
 
 /**
+ * オブジェクトの変更可能なメタデータです。
+ *
+ * 実体のバイト列に由来する `size` や `hash`、作成時刻などは含みません。
+ * 省略した項目は変更しません。
+ */
+export type ObjectMetadataPatch<TUserMetadata = Record<string, unknown>> = {
+  /** コンテンツタイプです。省略時は変更しません。 */
+  readonly contentType?: string | undefined;
+
+  /** 説明文です。省略時は変更しません。 */
+  readonly description?: string | undefined;
+
+  /** 絞り込み用のタグ一覧です。省略時は変更しません。空配列を指定するとすべて削除します。 */
+  readonly tags?: readonly string[] | undefined;
+
+  /** 利用者が自由に付与するメタデータです。省略時は変更しません。 */
+  readonly userMetadata?: TUserMetadata | undefined;
+
+  /** 更新時刻です。ISO 8601 文字列で表します。 */
+  readonly updatedAt: string;
+};
+
+/**
  * 埋め込みベクトルの由来です。
  */
 export type EmbedSource =

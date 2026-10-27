@@ -863,6 +863,123 @@ describe("putObject と getObject", () => {
   });
 });
 
+describe("updateObjectMetadata", () => {
+  test("変更可能なメタデータだけを更新する", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    const first = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1, 2, 3]),
+      tags: ["old"],
+      contentType: "text/plain",
+      description: "cat on the mat",
+      userMetadata: { version: 1 },
+    });
+
+    // 実行：
+    const updated = await omnio.updateObjectMetadata({
+      key: "k",
+      tags: [],
+      signal,
+      contentType: "application/json",
+      description: "dog in the park",
+      userMetadata: { version: 2 },
+    });
+
+    // 検証：
+    expect(updated?.entityId).toBe(first.entityId);
+    expect(updated?.system.size).toBe(first.system.size);
+    expect(updated?.system.hash).toBe(first.system.hash);
+    expect(updated?.system.hashAlgorithm).toBe(first.system.hashAlgorithm);
+    expect(updated?.system.createdAt).toBe(first.system.createdAt);
+    expect(updated?.system.contentType).toBe("application/json");
+    expect(updated?.description).toBe("dog in the park");
+    expect(updated?.tags).toStrictEqual([]);
+    expect(updated?.userMetadata).toStrictEqual({ version: 2 });
+    expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([1, 2, 3]));
+    expect(await omnio.headObject("k", signal)).toStrictEqual(updated);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("省略した項目は変更しない", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      tags: ["pet"],
+      contentType: "text/plain",
+      description: "cat on the mat",
+      userMetadata: { version: 1 },
+    });
+
+    // 実行：
+    const updated = await omnio.updateObjectMetadata({
+      key: "k",
+      signal,
+      userMetadata: { version: 2 },
+    });
+
+    // 検証：
+    expect(updated?.system.contentType).toBe("text/plain");
+    expect(updated?.description).toBe("cat on the mat");
+    expect(updated?.tags).toStrictEqual(["pet"]);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("実体に由来する項目は更新できない", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    const first = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1, 2, 3]),
+      contentType: "text/plain",
+    });
+
+    // 実行：
+    const updated = await omnio.updateObjectMetadata({
+      key: "k",
+      hash: "invalid",
+      size: 999,
+      entityId: "changed",
+      createdAt: "2000-01-01T00:00:00Z",
+      userMetadata: { version: 2 },
+      hashAlgorithm: "md5",
+    } as never);
+
+    // 検証：
+    expect(updated?.system.size).toBe(first.system.size);
+    expect(updated?.system.hash).toBe(first.system.hash);
+    expect(updated?.system.hashAlgorithm).toBe(first.system.hashAlgorithm);
+    expect(updated?.system.createdAt).toBe(first.system.createdAt);
+    expect(updated?.entityId).toBe(first.entityId);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("存在しないキーは null を返す", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+
+    // 実行と検証：
+    expect(
+      await omnio.updateObjectMetadata({
+        key: "missing",
+        signal,
+        userMetadata: { version: 1 },
+      }),
+    ).toBeNull();
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+});
+
 describe("hasObject", () => {
   test("索引に存在するかを返す", async ({ expect, signal }) => {
     // 準備：

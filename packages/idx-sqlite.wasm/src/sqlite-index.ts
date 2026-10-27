@@ -472,6 +472,94 @@ export class SqliteWasmIndex implements IObjectIndex {
   }
 
   /**
+   * オブジェクトの変更可能なメタデータだけを更新します。
+   *
+   * @param c メタデータを更新する操作のコンテキストです。
+   *
+   * @returns 更新したオブジェクト、存在しない場合は null です。
+   */
+  public async updateMetadata<TUserMetadata>(
+    c: IObjectIndex.UpdateMetadataContext<TUserMetadata>,
+  ): Promise<OmnioObject<TUserMetadata> | null> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux(this, c.signal);
+
+    const kysely = this.#requireOpen("updateMetadata");
+    const updated = await kysely.transaction().execute(async (transaction) => {
+      const existing = await transaction
+        .selectFrom("journal")
+        .select(["content_type", "description", "user_metadata"])
+        .where("key", "=", c.key.key)
+        .where("record_type", "is not", "DELETE")
+        .executeTakeFirst();
+
+      if (existing === undefined) {
+        return false;
+      }
+
+      const contentType = c.metadata.contentType ?? existing.content_type;
+      const description = c.metadata.description ?? existing.description;
+      const userMetadata =
+        c.metadata.userMetadata === undefined
+          ? existing.user_metadata
+          : stringifyJson(c.metadata.userMetadata, "updateMetadata");
+      await transaction
+        .updateTable("journal")
+        .set({
+          updated_at: c.metadata.updatedAt,
+          description,
+          record_type: "UPDATE_METADATA",
+          content_type: contentType,
+          user_metadata: userMetadata,
+          record_timestamp: c.metadata.updatedAt,
+        })
+        .where("key", "=", c.key.key)
+        .where("record_type", "is not", "DELETE")
+        .execute();
+
+      if (c.metadata.tags !== undefined) {
+        const tags = [...new Set(c.metadata.tags)];
+
+        await transaction.deleteFrom("object_tag").where("key", "=", c.key.key).execute();
+
+        if (tags.length > 0) {
+          await transaction
+            .insertInto("object_tag")
+            .values(
+              tags.map((tag) => ({
+                key: c.key.key,
+                tag,
+              })),
+            )
+            .execute();
+        }
+      }
+
+      return true;
+    });
+
+    if (!updated) {
+      return null;
+    }
+
+    const row = await kysely
+      .selectFrom("journal")
+      .selectAll()
+      .where("key", "=", c.key.key)
+      .where("record_type", "is not", "DELETE")
+      .executeTakeFirst();
+
+    if (row === undefined) {
+      return null;
+    }
+
+    const tags = await this.#loadTags(kysely, [row.key]);
+
+    return this.#toObject<TUserMetadata>(row, tags.get(row.key) ?? [], "updateMetadata");
+  }
+
+  /**
    * オブジェクトを取得します。
    *
    * @param c 取得する操作のコンテキストです。

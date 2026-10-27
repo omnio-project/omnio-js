@@ -535,6 +535,115 @@ describe("has", () => {
   });
 });
 
+describe("updateMetadata", () => {
+  test("変更可能なメタデータだけを更新する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const object = createObject("k1", ["old"]);
+    await index.upsert({
+      action: "upsert",
+      object,
+      signal,
+    });
+
+    // 実行：
+    const updated = await index.updateMetadata({
+      key: OmnioKey.parse("k1"),
+      action: "updateMetadata",
+      signal,
+      metadata: {
+        tags: [],
+        updatedAt: "2026-02-01T00:00:00Z",
+        contentType: "application/json",
+        description: "新しい説明",
+        userMetadata: { genre: "updated" },
+      },
+    });
+
+    // 検証：
+    expect(updated?.entityId).toBe(object.entityId);
+    expect(updated?.system.size).toBe(object.system.size);
+    expect(updated?.system.hash).toBe(object.system.hash);
+    expect(updated?.system.hashAlgorithm).toBe(object.system.hashAlgorithm);
+    expect(updated?.system.createdAt).toBe(object.system.createdAt);
+    expect(updated?.system.updatedAt).toBe("2026-02-01T00:00:00Z");
+    expect(updated?.system.contentType).toBe("application/json");
+    expect(updated?.description).toBe("新しい説明");
+    expect(updated?.tags).toStrictEqual([]);
+    expect(updated?.userMetadata).toStrictEqual({ genre: "updated" });
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("存在しないキーは null を返す", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+
+    // 実行と検証：
+    expect(
+      await index.updateMetadata({
+        key: OmnioKey.parse("missing"),
+        action: "updateMetadata",
+        signal,
+        metadata: {
+          updatedAt: "2026-02-01T00:00:00Z",
+          userMetadata: { genre: "updated" },
+        },
+      }),
+    ).toBeNull();
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("dirty フラグを維持する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: createObject("k1"),
+      signal,
+    });
+    await index.markDirty({
+      action: "markDirty",
+      signal,
+      embeddingModel: "other-model",
+    });
+
+    // 実行：
+    await index.updateMetadata({
+      key: OmnioKey.parse("k1"),
+      action: "updateMetadata",
+      signal,
+      metadata: {
+        updatedAt: "2026-02-01T00:00:00Z",
+        userMetadata: { genre: "updated" },
+      },
+    });
+
+    const dirty = await index.listDirty({
+      action: "listDirty",
+      signal,
+    });
+
+    // 検証：
+    expect(keysOf(dirty)).toStrictEqual(["k1"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+});
+
 describe("delete", () => {
   test("削除すると取得できなくなりタグも消える", async ({ expect, signal }) => {
     // 準備：

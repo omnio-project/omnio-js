@@ -95,6 +95,31 @@ export type PutObjectInput<TUserMetadata = Record<string, unknown>> = {
 };
 
 /**
+ * オブジェクトの変更可能なメタデータを更新する入力です。
+ *
+ * 実体のバイト列に由来するサイズやハッシュ、作成時刻、実体 ID は更新できません。
+ */
+export type UpdateObjectMetadataInput<TUserMetadata = Record<string, unknown>> = {
+  /** オブジェクトキーまたはその文字列表現です。 */
+  readonly key: OmnioKey | string;
+
+  /** コンテンツタイプです。省略時は変更しません。 */
+  readonly contentType?: string | undefined;
+
+  /** 任意のテキスト形式の説明文です。省略時は変更しません。 */
+  readonly description?: string | undefined;
+
+  /** 絞り込み用のタグ一覧です。省略時は変更しません。空配列を指定するとすべて削除します。 */
+  readonly tags?: readonly string[] | undefined;
+
+  /** 利用者が自由に付与するメタデータです。省略時は変更しません。 */
+  readonly userMetadata?: TUserMetadata | undefined;
+
+  /** 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。 */
+  readonly signal?: AbortSignal | undefined;
+};
+
+/**
  * 意味検索のクエリーです。
  */
 export type ObjectSearchQuery =
@@ -307,6 +332,7 @@ const IObjectIndexSchema = v.custom<IObjectIndex>((input) => {
       "open",
       "close",
       "upsert",
+      "updateMetadata",
       "get",
       "has",
       "delete",
@@ -361,6 +387,16 @@ const PutObjectInputSchema = v.object({
   signal: OptionalAbortSignalSchema,
   embedding: v.optional(EmbeddingSchema),
   contentType: ContentTypeSchema,
+  description: v.optional(DescriptionSchema),
+  userMetadata: v.optional(UserMetadataSchema),
+});
+
+/** 変更可能なメタデータの更新入力を検証するスキーマです。 */
+const UpdateObjectMetadataInputSchema = v.object({
+  key: OmnioKeySchema,
+  tags: v.optional(TagsSchema),
+  signal: OptionalAbortSignalSchema,
+  contentType: v.optional(ContentTypeSchema),
   description: v.optional(DescriptionSchema),
   userMetadata: v.optional(UserMetadataSchema),
 });
@@ -627,6 +663,44 @@ export class Omnio {
       await this.#restoreEntity(entityId, previousBytes).catch(() => undefined);
       throw ex;
     }
+  }
+
+  /**
+   * オブジェクトの変更可能なメタデータだけを更新します。
+   *
+   * 実体ストレージーは変更しません。サイズ、ハッシュ、作成時刻、実体 ID は更新できません。
+   * 説明文を変更しても埋め込みベクトルは作り直さないため、検索へ反映するには `reindexObject` を使ってください。
+   *
+   * @param input 更新する入力です。
+   *
+   * @returns 更新したオブジェクト、存在しない場合は null です。
+   */
+  public async updateObjectMetadata<TUserMetadata = Record<string, unknown>>(
+    input: UpdateObjectMetadataInput<TUserMetadata>,
+  ): Promise<OmnioObject<TUserMetadata> | null> {
+    this.#requireOpen("updateObjectMetadata");
+
+    const parsed = v.parse(UpdateObjectMetadataInputSchema, input);
+    const active = this.#activeSignal(parsed.signal);
+    active.throwIfAborted();
+
+    using _lock = await asyncmux.readonly(this, active);
+
+    const key = toOmnioKey(parsed.key);
+    const updatedAt = new Date().toISOString();
+
+    return await this.#index.updateMetadata<TUserMetadata>({
+      key,
+      action: "updateMetadata",
+      signal: active,
+      metadata: {
+        tags: parsed.tags,
+        updatedAt,
+        contentType: parsed.contentType,
+        description: parsed.description,
+        userMetadata: parsed.userMetadata as TUserMetadata | undefined,
+      },
+    });
   }
 
   /**

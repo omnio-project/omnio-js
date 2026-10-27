@@ -16,6 +16,7 @@ export type ContextAction =
   | "purge"
   | "search"
   | "supports"
+  | "updateMetadata"
   | "upsert";
 
 /**

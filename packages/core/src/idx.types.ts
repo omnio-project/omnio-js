@@ -2,7 +2,7 @@ import type { MaybePromise } from "maypromise";
 
 import type { IOpenContext, ICloseContext, IActionContext } from "./context.types.js";
 import type { OmnioKey } from "./object-key.js";
-import type { OmnioObject, MetadataFilter } from "./object.types.js";
+import type { OmnioObject, MetadataFilter, ObjectMetadataPatch } from "./object.types.js";
 
 /**
  * ベクトル類似度の計算方式です。
@@ -26,6 +26,22 @@ export interface IUpsertContext<TUserMetadata = Record<string, unknown>> extends
 
   /** 保存するオブジェクトです。 */
   readonly object: OmnioObject<TUserMetadata>;
+}
+
+/**
+ * オブジェクトの変更可能なメタデータを更新する操作のコンテキストです。
+ */
+export interface IUpdateMetadataContext<
+  TUserMetadata = Record<string, unknown>,
+> extends IActionContext {
+  /** 操作の種別です。 */
+  readonly action: "updateMetadata";
+
+  /** 更新するオブジェクトのキーです。 */
+  readonly key: OmnioKey;
+
+  /** 更新する変更可能なメタデータです。 */
+  readonly metadata: ObjectMetadataPatch<TUserMetadata>;
 }
 
 /**
@@ -219,6 +235,12 @@ export namespace IObjectIndex {
    */
   export type UpsertContext<TUserMetadata = Record<string, unknown>> =
     IUpsertContext<TUserMetadata>;
+
+  /**
+   * 変更可能なメタデータを更新する操作のコンテキストです。
+   */
+  export type UpdateMetadataContext<TUserMetadata = Record<string, unknown>> =
+    IUpdateMetadataContext<TUserMetadata>;
 }
 
 /**
@@ -269,6 +291,20 @@ export interface IObjectIndex {
    * @returns 保存処理の完了を示す Promise です。
    */
   upsert<TUserMetadata>(c: IObjectIndex.UpsertContext<TUserMetadata>): MaybePromise<void>;
+
+  /**
+   * オブジェクトの変更可能なメタデータだけを更新します。
+   *
+   * `userMetadata`、`tags`、`description`、`contentType`、`updatedAt` を更新できます。
+   * 実体のバイト列に由来する `size` や `hash`、作成時刻、実体 ID は変更しません。
+   *
+   * @param c メタデータを更新する操作のコンテキストです。
+   *
+   * @returns 更新したオブジェクト、存在しない場合は null を解決する Promise です。
+   */
+  updateMetadata<TUserMetadata>(
+    c: IObjectIndex.UpdateMetadataContext<TUserMetadata>,
+  ): MaybePromise<OmnioObject<TUserMetadata> | null>;
 
   /**
    * オブジェクトを取得します。
