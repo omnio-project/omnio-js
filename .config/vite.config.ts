@@ -187,7 +187,7 @@ export default defineConfig({
       // import の並びと書き方を統一します。
 
       "import/first": "error",
-      "import/no-namespace": "error",
+      "import/no-namespace": "off",
       "import/no-duplicates": "error",
       "import/no-named-default": "error",
       "import/no-mutable-exports": "error",
