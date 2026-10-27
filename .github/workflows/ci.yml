@@ -150,6 +150,9 @@ jobs:
 
       - name: "テスト"
         run: mise run test
+        env:
+          # Firefox は HOME が現在のユーザー所有でないと起動できません。
+          HOME: /root
         working-directory: ${{ matrix.package.directory }}
 
       - name: "カバレッジをアップロード"
