@@ -118,4 +118,30 @@ describe("マイグレーション", () => {
       await db.destroy();
     }
   });
+
+  test("down で journal と object_tag を削除する", async ({ expect }) => {
+    // 準備：
+    const migration = requireMigration("001_create_journal");
+    const pglite = new PGlite();
+    const db = new Kysely<PGliteDatabase>({
+      dialect: new PGliteDialect({ pglite }),
+    });
+
+    try {
+      await migration.up(db);
+
+      // 実行：
+      await migration.down?.(db);
+
+      // 検証：
+      const tables = await sql<{ count: number }>`
+        select count(*)::integer as count
+        from information_schema.tables
+        where table_schema = 'public' and table_name in ('journal', 'object_tag')
+      `.execute(db);
+      expect(tables.rows[0]?.count).toBe(0);
+    } finally {
+      await db.destroy();
+    }
+  });
 });

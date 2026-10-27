@@ -52,8 +52,8 @@ export function cosineSimilarity(query: Float32Array, target: Float32Array): num
   let targetNorm = 0;
 
   for (let index = 0; index < length; index += 1) {
-    const queryValue = query[index] ?? 0;
-    const targetValue = target[index] ?? 0;
+    const queryValue = Number(query[index]);
+    const targetValue = Number(target[index]);
     dot += queryValue * targetValue;
     queryNorm += queryValue * queryValue;
     targetNorm += targetValue * targetValue;
@@ -79,7 +79,7 @@ export function dotProduct(query: Float32Array, target: Float32Array): number {
   let dot = 0;
 
   for (let index = 0; index < length; index += 1) {
-    dot += (query[index] ?? 0) * (target[index] ?? 0);
+    dot += Number(query[index]) * Number(target[index]);
   }
 
   return dot;
@@ -98,7 +98,7 @@ export function l2Distance(query: Float32Array, target: Float32Array): number {
   let sum = 0;
 
   for (let index = 0; index < length; index += 1) {
-    const diff = (query[index] ?? 0) - (target[index] ?? 0);
+    const diff = Number(query[index]) - Number(target[index]);
     sum += diff * diff;
   }
 

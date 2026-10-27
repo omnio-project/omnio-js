@@ -1,8 +1,11 @@
-import { sql, Kysely } from "kysely";
+import { DbQueryError } from "@omniojs/core";
+import { sql, Kysely, CompiledQuery } from "kysely";
 import type { Migration } from "kysely/migration";
+import { setGlobalConfig, deleteGlobalConfig } from "valibot";
 import { test, describe } from "vite-plus/test";
 
 import { initSqliteWasm, SqliteWasmDialect } from "../src/dialect.js";
+import { SqliteWasmDialectError } from "../src/errors.js";
 import { MIGRATIONS } from "../src/migrations.js";
 import type { SqliteWasmDatabase } from "../src/schema.js";
 
@@ -21,6 +24,21 @@ function requireMigration(name: string): Migration {
   }
 
   return migration;
+}
+
+/**
+ * メモリー上の SQLite WASM を使う kysely のインスタンスを作ります。
+ *
+ * スキーマーの検証とトランザクションの検証で使用します。
+ *
+ * @returns kysely のインスタンスです。
+ */
+async function createDatabase(): Promise<Kysely<SqliteWasmDatabase>> {
+  const sqlite3 = await initSqliteWasm();
+
+  return new Kysely<SqliteWasmDatabase>({
+    dialect: new SqliteWasmDialect(new sqlite3.oo1.DB(":memory:", "c")),
+  });
 }
 
 describe("SqliteWasmDialect", () => {
@@ -114,6 +132,137 @@ describe("SqliteWasmDialect", () => {
       expect(children.rows[0]?.count).toBe(0);
     } finally {
       await db.destroy();
+    }
+  });
+
+  test("down で journal と object_tag を削除する", async ({ expect }) => {
+    // 準備：
+    const migration = requireMigration("001_create_journal");
+    const db = await createDatabase();
+
+    try {
+      await migration.up(db);
+
+      // 実行：
+      await migration.down?.(db);
+
+      // 検証：
+      const tables = await sql<{ count: number }>`
+        select count(*) as count
+        from sqlite_master
+        where type = 'table' and name in ('journal', 'object_tag')
+      `.execute(db);
+      expect(tables.rows[0]?.count).toBe(0);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("トランザクションをロールバックする", async ({ expect }) => {
+    // 準備：
+    const migration = requireMigration("001_create_journal");
+    const db = await createDatabase();
+
+    try {
+      await migration.up(db);
+
+      // 実行と検証：
+      await expect(
+        db.transaction().execute(async (transaction) => {
+          await transaction
+            .insertInto("journal")
+            .values({
+              key: "k1",
+              dirty: 0,
+              entity_id: "00000000-0000-4000-8000-000000000001",
+              record_type: "CREATE",
+              record_timestamp: "2026-01-01T00:00:00Z",
+            })
+            .execute();
+          throw new Error("rollback");
+        }),
+      ).rejects.toThrow("rollback");
+
+      const rows = await db.selectFrom("journal").selectAll().execute();
+      expect(rows).toStrictEqual([]);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("ブール値とバイナリ値をバインドできる", async ({ expect }) => {
+    // 準備：
+    const db = await createDatabase();
+
+    try {
+      // 実行：
+      const booleans = await sql<{ value: number }>`select ${true} as value`.execute(db);
+      const buffers = await sql<{ value: Uint8Array }>`
+        select ${new Uint8Array([1, 2])} as value
+      `.execute(db);
+
+      // 検証：
+      expect(booleans.rows[0]?.value).toBe(1);
+      expect(buffers.rows[0]?.value).toStrictEqual(new Uint8Array([1, 2]));
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("未対応のバインド値は DbQueryError を投げる", async ({ expect }) => {
+    // 準備：
+    const db = await createDatabase();
+
+    try {
+      // 実行と検証：
+      await expect(sql`select ${new Date()} as value`.execute(db)).rejects.toBeInstanceOf(
+        DbQueryError,
+      );
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("ストリームクエリーは SqliteWasmDialectError を投げる", async ({ expect }) => {
+    // 準備：
+    const sqlite3 = await initSqliteWasm();
+    const driver = new SqliteWasmDialect(new sqlite3.oo1.DB(":memory:", "c")).createDriver();
+    await driver.init();
+
+    try {
+      // 実行：
+      const connection = await driver.acquireConnection();
+
+      // 検証：
+      expect(() => connection.streamQuery(CompiledQuery.raw("select 1"), 1)).toThrow(
+        SqliteWasmDialectError,
+      );
+    } finally {
+      await driver.destroy();
+    }
+  });
+
+  test("既定のメッセージは英語である", ({ expect }) => {
+    // 実行：
+    const error = new SqliteWasmDialectError({ operation: "stream" });
+
+    // 検証：
+    expect(error.name).toBe("OmnioSqliteWasmDialectError");
+    expect(error.message).toBe("Unsupported operation in the sqlite.wasm dialect: stream");
+  });
+
+  test("ja では日本語のメッセージを返す", ({ expect }) => {
+    // 準備：
+    setGlobalConfig({ lang: "ja" });
+
+    try {
+      // 実行：
+      const error = new SqliteWasmDialectError({ operation: "stream" });
+
+      // 検証：
+      expect(error.message).toBe("sqlite.wasm dialect では対応していない処理です: stream");
+    } finally {
+      deleteGlobalConfig();
     }
   });
 });

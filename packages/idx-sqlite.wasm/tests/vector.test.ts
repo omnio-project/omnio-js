@@ -56,12 +56,24 @@ describe("cosineSimilarity", () => {
     // 実行と検証：
     expect(cosineSimilarity(new Float32Array([0, 0]), new Float32Array([1, 0]))).toBe(0);
   });
+
+  test("長さが異なるベクトルでも短い方に合わせて計算する", ({ expect }) => {
+    // 実行と検証：
+    expect(cosineSimilarity(new Float32Array([1, 0, 0]), new Float32Array([1, 0]))).toBeCloseTo(1);
+    expect(cosineSimilarity(new Float32Array([1, 0]), new Float32Array([1, 0, 0]))).toBeCloseTo(1);
+  });
 });
 
 describe("dotProduct", () => {
   test("内積を求める", ({ expect }) => {
     // 実行と検証：
     expect(dotProduct(new Float32Array([1, 2]), new Float32Array([3, 4]))).toBe(11);
+  });
+
+  test("長さが異なるベクトルでも短い方に合わせて計算する", ({ expect }) => {
+    // 実行と検証：
+    expect(dotProduct(new Float32Array([1, 2, 3]), new Float32Array([4, 5]))).toBe(14);
+    expect(dotProduct(new Float32Array([1, 2]), new Float32Array([3, 4, 5]))).toBe(11);
   });
 });
 
@@ -74,6 +86,12 @@ describe("l2Distance", () => {
   test("距離を求める", ({ expect }) => {
     // 実行と検証：
     expect(l2Distance(new Float32Array([0, 0]), new Float32Array([3, 4]))).toBe(5);
+  });
+
+  test("長さが異なるベクトルでも短い方に合わせて計算する", ({ expect }) => {
+    // 実行と検証：
+    expect(l2Distance(new Float32Array([1, 2, 3]), new Float32Array([1, 2]))).toBe(0);
+    expect(l2Distance(new Float32Array([1, 2]), new Float32Array([1, 2, 3]))).toBe(0);
   });
 });
 

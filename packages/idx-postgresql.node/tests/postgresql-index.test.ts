@@ -1526,4 +1526,247 @@ describe("PostgresqlIndex", () => {
       });
     });
   });
+  describe("境界条件", () => {
+    test("不正なカーソルは先頭から一覧する", async ({ expect, signal }) => {
+      // 準備：
+      const index = await createOpenedIndex(signal);
+      await seedThree(index, signal);
+
+      // 実行：
+      const actual = await index.list({
+        action: "list",
+        cursor: "invalid",
+        signal,
+      });
+
+      // 検証：
+      expect(keysOf(actual.items)).toStrictEqual(["k1", "k2", "k3"]);
+
+      // 後始末：
+      await index.close({
+        action: "close",
+        signal,
+      });
+    });
+
+    test("limit が 0 以下の listDirty は空の一覧を返す", async ({ expect, signal }) => {
+      // 準備：
+      const index = await createOpenedIndex(signal);
+
+      // 実行：
+      const actual = await index.listDirty({
+        limit: 0,
+        action: "listDirty",
+        signal,
+      });
+
+      // 検証：
+      expect(actual).toStrictEqual([]);
+
+      // 後始末：
+      await index.close({
+        action: "close",
+        signal,
+      });
+    });
+
+    test("省略可能なメタデータなしで保存と取得をする", async ({ expect, signal }) => {
+      // 準備：
+      const index = await createOpenedIndex(signal);
+      const base = createObject("k1");
+      const object: OmnioObject = {
+        ...base,
+        description: undefined,
+        embeddingModel: undefined,
+        embeddingSource: undefined,
+        system: {
+          ...base.system,
+          hash: undefined,
+          hashAlgorithm: undefined,
+        },
+      };
+
+      // 実行：
+      await index.upsert({
+        action: "upsert",
+        object,
+        signal,
+      });
+
+      const actual = await index.get({
+        key: object.key,
+        action: "get",
+        signal,
+      });
+
+      // 検証：
+      expect(actual?.description).toBeUndefined();
+      expect(actual?.embeddingModel).toBeUndefined();
+      expect(actual?.embeddingSource).toBeUndefined();
+      expect(actual?.system.hash).toBeUndefined();
+      expect(actual?.system.hashAlgorithm).toBeUndefined();
+      expect(actual?.embedding).toStrictEqual(object.embedding);
+
+      // 後始末：
+      await index.close({
+        action: "close",
+        signal,
+      });
+    });
+
+    test("循環参照の利用者メタデータは DbQueryError を投げる", async ({ expect, signal }) => {
+      // 準備：
+      const index = await createOpenedIndex(signal);
+      const metadata: Record<string, unknown> = {};
+      metadata["self"] = metadata;
+
+      // 実行と検証：
+      await expect(
+        index.upsert({
+          action: "upsert",
+          object: {
+            ...createObject("k1"),
+            userMetadata: metadata,
+          },
+          signal,
+        }),
+      ).rejects.toBeInstanceOf(DbQueryError);
+
+      // 後始末：
+      await index.close({
+        action: "close",
+        signal,
+      });
+    });
+
+    test("同じキーへの rename はそのまま返す", async ({ expect, signal }) => {
+      // 準備：
+      const index = await createOpenedIndex(signal);
+      const object = createObject("k1", ["a", "b"]);
+      await index.upsert({
+        action: "upsert",
+        object,
+        signal,
+      });
+
+      // 実行：
+      const result = await index.rename({
+        action: "rename",
+        signal,
+        sourceKey: object.key,
+        updatedAt: "2026-02-01T00:00:00Z",
+        destinationKey: object.key,
+      });
+
+      // 検証：
+      expect(result?.object.key.key).toBe("k1");
+      expect(result?.object.tags).toStrictEqual(["a", "b"]);
+      expect(result?.replacedEntityId).toBeUndefined();
+
+      // 後始末：
+      await index.close({
+        action: "close",
+        signal,
+      });
+    });
+
+    test("利用者メタデータの配列とオブジェクトで絞り込む", async ({ expect, signal }) => {
+      // 準備：
+      const index = await createOpenedIndex(signal);
+      await index.upsert({
+        action: "upsert",
+        object: {
+          ...createObject("k1"),
+          userMetadata: {
+            flag: true,
+            nested: {
+              list: [1, 2],
+            },
+          },
+        },
+        signal,
+      });
+
+      // 実行：
+      const matched = await index.list({
+        action: "list",
+        filter: {
+          userMetadata: {
+            nested: {
+              list: [1, 2],
+            },
+          },
+        },
+        signal,
+      });
+      const mismatched = await index.list({
+        action: "list",
+        filter: {
+          userMetadata: {
+            nested: {
+              list: [1, 3],
+            },
+          },
+        },
+        signal,
+      });
+
+      // 検証：
+      expect(keysOf(matched.items)).toStrictEqual(["k1"]);
+      expect(mismatched.items).toStrictEqual([]);
+
+      // 後始末：
+      await index.close({
+        action: "close",
+        signal,
+      });
+    });
+
+    test("検索でも利用者メタデータで絞り込む", async ({ expect, signal }) => {
+      // 準備：
+      const index = await createOpenedIndex(signal);
+      await index.upsert({
+        action: "upsert",
+        object: {
+          ...createVectorObject("a", new Float32Array([1, 0])),
+          userMetadata: {
+            color: "red",
+          },
+        },
+        signal,
+      });
+      await index.upsert({
+        action: "upsert",
+        object: {
+          ...createVectorObject("b", new Float32Array([1, 0])),
+          userMetadata: {
+            color: "blue",
+          },
+        },
+        signal,
+      });
+
+      // 実行：
+      const actual = await index.search({
+        topK: 10,
+        action: "search",
+        filter: {
+          userMetadata: {
+            color: "red",
+          },
+        },
+        signal,
+        vector: new Float32Array([1, 0]),
+      });
+
+      // 検証：
+      expect(keysOf(actual)).toStrictEqual(["a"]);
+
+      // 後始末：
+      await index.close({
+        action: "close",
+        signal,
+      });
+    });
+  });
 });

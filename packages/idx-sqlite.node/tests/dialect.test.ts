@@ -1,10 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
 
-import { sql, Kysely } from "kysely";
+import { DbQueryError } from "@omniojs/core";
+import { sql, Kysely, CompiledQuery } from "kysely";
 import type { Migration } from "kysely/migration";
+import { setGlobalConfig, deleteGlobalConfig } from "valibot";
 import { test, describe } from "vite-plus/test";
 
 import { SqliteNodeDialect } from "../src/dialect.js";
+import { SqliteNodeDialectError } from "../src/errors.js";
 import { MIGRATIONS } from "../src/migrations.js";
 import type { SqliteNodeDatabase } from "../src/schema.js";
 
@@ -115,6 +118,152 @@ describe("SqliteNodeDialect", () => {
       expect(children.rows[0]?.count).toBe(0);
     } finally {
       await db.destroy();
+    }
+  });
+
+  test("down で journal と object_tag を削除する", async ({ expect }) => {
+    // 準備：
+    const migration = requireMigration("001_create_journal");
+    const db = new Kysely<SqliteNodeDatabase>({
+      dialect: new SqliteNodeDialect(new DatabaseSync(":memory:")),
+    });
+
+    try {
+      await migration.up(db);
+
+      // 実行：
+      await migration.down?.(db);
+
+      // 検証：
+      const tables = await sql<{ count: number }>`
+        select count(*) as count
+        from sqlite_master
+        where type = 'table' and name in ('journal', 'object_tag')
+      `.execute(db);
+      expect(tables.rows[0]?.count).toBe(0);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("トランザクションをロールバックする", async ({ expect }) => {
+    // 準備：
+    const migration = requireMigration("001_create_journal");
+    const db = new Kysely<SqliteNodeDatabase>({
+      dialect: new SqliteNodeDialect(new DatabaseSync(":memory:")),
+    });
+
+    try {
+      await migration.up(db);
+
+      // 実行と検証：
+      await expect(
+        db.transaction().execute(async (transaction) => {
+          await transaction
+            .insertInto("journal")
+            .values({
+              key: "k1",
+              dirty: 0,
+              entity_id: "00000000-0000-4000-8000-000000000001",
+              record_type: "CREATE",
+              record_timestamp: "2026-01-01T00:00:00Z",
+            })
+            .execute();
+          throw new Error("rollback");
+        }),
+      ).rejects.toThrow("rollback");
+
+      const rows = await db.selectFrom("journal").selectAll().execute();
+      expect(rows).toStrictEqual([]);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("ブール値とバイナリ値をバインドできる", async ({ expect }) => {
+    // 準備：
+    const db = new Kysely<SqliteNodeDatabase>({
+      dialect: new SqliteNodeDialect(new DatabaseSync(":memory:")),
+    });
+
+    try {
+      // 実行：
+      const booleans = await sql<{ value: number }>`select ${true} as value`.execute(db);
+      const buffers = await sql<{ value: Uint8Array }>`
+        select ${new Uint8Array([1, 2])} as value
+      `.execute(db);
+      const arrayBuffers = await sql<{ value: Uint8Array }>`
+        select ${new ArrayBuffer(2)} as value
+      `.execute(db);
+      const views = await sql<{ value: Uint8Array }>`
+        select ${new Uint16Array([0x01_02])} as value
+      `.execute(db);
+
+      // 検証：
+      expect(booleans.rows[0]?.value).toBe(1);
+      expect(buffers.rows[0]?.value).toStrictEqual(new Uint8Array([1, 2]));
+      expect(arrayBuffers.rows[0]?.value).toBeInstanceOf(Uint8Array);
+      expect(views.rows[0]?.value).toBeInstanceOf(Uint8Array);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("未対応のバインド値は DbQueryError を投げる", async ({ expect }) => {
+    // 準備：
+    const db = new Kysely<SqliteNodeDatabase>({
+      dialect: new SqliteNodeDialect(new DatabaseSync(":memory:")),
+    });
+
+    try {
+      // 実行と検証：
+      await expect(sql`select ${new Date()} as value`.execute(db)).rejects.toBeInstanceOf(
+        DbQueryError,
+      );
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("ストリームクエリーは SqliteNodeDialectError を投げる", async ({ expect }) => {
+    // 準備：
+    const driver = new SqliteNodeDialect(new DatabaseSync(":memory:")).createDriver();
+    await driver.init();
+
+    try {
+      // 実行：
+      const connection = await driver.acquireConnection();
+
+      // 検証：
+      expect(() => connection.streamQuery(CompiledQuery.raw("select 1"), 1)).toThrow(
+        SqliteNodeDialectError,
+      );
+    } finally {
+      await driver.destroy();
+    }
+  });
+
+  test("既定のメッセージは英語である", ({ expect }) => {
+    // 実行：
+    const error = new SqliteNodeDialectError({ operation: "stream" });
+
+    // 検証：
+    expect(error.name).toBe("OmnioSqliteNodeDialectError");
+    expect(error.message).toBe("Unsupported operation in the node:sqlite dialect: stream");
+  });
+
+  test("ja では日本語のメッセージを返す", ({ expect }) => {
+    // 準備：
+    setGlobalConfig({ lang: "ja" });
+
+    try {
+      // 実行：
+      const error = new SqliteNodeDialectError({ operation: "stream" });
+
+      // 検証：
+      expect(error.message).toBe("node:sqlite ダイアレクトでは対応していない処理です: stream");
+    } finally {
+      deleteGlobalConfig();
     }
   });
 });
