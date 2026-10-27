@@ -591,7 +591,7 @@ export class Omnio {
     const previousBytes =
       existing === null
         ? undefined
-        : ((await this.#readEntityBytes(existing, active)) ?? undefined);
+        : ((await this.#readEntityBytes(existing.entityId, active)) ?? undefined);
 
     try {
       const hash = await this.#setEntity(entityId, bytes, active);
@@ -654,7 +654,7 @@ export class Omnio {
       return null;
     }
 
-    return await this.#readEntityBytes(object, active);
+    return await this.#readEntityBytes(object.entityId, active);
   }
 
   /**
@@ -689,21 +689,7 @@ export class Omnio {
       return null;
     }
 
-    const stream = await nullIfKeyNotFound(() =>
-      this.#entity.stream(object.entityId, { signal: active }),
-    );
-
-    if (stream !== null) {
-      return stream;
-    }
-
-    const legacyKey = object.key.key;
-
-    if (legacyKey === object.entityId) {
-      return null;
-    }
-
-    return await nullIfKeyNotFound(() => this.#entity.stream(legacyKey, { signal: active }));
+    return await nullIfKeyNotFound(() => this.#entity.stream(object.entityId, { signal: active }));
   }
 
   /**
@@ -1130,16 +1116,6 @@ export class Omnio {
       await this.#entity.delete(entityId, { signal });
     }
 
-    const legacyKey = key.key;
-
-    if (legacyKey !== entityId) {
-      const hasLegacyEntity = await this.#entity.has(legacyKey, { signal });
-
-      if (hasLegacyEntity) {
-        await this.#entity.delete(legacyKey, { signal });
-      }
-    }
-
     await this.#index.purge({
       key,
       action: "purge",
@@ -1151,39 +1127,13 @@ export class Omnio {
   /**
    * 実体のバイト列を取得します。
    *
-   * 旧キーにのみ実体が存在する場合は、entityId のキーへ移行します。
-   *
-   * @param object 取得するオブジェクトです。
+   * @param entityId 取得する実体 ID です。
    * @param signal 処理を中断するための中断シグナルです。
    *
    * @returns バイト列、存在しない場合は null です。
    */
-  async #readEntityBytes(
-    object: Pick<OmnioObject<unknown>, "entityId" | "key">,
-    signal: AbortSignal,
-  ): Promise<Uint8Array | null> {
-    const bytes = await nullIfKeyNotFound(() => this.#entity.get(object.entityId, { signal }));
-
-    if (bytes !== null) {
-      return bytes;
-    }
-
-    const legacyKey = object.key.key;
-
-    if (legacyKey === object.entityId) {
-      return null;
-    }
-
-    const legacyBytes = await nullIfKeyNotFound(() => this.#entity.get(legacyKey, { signal }));
-
-    if (legacyBytes === null) {
-      return null;
-    }
-
-    await this.#entity.set(object.entityId, legacyBytes, { signal });
-    await this.#entity.delete(legacyKey, { signal }).catch(() => undefined);
-
-    return legacyBytes;
+  async #readEntityBytes(entityId: string, signal: AbortSignal): Promise<Uint8Array | null> {
+    return nullIfKeyNotFound(() => this.#entity.get(entityId, { signal }));
   }
 
   /**

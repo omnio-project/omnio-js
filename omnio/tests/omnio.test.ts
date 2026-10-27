@@ -616,7 +616,7 @@ describe("putObject と getObject", () => {
     await omnio.close(signal);
   });
 
-  test("旧キーに保存された実体を entityId へ移行する", async ({ expect, signal }) => {
+  test("実体を参照するときは entityId だけを使う", async ({ expect, signal }) => {
     // 準備：
     const { builder, getEntity } = createInspectableTestEntity();
     const index = new SqliteWasmIndex();
@@ -643,12 +643,14 @@ describe("putObject と getObject", () => {
 
     // 実行：
     const actual = await omnio.getObject("legacy", signal);
+    const stream = await omnio.streamObject("legacy", signal);
 
     // 検証：
-    expect(actual).toStrictEqual(bytes);
+    expect(actual).toBeNull();
+    expect(stream).toBeNull();
 
-    expect(await getEntity().get(entityId)).toStrictEqual(bytes);
-    expect(await getEntity().has("legacy")).toBe(false);
+    expect(await getEntity().has("legacy")).toBe(true);
+    expect(await getEntity().has(entityId)).toBe(false);
 
     // 後始末：
     await omnio.close(signal);
