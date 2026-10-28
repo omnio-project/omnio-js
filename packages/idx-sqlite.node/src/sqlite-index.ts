@@ -99,12 +99,10 @@ export class SqliteNodeIndex extends SqlObjectIndex {
   /**
    * sqlite-vec の距離関数を使えるかを確認します。
    *
-   * @param c 検索する操作のコンテキストです。
-   *
-   * @returns sqlite-vec を使う場合は true です。利用者メタデータの絞り込みには対応しません。
+   * @returns sqlite-vec を使う場合は true です。
    */
-  protected override canSearchScoredKeys(c: IObjectIndex.SearchContext): boolean {
-    return this.#vectorSearchAvailable && c.filter?.userMetadata === undefined;
+  protected override canSearchScoredKeys(): boolean {
+    return this.#vectorSearchAvailable;
   }
 
   /**

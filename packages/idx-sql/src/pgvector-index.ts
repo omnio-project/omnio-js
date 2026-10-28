@@ -17,13 +17,10 @@ export abstract class PgVectorObjectIndex extends SqlObjectIndex {
   /**
    * pgvector の距離演算子を使えるかを確認します。
    *
-   * @param c 検索する操作のコンテキストです。
-   *
    * @returns pgvector を使う場合は true です。
    */
-  protected override canSearchScoredKeys(c: IObjectIndex.SearchContext): boolean {
-    // 利用者メタデータの深い一致判定は SQL に任せられないため、指定時は JavaScript の総当たりを使います。
-    return c.filter?.userMetadata === undefined;
+  protected override canSearchScoredKeys(): boolean {
+    return true;
   }
 
   /**

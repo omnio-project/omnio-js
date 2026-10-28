@@ -139,7 +139,4 @@ export type MetadataFilter = {
 
   /** いずれかを含むことを要求するタグ一覧です。 */
   readonly tagsAny?: readonly string[] | undefined;
-
-  /** 利用者メタデータに対する条件です。 */
-  readonly userMetadata?: Record<string, unknown> | undefined;
 };

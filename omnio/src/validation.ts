@@ -131,7 +131,6 @@ const MetadataFilterSchema = v.object({
   fullText: v.optional(v.string()),
   contentTypes: v.optional(v.array(ContentTypeSchema)),
   createdAfter: v.optional(TimestampSchema),
-  userMetadata: v.optional(v.record(v.string(), v.unknown())),
   createdBefore: v.optional(TimestampSchema),
 });
 

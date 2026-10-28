@@ -13,12 +13,7 @@ import { asyncmux } from "asyncmux";
 import type { Kysely } from "kysely";
 import { type MigrationProvider, Migrator } from "kysely/migration";
 
-import {
-  type FullTextOperator,
-  parseCursor,
-  withMetadataFilter,
-  matchesUserMetadata,
-} from "./filter.js";
+import { type FullTextOperator, parseCursor, withMetadataFilter } from "./filter.js";
 import { parseJson, stringifyJson } from "./json.js";
 import type { SqlObjectRow, SqlIndexDatabase } from "./schema.js";
 import {
@@ -562,25 +557,6 @@ export abstract class SqlObjectIndex implements IObjectIndex {
     }
 
     const offset = parseCursor(c.cursor);
-    const userMetadataFilter = c.filter?.userMetadata;
-
-    if (userMetadataFilter !== undefined) {
-      const matched = await withMetadataFilter(
-        kysely.selectFrom("journal").selectAll(),
-        c.filter,
-        this.fullTextOperator,
-      )
-        .orderBy("key")
-        .execute();
-      const candidates = matched
-        .filter((row) =>
-          matchesUserMetadata(parseJson(row.user_metadata ?? "null", "list"), userMetadataFilter),
-        )
-        .slice(offset);
-
-      return await this.#toListResult<TUserMetadata>(kysely, candidates, limit, offset);
-    }
-
     const candidates = await withMetadataFilter(
       kysely.selectFrom("journal").selectAll(),
       c.filter,
@@ -690,7 +666,7 @@ export abstract class SqlObjectIndex implements IObjectIndex {
     const candidates = withMetadataFilter(
       kysely
         .selectFrom("journal")
-        .select(["key", "embedding", "embedding_dims", "embedding_model", "user_metadata"]),
+        .select(["key", "embedding", "embedding_dims", "embedding_model"]),
       c.filter,
       this.fullTextOperator,
     )
@@ -760,16 +736,6 @@ export abstract class SqlObjectIndex implements IObjectIndex {
       const score = scoreVector(metric, c.vector, vector);
 
       if (c.minScore !== undefined && score < c.minScore) {
-        continue;
-      }
-
-      if (
-        c.filter?.userMetadata !== undefined &&
-        !matchesUserMetadata(
-          parseJson(row.user_metadata ?? "null", "search"),
-          c.filter.userMetadata,
-        )
-      ) {
         continue;
       }
 
