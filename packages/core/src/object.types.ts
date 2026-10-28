@@ -200,6 +200,37 @@ export type MetadataFilterDateCondition = {
 };
 
 /**
+ * メタデータのサイズに対する絞り込み条件です。
+ *
+ * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
+ */
+export type MetadataFilterSizeCondition = {
+  /** 完全一致を要求するサイズです。 */
+  readonly equals?: number | bigint | undefined;
+
+  /** 指定サイズより大きいことを要求するサイズです。 */
+  readonly gt?: number | bigint | undefined;
+
+  /** 指定サイズ以上であることを要求するサイズです。 */
+  readonly gte?: number | bigint | undefined;
+
+  /** いずれかに一致することを要求するサイズの一覧です。単一のサイズも指定できます。 */
+  readonly in?: number | bigint | readonly (number | bigint)[] | undefined;
+
+  /** 指定サイズより小さいことを要求するサイズです。 */
+  readonly lt?: number | bigint | undefined;
+
+  /** 指定サイズ以下であることを要求するサイズです。 */
+  readonly lte?: number | bigint | undefined;
+
+  /** 一致しないことを要求するサイズです。単一のサイズも指定できます。 */
+  readonly not?: number | bigint | readonly (number | bigint)[] | undefined;
+
+  /** いずれにも一致しないことを要求するサイズの一覧です。 */
+  readonly notIn?: readonly (number | bigint)[] | undefined;
+};
+
+/**
  * メタデータによる絞り込み条件です。
  */
 export type MetadataFilter = {
@@ -225,6 +256,9 @@ export type MetadataFilter = {
 
   /** レコードタイプの条件です。レコードタイプを指定すると完全一致を要求します。 */
   readonly recordType?: RecordType | MetadataFilterRecordTypeCondition | undefined;
+
+  /** サイズの条件です。数値または bigint を指定すると完全一致を要求します。 */
+  readonly size?: number | bigint | MetadataFilterSizeCondition | undefined;
 
   /** すべて含むことを要求するタグ一覧です。 */
   readonly tagsAll?: readonly string[] | undefined;

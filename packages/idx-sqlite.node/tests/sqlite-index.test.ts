@@ -120,6 +120,7 @@ async function seedThree(index: SqliteNodeIndex, signal: AbortSignal): Promise<v
         ...createObject("k2").system,
         contentType: "image/png",
         createdAt: "2026-02-01T00:00:00Z",
+        size: 8,
         updatedAt: "2026-02-05T00:00:00Z",
       },
       userMetadata: { color: "blue" },
@@ -130,6 +131,7 @@ async function seedThree(index: SqliteNodeIndex, signal: AbortSignal): Promise<v
       system: {
         ...createObject("k3").system,
         createdAt: "2026-03-01T00:00:00Z",
+        size: 5,
         updatedAt: "2026-03-05T00:00:00Z",
       },
       userMetadata: { color: "red" },
@@ -1232,6 +1234,53 @@ describe("list", () => {
       const actual = await index.list({
         action: "list",
         filter: { contentType },
+        signal,
+      });
+
+      // 検証：
+      expect(keysOf(actual.items)).toStrictEqual(expected);
+    }
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("サイズの条件で絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    const cases = [
+      [3, ["k1"]],
+      [5n, ["k3"]],
+      [{ equals: 8 }, ["k2"]],
+      [{ equals: 5n }, ["k3"]],
+      [{ not: 3 }, ["k2", "k3"]],
+      [{ not: [3, 8] }, ["k3"]],
+      [{ in: [3, 5] }, ["k1", "k3"]],
+      [{ in: 8n }, ["k2"]],
+      [{ notIn: [3, 8] }, ["k3"]],
+      [{ lt: 5 }, ["k1"]],
+      [{ lte: 5 }, ["k1", "k3"]],
+      [{ gt: 5 }, ["k2"]],
+      [{ gte: 5 }, ["k2", "k3"]],
+      [
+        {
+          gt: 3n,
+          lt: 8n,
+        },
+        ["k3"],
+      ],
+    ] as const;
+
+    for (const [size, expected] of cases) {
+      // 実行：
+      const actual = await index.list({
+        action: "list",
+        filter: { size },
         signal,
       });
 

@@ -1390,6 +1390,51 @@ describe("listObjects", () => {
     await omnio.close(signal);
   });
 
+  test("サイズの条件で絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    await omnio.putObject({
+      key: "a",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    await omnio.putObject({
+      key: "b",
+      data: new Uint8Array([2, 3]),
+      contentType: "text/plain",
+    });
+    await omnio.putObject({
+      key: "c",
+      data: new Uint8Array([4, 5, 6]),
+      contentType: "text/plain",
+    });
+
+    const cases = [
+      [1, ["a"]],
+      [3n, ["c"]],
+      [{ equals: 2n }, ["b"]],
+      [{ not: 1 }, ["b", "c"]],
+      [{ not: [1n, 3] }, ["b"]],
+      [{ in: [1n, 3] }, ["a", "c"]],
+      [{ notIn: [1, 2n] }, ["c"]],
+      [{ lt: 2n }, ["a"]],
+      [{ lte: 2 }, ["a", "b"]],
+      [{ gt: 1n }, ["b", "c"]],
+      [{ gte: 2 }, ["b", "c"]],
+    ] as const;
+
+    for (const [size, expected] of cases) {
+      // 実行：
+      const actual = await omnio.listObjects({ filter: { size } }, signal);
+
+      // 検証：
+      expect(actual.items.map((item) => item.key.key)).toStrictEqual(expected);
+    }
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
   test("作成時刻の条件で絞り込む", async ({ expect, signal }) => {
     // 準備：
     const omnio = await createTestOmnio(signal);

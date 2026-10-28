@@ -231,6 +231,97 @@ function withDateFilter<T>(
 }
 
 /**
+ * サイズの条件に使う値をデータベースに渡す値に変換します。
+ *
+ * @param value 変換するサイズです。
+ *
+ * @returns データベースに渡す値です。
+ */
+function toSizeValue(value: number | bigint): number | string {
+  return typeof value === "bigint" ? value.toString() : value;
+}
+
+/**
+ * サイズの条件に使う値の一覧をデータベースに渡す値に変換します。
+ *
+ * @param value 変換するサイズまたはサイズの一覧です。
+ *
+ * @returns データベースに渡す値の一覧です。
+ */
+function toSizeValues(value: number | bigint | readonly (number | bigint)[]): (number | string)[] {
+  if (typeof value === "number" || typeof value === "bigint") {
+    return [toSizeValue(value)];
+  }
+
+  return value.map((item) => toSizeValue(item));
+}
+
+/**
+ * サイズの条件をクエリーに適用します。
+ *
+ * @param query 絞り込む前のクエリーです。
+ * @param condition サイズの条件です。
+ *
+ * @returns 絞り込んだクエリーです。
+ */
+function withSizeFilter<T>(
+  query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
+  condition: NonNullable<MetadataFilter["size"]>,
+): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
+  if (typeof condition === "number" || typeof condition === "bigint") {
+    return query.where("journal.size", "=", toSizeValue(condition));
+  }
+
+  let filtered = query;
+
+  if (condition.equals !== undefined) {
+    filtered = filtered.where("journal.size", "=", toSizeValue(condition.equals));
+  }
+
+  if (condition.gt !== undefined) {
+    filtered = filtered.where("journal.size", ">", toSizeValue(condition.gt));
+  }
+
+  if (condition.gte !== undefined) {
+    filtered = filtered.where("journal.size", ">=", toSizeValue(condition.gte));
+  }
+
+  if (condition.in !== undefined) {
+    const values = toSizeValues(condition.in);
+
+    if (values.length > 0) {
+      filtered = filtered.where("journal.size", "in", values);
+    }
+  }
+
+  if (condition.lt !== undefined) {
+    filtered = filtered.where("journal.size", "<", toSizeValue(condition.lt));
+  }
+
+  if (condition.lte !== undefined) {
+    filtered = filtered.where("journal.size", "<=", toSizeValue(condition.lte));
+  }
+
+  if (condition.not !== undefined) {
+    const values = toSizeValues(condition.not);
+
+    if (values.length > 0) {
+      filtered = filtered.where("journal.size", "not in", values);
+    }
+  }
+
+  if (condition.notIn !== undefined) {
+    const values = toSizeValues(condition.notIn);
+
+    if (values.length > 0) {
+      filtered = filtered.where("journal.size", "not in", values);
+    }
+  }
+
+  return filtered;
+}
+
+/**
  * カーソルを offset に変換します。
  *
  * @param cursor 一覧の続きを示すカーソルです。
@@ -284,6 +375,10 @@ export function withMetadataFilter<T>(
 
   if (filter?.recordType !== undefined) {
     filtered = withRecordTypeFilter(filtered, filter.recordType);
+  }
+
+  if (filter?.size !== undefined) {
+    filtered = withSizeFilter(filtered, filter.size);
   }
 
   if (filter?.tagsAll !== undefined && filter.tagsAll.length > 0) {

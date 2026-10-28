@@ -138,6 +138,21 @@ const MetadataFilterConditionSchema = v.object({
 /** レコードタイプを検証するスキーマです。 */
 const RecordTypeSchema = v.picklist(["CREATE", "UPDATE_METADATA", "DELETE"]);
 
+/** サイズの条件に使う値を検証するスキーマです。 */
+const SizeValueSchema = v.union([v.number(), v.bigint()]);
+
+/** メタデータのサイズに対する絞り込み条件を検証するスキーマです。 */
+const MetadataFilterSizeConditionSchema = v.object({
+  gt: v.optional(SizeValueSchema),
+  in: v.optional(v.union([SizeValueSchema, v.array(SizeValueSchema)])),
+  lt: v.optional(SizeValueSchema),
+  gte: v.optional(SizeValueSchema),
+  lte: v.optional(SizeValueSchema),
+  not: v.optional(v.union([SizeValueSchema, v.array(SizeValueSchema)])),
+  notIn: v.optional(v.array(SizeValueSchema)),
+  equals: v.optional(SizeValueSchema),
+});
+
 /** メタデータのレコードタイプに対する絞り込み条件を検証するスキーマです。 */
 const MetadataFilterRecordTypeConditionSchema = v.object({
   in: v.optional(v.union([RecordTypeSchema, v.array(RecordTypeSchema)])),
@@ -164,6 +179,7 @@ const MetadataFilterDateConditionSchema = v.object({
 
 /** メタデータの絞り込み条件を検証するスキーマです。 */
 const MetadataFilterSchema = v.object({
+  size: v.optional(v.union([SizeValueSchema, MetadataFilterSizeConditionSchema])),
   tagsAll: v.optional(TagsSchema),
   tagsAny: v.optional(TagsSchema),
   fullText: v.optional(v.string()),
