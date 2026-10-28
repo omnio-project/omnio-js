@@ -461,20 +461,18 @@ export class Omnio {
       const hash = await this.#setEntity(entityId, bytes, active);
       const object: OmnioObject<TUserMetadata> = {
         key,
+        hash,
+        size: bytes.byteLength,
         tags: [...(parsed.tags ?? [])],
-        system: {
-          hash,
-          size: bytes.byteLength,
-          createdAt: existing?.system.createdAt ?? now,
-          updatedAt: now,
-          contentType: parsed.contentType,
-          hashAlgorithm: ENTITY_HASH_ALGORITHM,
-        },
         entityId,
+        createdAt: existing?.createdAt ?? now,
         embedding,
+        updatedAt: now,
+        contentType: parsed.contentType,
         description: parsed.description,
         userMetadata: (parsed.userMetadata ?? {}) as TUserMetadata,
         embeddingDims: embedding === undefined ? undefined : embedding.length,
+        hashAlgorithm: ENTITY_HASH_ALGORITHM,
         embeddingModel,
         embeddingSource,
       };
@@ -556,20 +554,18 @@ export class Omnio {
 
       const object: OmnioObject<TUserMetadata> = {
         key: destinationObjectKey,
+        hash: source.hash,
+        size: bytes.byteLength,
         tags: [...source.tags],
-        system: {
-          hash: source.system.hash,
-          size: bytes.byteLength,
-          createdAt: existing?.system.createdAt ?? now,
-          updatedAt: now,
-          contentType: source.system.contentType,
-          hashAlgorithm: source.system.hashAlgorithm,
-        },
         entityId,
+        createdAt: existing?.createdAt ?? now,
         embedding: source.embedding,
+        updatedAt: now,
+        contentType: source.contentType,
         description: source.description,
         userMetadata: source.userMetadata,
         embeddingDims: source.embeddingDims,
+        hashAlgorithm: source.hashAlgorithm,
         embeddingModel: source.embeddingModel,
         embeddingSource: source.embeddingSource,
       };
@@ -995,10 +991,7 @@ export class Omnio {
       embeddingDims: embedded.embedding.length,
       embeddingModel: embedded.embeddingModel,
       embeddingSource: embedded.embeddingSource,
-      system: {
-        ...object.system,
-        updatedAt: new Date().toISOString(),
-      },
+      updatedAt: new Date().toISOString(),
     };
     await this.#index.upsert({
       action: "upsert",

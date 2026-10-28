@@ -14,18 +14,16 @@ describe("ファイル保存", () => {
     const location = join(directory, "pgdata");
     const object: OmnioObject = {
       key: OmnioKey.parse("k1"),
+      hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      size: 3,
       tags: ["persisted"],
-      system: {
-        hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        size: 3,
-        createdAt: "2026-01-01T00:00:00Z",
-        updatedAt: "2026-01-02T00:00:00Z",
-        contentType: "text/plain",
-        hashAlgorithm: "sha256",
-      },
       entityId: crypto.randomUUID(),
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-02T00:00:00Z",
+      contentType: "text/plain",
       description: "永続化の確認",
       userMetadata: { genre: "test" },
+      hashAlgorithm: "sha256",
     };
 
     try {

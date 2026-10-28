@@ -86,7 +86,7 @@ export type EmbedSource =
 /**
  * 実体とメタデータを合わせた論理単位です。
  */
-export type OmnioObject<TUserMetadata = Record<string, unknown>> = {
+export type OmnioObject<TUserMetadata = Record<string, unknown>> = OmnioSystemMetadata & {
   /** 任意のテキスト形式の説明文です。埋め込み対象にできます。 */
   readonly description?: string | undefined;
 
@@ -107,9 +107,6 @@ export type OmnioObject<TUserMetadata = Record<string, unknown>> = {
 
   /** オブジェクトを一意に識別するキーです。 */
   readonly key: OmnioKey;
-
-  /** システムメタデータです。 */
-  readonly system: OmnioSystemMetadata;
 
   /** 絞り込み用のタグ一覧です。埋め込み対象ではありません。 */
   readonly tags: readonly string[];

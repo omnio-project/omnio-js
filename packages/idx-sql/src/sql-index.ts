@@ -181,22 +181,22 @@ export abstract class SqlObjectIndex implements IObjectIndex {
         existing === undefined || existing.record_type === "DELETE" ? "CREATE" : "UPDATE_METADATA";
       const row: SqlObjectRow = {
         key,
-        hash: object.system.hash ?? null,
-        size: this.toStoredSize(object.system.size),
+        hash: object.hash ?? null,
+        size: this.toStoredSize(object.size),
         dirty: 0,
         embedding,
         entity_id: object.entityId,
-        created_at: object.system.createdAt,
-        updated_at: object.system.updatedAt,
+        created_at: object.createdAt,
+        updated_at: object.updatedAt,
         description: object.description ?? null,
         record_type: recordType,
-        content_type: object.system.contentType,
+        content_type: object.contentType,
         user_metadata: stringifyJson(object.userMetadata, "upsert"),
         embedding_dims: embeddingDims,
-        hash_algorithm: object.system.hashAlgorithm ?? null,
+        hash_algorithm: object.hashAlgorithm ?? null,
         embedding_model: embeddingModel,
         embedding_source: embeddingSource,
-        record_timestamp: object.system.updatedAt,
+        record_timestamp: object.updatedAt,
       };
       await transaction
         .insertInto("journal")
@@ -1049,21 +1049,19 @@ export abstract class SqlObjectIndex implements IObjectIndex {
 
     return {
       key: OmnioKey.parse(row.key),
+      hash: row.hash ?? undefined,
+      // node-postgres は bigint を文字列で返すため、数値に変換します。
+      size: Number(row.size),
       tags: [...tags],
-      system: {
-        hash: row.hash ?? undefined,
-        // node-postgres は bigint を文字列で返すため、数値に変換します。
-        size: Number(row.size),
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        contentType: row.content_type,
-        hashAlgorithm: row.hash_algorithm ?? undefined,
-      },
       entityId: row.entity_id,
+      createdAt: row.created_at,
       embedding: decoded,
+      updatedAt: row.updated_at,
+      contentType: row.content_type,
       description: row.description ?? undefined,
       userMetadata: parseJson(row.user_metadata, operation) as TUserMetadata,
       embeddingDims: row.embedding_dims ?? undefined,
+      hashAlgorithm: row.hash_algorithm ?? undefined,
       embeddingModel: row.embedding_model ?? undefined,
       embeddingSource:
         row.embedding_source === null

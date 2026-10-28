@@ -70,20 +70,18 @@ async function createOpenedIndex(signal: AbortSignal): Promise<PostgresqlIndex> 
 function createObject(key: string, tags: readonly string[] = []): OmnioObject {
   return {
     key: OmnioKey.parse(key),
+    hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    size: 3,
     tags: [...tags],
-    system: {
-      hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      size: 3,
-      createdAt: "2026-01-01T00:00:00Z",
-      updatedAt: "2026-01-02T00:00:00Z",
-      contentType: "text/plain",
-      hashAlgorithm: "sha256",
-    },
     entityId: crypto.randomUUID(),
+    createdAt: "2026-01-01T00:00:00Z",
     embedding: new Float32Array([1, 0, 0]),
+    updatedAt: "2026-01-02T00:00:00Z",
+    contentType: "text/plain",
     description: `${key} の説明文`,
     userMetadata: { genre: "test" },
     embeddingDims: 3,
+    hashAlgorithm: "sha256",
     embeddingModel: "test-model",
     embeddingSource: {
       kind: "description",
@@ -128,37 +126,28 @@ async function seedThree(index: PostgresqlIndex, signal: AbortSignal): Promise<v
     {
       ...createObject("k1", ["red", "round"]),
       description: "赤い丸",
-      system: {
-        ...createObject("k1").system,
-        hash: HASH_K1,
-        createdAt: "2026-01-01T00:00:00Z",
-        updatedAt: "2026-01-05T00:00:00Z",
-      },
+      hash: HASH_K1,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-05T00:00:00Z",
       userMetadata: { color: "red" },
     },
     {
       ...createObject("k2", ["blue", "round"]),
       description: "青い丸",
-      system: {
-        ...createObject("k2").system,
-        hash: HASH_K2,
-        contentType: "image/png",
-        createdAt: "2026-02-01T00:00:00Z",
-        size: 8,
-        updatedAt: "2026-02-05T00:00:00Z",
-      },
+      hash: HASH_K2,
+      contentType: "image/png",
+      createdAt: "2026-02-01T00:00:00Z",
+      size: 8,
+      updatedAt: "2026-02-05T00:00:00Z",
       userMetadata: { color: "blue" },
     },
     {
       ...createObject("k3", ["red", "square"]),
       description: "赤い四角",
-      system: {
-        ...createObject("k3").system,
-        hash: HASH_K3,
-        createdAt: "2026-03-01T00:00:00Z",
-        size: 5,
-        updatedAt: "2026-03-05T00:00:00Z",
-      },
+      hash: HASH_K3,
+      createdAt: "2026-03-01T00:00:00Z",
+      size: 5,
+      updatedAt: "2026-03-05T00:00:00Z",
       userMetadata: { color: "red" },
     },
   ];
@@ -400,7 +389,7 @@ describe("PostgresqlIndex", () => {
       expect(actual?.embeddingDims).toBe(object.embeddingDims);
       expect(actual?.embeddingModel).toBe(object.embeddingModel);
       expect(actual?.embeddingSource).toStrictEqual(object.embeddingSource);
-      expect(actual?.system).toStrictEqual(object.system);
+      expect(actual).toStrictEqual(object);
       expect(actual?.tags).toStrictEqual(object.tags);
       expect(actual?.userMetadata).toStrictEqual(object.userMetadata);
 
@@ -612,12 +601,12 @@ describe("PostgresqlIndex", () => {
 
       // 検証：
       expect(updated?.entityId).toBe(object.entityId);
-      expect(updated?.system.size).toBe(object.system.size);
-      expect(updated?.system.hash).toBe(object.system.hash);
-      expect(updated?.system.hashAlgorithm).toBe(object.system.hashAlgorithm);
-      expect(updated?.system.createdAt).toBe(object.system.createdAt);
-      expect(updated?.system.updatedAt).toBe("2026-02-01T00:00:00Z");
-      expect(updated?.system.contentType).toBe("application/json");
+      expect(updated?.size).toBe(object.size);
+      expect(updated?.hash).toBe(object.hash);
+      expect(updated?.hashAlgorithm).toBe(object.hashAlgorithm);
+      expect(updated?.createdAt).toBe(object.createdAt);
+      expect(updated?.updatedAt).toBe("2026-02-01T00:00:00Z");
+      expect(updated?.contentType).toBe("application/json");
       expect(updated?.description).toBe("新しい説明");
       expect(updated?.tags).toStrictEqual([]);
       expect(updated?.userMetadata).toStrictEqual({ genre: "updated" });
@@ -722,11 +711,11 @@ describe("PostgresqlIndex", () => {
       // 検証：
       expect(result?.replacedEntityId).toBeUndefined();
       expect(result?.object.entityId).toBe(object.entityId);
-      expect(result?.object.system.size).toBe(object.system.size);
-      expect(result?.object.system.hash).toBe(object.system.hash);
-      expect(result?.object.system.hashAlgorithm).toBe(object.system.hashAlgorithm);
-      expect(result?.object.system.createdAt).toBe(object.system.createdAt);
-      expect(result?.object.system.updatedAt).toBe("2026-02-01T00:00:00Z");
+      expect(result?.object.size).toBe(object.size);
+      expect(result?.object.hash).toBe(object.hash);
+      expect(result?.object.hashAlgorithm).toBe(object.hashAlgorithm);
+      expect(result?.object.createdAt).toBe(object.createdAt);
+      expect(result?.object.updatedAt).toBe("2026-02-01T00:00:00Z");
       expect(result?.object.tags).toStrictEqual(["a", "b"]);
       expect(actual).toStrictEqual(result?.object);
 
@@ -1697,11 +1686,8 @@ describe("PostgresqlIndex", () => {
         description: undefined,
         embeddingModel: undefined,
         embeddingSource: undefined,
-        system: {
-          ...base.system,
-          hash: undefined,
-          hashAlgorithm: undefined,
-        },
+        hash: undefined,
+        hashAlgorithm: undefined,
       };
 
       // 実行：
@@ -1721,8 +1707,8 @@ describe("PostgresqlIndex", () => {
       expect(actual?.description).toBeUndefined();
       expect(actual?.embeddingModel).toBeUndefined();
       expect(actual?.embeddingSource).toBeUndefined();
-      expect(actual?.system.hash).toBeUndefined();
-      expect(actual?.system.hashAlgorithm).toBeUndefined();
+      expect(actual?.hash).toBeUndefined();
+      expect(actual?.hashAlgorithm).toBeUndefined();
       expect(actual?.embedding).toStrictEqual(object.embedding);
 
       // 後始末：

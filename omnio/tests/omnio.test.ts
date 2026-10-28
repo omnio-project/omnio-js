@@ -228,7 +228,7 @@ function createReadableStreamLike(source: ReadableStream<Uint8Array>): ReadableS
  * @returns ハッシュ値です。
  */
 function hashOf(object: IndexedObject): string {
-  const hash = object.system.hash;
+  const hash = object.hash;
 
   if (hash === undefined) {
     throw new Error("ハッシュ値がありません。");
@@ -506,15 +506,13 @@ describe("dirty 再インデックス", () => {
       action: "upsert",
       object: {
         key: OmnioKey.parse("k"),
+        size: 3,
         tags: ["pet"],
-        system: {
-          size: 3,
-          createdAt: "2026-01-01T00:00:00Z",
-          updatedAt: "2026-01-01T00:00:00Z",
-          contentType: "text/plain",
-        },
         entityId: crypto.randomUUID(),
+        createdAt: "2026-01-01T00:00:00Z",
         embedding: new Float32Array([0, 1]),
+        updatedAt: "2026-01-01T00:00:00Z",
+        contentType: "text/plain",
         description: "cat on the mat",
         userMetadata: {},
         embeddingDims: 2,
@@ -584,14 +582,12 @@ describe("putObject と getObject", () => {
     expect(actual).toStrictEqual(new Uint8Array([1, 2, 3]));
     expect(stored.key).toBeInstanceOf(OmnioKey);
     expect(stored.key.key).toBe("k1");
-    expect(stored.system.contentType).toBe("text/plain");
-    expect(stored.system.size).toBe(3);
-    expect(stored.system.hash).toBe(
-      "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
-    );
-    expect(stored.system.hashAlgorithm).toBe("sha256");
+    expect(stored.contentType).toBe("text/plain");
+    expect(stored.size).toBe(3);
+    expect(stored.hash).toBe("039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81");
+    expect(stored.hashAlgorithm).toBe("sha256");
     expect(head?.description).toBe("cat on the mat");
-    expect(head?.system.hashAlgorithm).toBe("sha256");
+    expect(head?.hashAlgorithm).toBe("sha256");
     expect(head?.tags).toStrictEqual(["pet"]);
     expect(head?.userMetadata).toStrictEqual({ genre: "test" });
     expect(head?.embedding).toStrictEqual(new Float32Array([1, 0]));
@@ -715,7 +711,7 @@ describe("putObject と getObject", () => {
     });
 
     // 検証：
-    expect(second.system.createdAt).toBe(first.system.createdAt);
+    expect(second.createdAt).toBe(first.createdAt);
     expect(second.entityId).toBe(first.entityId);
     expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([1, 2]));
 
@@ -757,14 +753,12 @@ describe("putObject と getObject", () => {
       action: "upsert",
       object: {
         key: OmnioKey.parse("legacy"),
+        size: bytes.byteLength,
         tags: [],
-        system: {
-          size: bytes.byteLength,
-          createdAt: "2026-01-01T00:00:00Z",
-          updatedAt: "2026-01-01T00:00:00Z",
-          contentType: "text/plain",
-        },
         entityId,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        contentType: "text/plain",
         userMetadata: {},
       },
       signal,
@@ -816,7 +810,7 @@ describe("putObject と getObject", () => {
 
     const head = await omnio.headObject("k", signal);
     expect(head?.description).toBe("cat on the mat");
-    expect(head?.system.contentType).toBe("text/plain");
+    expect(head?.contentType).toBe("text/plain");
     expect(head?.userMetadata).toStrictEqual({ version: 1 });
     expect(head?.embedding).toStrictEqual(new Float32Array([1, 0]));
 
@@ -898,7 +892,7 @@ describe("putObject と getObject", () => {
     });
 
     // 検証：
-    expect(stored.system.contentType).toBe("text/plain");
+    expect(stored.contentType).toBe("text/plain");
 
     // 後始末：
     await omnio.close(signal);
@@ -950,10 +944,10 @@ describe("copyObject", () => {
     // 検証：
     expect(copied?.key.key).toBe("dest");
     expect(copied?.entityId).not.toBe(source.entityId);
-    expect(copied?.system.size).toBe(source.system.size);
-    expect(copied?.system.hash).toBe(source.system.hash);
-    expect(copied?.system.hashAlgorithm).toBe(source.system.hashAlgorithm);
-    expect(copied?.system.contentType).toBe(source.system.contentType);
+    expect(copied?.size).toBe(source.size);
+    expect(copied?.hash).toBe(source.hash);
+    expect(copied?.hashAlgorithm).toBe(source.hashAlgorithm);
+    expect(copied?.contentType).toBe(source.contentType);
     expect(copied?.description).toBe(source.description);
     expect(copied?.tags).toStrictEqual(source.tags);
     expect(copied?.userMetadata).toStrictEqual(source.userMetadata);
@@ -986,8 +980,8 @@ describe("copyObject", () => {
 
     // 検証：
     expect(copied?.entityId).toBe(destination.entityId);
-    expect(copied?.system.createdAt).toBe(destination.system.createdAt);
-    expect(copied?.system.contentType).toBe("text/plain");
+    expect(copied?.createdAt).toBe(destination.createdAt);
+    expect(copied?.contentType).toBe("text/plain");
     expect(copied?.userMetadata).toStrictEqual({});
 
     expect(await omnio.getObject("dest", signal)).toStrictEqual(new Uint8Array([1]));
@@ -1074,11 +1068,11 @@ describe("renameObject", () => {
     // 検証：
     expect(renamed?.key.key).toBe("dest");
     expect(renamed?.entityId).toBe(source.entityId);
-    expect(renamed?.system.createdAt).toBe(source.system.createdAt);
-    expect(renamed?.system.size).toBe(source.system.size);
-    expect(renamed?.system.hash).toBe(source.system.hash);
-    expect(renamed?.system.hashAlgorithm).toBe(source.system.hashAlgorithm);
-    expect(renamed?.system.contentType).toBe(source.system.contentType);
+    expect(renamed?.createdAt).toBe(source.createdAt);
+    expect(renamed?.size).toBe(source.size);
+    expect(renamed?.hash).toBe(source.hash);
+    expect(renamed?.hashAlgorithm).toBe(source.hashAlgorithm);
+    expect(renamed?.contentType).toBe(source.contentType);
     expect(renamed?.description).toBe(source.description);
     expect(renamed?.tags).toStrictEqual(source.tags);
     expect(renamed?.userMetadata).toStrictEqual(source.userMetadata);
@@ -1112,8 +1106,8 @@ describe("renameObject", () => {
 
     // 検証：
     expect(renamed?.entityId).toBe(source.entityId);
-    expect(renamed?.system.createdAt).toBe(source.system.createdAt);
-    expect(renamed?.system.contentType).toBe("text/plain");
+    expect(renamed?.createdAt).toBe(source.createdAt);
+    expect(renamed?.contentType).toBe("text/plain");
     expect(renamed?.userMetadata).toStrictEqual({});
     expect(await omnio.getObject("dest", signal)).toStrictEqual(new Uint8Array([1]));
     expect(await getEntity().has(source.entityId)).toBe(true);
@@ -1187,11 +1181,11 @@ describe("updateObjectMetadata", () => {
 
     // 検証：
     expect(updated?.entityId).toBe(first.entityId);
-    expect(updated?.system.size).toBe(first.system.size);
-    expect(updated?.system.hash).toBe(first.system.hash);
-    expect(updated?.system.hashAlgorithm).toBe(first.system.hashAlgorithm);
-    expect(updated?.system.createdAt).toBe(first.system.createdAt);
-    expect(updated?.system.contentType).toBe("application/json");
+    expect(updated?.size).toBe(first.size);
+    expect(updated?.hash).toBe(first.hash);
+    expect(updated?.hashAlgorithm).toBe(first.hashAlgorithm);
+    expect(updated?.createdAt).toBe(first.createdAt);
+    expect(updated?.contentType).toBe("application/json");
     expect(updated?.description).toBe("dog in the park");
     expect(updated?.tags).toStrictEqual([]);
     expect(updated?.userMetadata).toStrictEqual({ version: 2 });
@@ -1222,7 +1216,7 @@ describe("updateObjectMetadata", () => {
     });
 
     // 検証：
-    expect(updated?.system.contentType).toBe("text/plain");
+    expect(updated?.contentType).toBe("text/plain");
     expect(updated?.description).toBe("cat on the mat");
     expect(updated?.tags).toStrictEqual(["pet"]);
 
@@ -1251,10 +1245,10 @@ describe("updateObjectMetadata", () => {
     } as never);
 
     // 検証：
-    expect(updated?.system.size).toBe(first.system.size);
-    expect(updated?.system.hash).toBe(first.system.hash);
-    expect(updated?.system.hashAlgorithm).toBe(first.system.hashAlgorithm);
-    expect(updated?.system.createdAt).toBe(first.system.createdAt);
+    expect(updated?.size).toBe(first.size);
+    expect(updated?.hash).toBe(first.hash);
+    expect(updated?.hashAlgorithm).toBe(first.hashAlgorithm);
+    expect(updated?.createdAt).toBe(first.createdAt);
     expect(updated?.entityId).toBe(first.entityId);
 
     // 後始末：
@@ -1560,13 +1554,13 @@ describe("listObjects", () => {
     // 実行：
     const byValue = await omnio.listObjects(
       {
-        filter: { createdAt: new Date(stored.system.createdAt) },
+        filter: { createdAt: new Date(stored.createdAt) },
       },
       signal,
     );
     const byCondition = await omnio.listObjects(
       {
-        filter: { createdAt: { equals: new Date(stored.system.createdAt) } },
+        filter: { createdAt: { equals: new Date(stored.createdAt) } },
       },
       signal,
     );
@@ -1591,13 +1585,13 @@ describe("listObjects", () => {
     // 実行：
     const byValue = await omnio.listObjects(
       {
-        filter: { updatedAt: new Date(stored.system.updatedAt) },
+        filter: { updatedAt: new Date(stored.updatedAt) },
       },
       signal,
     );
     const byCondition = await omnio.listObjects(
       {
-        filter: { updatedAt: { equals: new Date(stored.system.updatedAt) } },
+        filter: { updatedAt: { equals: new Date(stored.updatedAt) } },
       },
       signal,
     );
@@ -1622,13 +1616,13 @@ describe("listObjects", () => {
     // 実行：
     const byValue = await omnio.listObjects(
       {
-        filter: { recordTimestamp: new Date(stored.system.updatedAt) },
+        filter: { recordTimestamp: new Date(stored.updatedAt) },
       },
       signal,
     );
     const byCondition = await omnio.listObjects(
       {
-        filter: { recordTimestamp: { equals: new Date(stored.system.updatedAt) } },
+        filter: { recordTimestamp: { equals: new Date(stored.updatedAt) } },
       },
       signal,
     );
