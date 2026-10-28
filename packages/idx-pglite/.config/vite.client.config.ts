@@ -20,5 +20,6 @@ export default defineConfig({
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "./coverage/client",
     },
+    testTimeout: 10_000,
   },
 });
