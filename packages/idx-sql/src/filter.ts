@@ -20,6 +20,80 @@ function escapeLikePattern(value: string): string {
 }
 
 /**
+ * LIKE 検索のパターンを組み立てます。
+ *
+ * @param value 検索する文字列です。
+ * @param position 一致させる位置です。
+ *
+ * @returns LIKE 検索のパターンです。
+ */
+function toLikePattern(value: string, position: "contains" | "endsWith" | "startsWith"): string {
+  const escaped = escapeLikePattern(value);
+
+  if (position === "contains") {
+    return `%${escaped}%`;
+  }
+
+  if (position === "endsWith") {
+    return `%${escaped}`;
+  }
+
+  return `${escaped}%`;
+}
+
+/**
+ * コンテンツタイプの条件をクエリーに適用します。
+ *
+ * @param query 絞り込む前のクエリーです。
+ * @param condition コンテンツタイプの条件です。
+ *
+ * @returns 絞り込んだクエリーです。
+ */
+function withContentTypeFilter<T>(
+  query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
+  condition: NonNullable<MetadataFilter["contentType"]>,
+): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
+  if (typeof condition === "string") {
+    return query.where("journal.content_type", "=", condition);
+  }
+
+  let filtered = query;
+
+  if (condition.contains !== undefined) {
+    const pattern = toLikePattern(condition.contains, "contains");
+    filtered = filtered.where(sql<boolean>`${sql.ref("content_type")} LIKE ${pattern} ESCAPE '\\'`);
+  }
+
+  if (condition.endsWith !== undefined) {
+    const pattern = toLikePattern(condition.endsWith, "endsWith");
+    filtered = filtered.where(sql<boolean>`${sql.ref("content_type")} LIKE ${pattern} ESCAPE '\\'`);
+  }
+
+  if (condition.equals !== undefined) {
+    filtered = filtered.where("journal.content_type", "=", condition.equals);
+  }
+
+  if (condition.in !== undefined && condition.in.length > 0) {
+    filtered = filtered.where("journal.content_type", "in", [...condition.in]);
+  }
+
+  if (condition.not !== undefined) {
+    filtered = filtered.where("journal.content_type", "!=", condition.not);
+  }
+
+  if (condition.notIn !== undefined && condition.notIn.length > 0) {
+    filtered = filtered.where("journal.content_type", "not in", [...condition.notIn]);
+  }
+
+  if (condition.startsWith !== undefined) {
+    const pattern = toLikePattern(condition.startsWith, "startsWith");
+    filtered = filtered.where(sql<boolean>`${sql.ref("content_type")} LIKE ${pattern} ESCAPE '\\'`);
+  }
+
+  return filtered;
+}
+
+/**
  * カーソルを offset に変換します。
  *
  * @param cursor 一覧の続きを示すカーソルです。
@@ -52,8 +126,8 @@ export function withMetadataFilter<T>(
 ): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
   let filtered = query.where("journal.record_type", "!=", "DELETE");
 
-  if (filter?.contentTypes !== undefined && filter.contentTypes.length > 0) {
-    filtered = filtered.where("journal.content_type", "in", [...filter.contentTypes]);
+  if (filter?.contentType !== undefined) {
+    filtered = withContentTypeFilter(filtered, filter.contentType);
   }
 
   if (filter?.createdAfter !== undefined) {

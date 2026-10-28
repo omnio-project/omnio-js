@@ -1146,7 +1146,7 @@ describe("PostgresqlIndex", () => {
       // 実行：
       const byType = await index.list({
         action: "list",
-        filter: { contentTypes: ["image/png"] },
+        filter: { contentType: "image/png" },
         signal,
       });
       const after = await index.list({

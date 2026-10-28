@@ -1176,7 +1176,7 @@ describe("list", () => {
     // 実行：
     const byType = await index.list({
       action: "list",
-      filter: { contentTypes: ["image/png"] },
+      filter: { contentType: "image/png" },
       signal,
     });
     const after = await index.list({
@@ -1194,6 +1194,47 @@ describe("list", () => {
     expect(keysOf(byType.items)).toStrictEqual(["k2"]);
     expect(keysOf(after.items)).toStrictEqual(["k2", "k3"]);
     expect(keysOf(before.items)).toStrictEqual(["k1"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("コンテンツタイプの条件で絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    const cases = [
+      [{ equals: "image/png" }, ["k2"]],
+      [{ not: "image/png" }, ["k1", "k3"]],
+      [{ in: ["image/png"] }, ["k2"]],
+      [{ notIn: ["image/png"] }, ["k1", "k3"]],
+      [{ contains: "image/" }, ["k2"]],
+      [{ startsWith: "image/" }, ["k2"]],
+      [{ endsWith: "plain" }, ["k1", "k3"]],
+      [
+        {
+          endsWith: "png",
+          startsWith: "image/",
+        },
+        ["k2"],
+      ],
+    ] as const;
+
+    for (const [contentType, expected] of cases) {
+      // 実行：
+      const actual = await index.list({
+        action: "list",
+        filter: { contentType },
+        signal,
+      });
+
+      // 検証：
+      expect(keysOf(actual.items)).toStrictEqual(expected);
+    }
 
     // 後始末：
     await index.close({

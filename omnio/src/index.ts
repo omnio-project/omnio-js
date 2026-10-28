@@ -16,4 +16,5 @@ export type {
   IObjectIndex,
   IndexedObject,
   MetadataFilter,
+  MetadataFilterCondition,
 } from "@omniojs/core";

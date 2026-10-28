@@ -124,12 +124,23 @@ export const OmnioOptionsSchema = v.object({
   embedder: IEmbedderSchema,
 });
 
+/** メタデータの文字列に対する絞り込み条件を検証するスキーマです。 */
+const MetadataFilterConditionSchema = v.object({
+  in: v.optional(v.array(ContentTypeSchema)),
+  not: v.optional(ContentTypeSchema),
+  notIn: v.optional(v.array(ContentTypeSchema)),
+  equals: v.optional(ContentTypeSchema),
+  contains: v.optional(ContentTypeSchema),
+  endsWith: v.optional(ContentTypeSchema),
+  startsWith: v.optional(ContentTypeSchema),
+});
+
 /** メタデータの絞り込み条件を検証するスキーマです。 */
 const MetadataFilterSchema = v.object({
   tagsAll: v.optional(TagsSchema),
   tagsAny: v.optional(TagsSchema),
   fullText: v.optional(v.string()),
-  contentTypes: v.optional(v.array(ContentTypeSchema)),
+  contentType: v.optional(v.union([ContentTypeSchema, MetadataFilterConditionSchema])),
   createdAfter: v.optional(TimestampSchema),
   createdBefore: v.optional(TimestampSchema),
 });

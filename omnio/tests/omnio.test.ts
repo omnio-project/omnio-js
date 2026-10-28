@@ -1361,6 +1361,35 @@ describe("listObjects", () => {
     await omnio.close(signal);
   });
 
+  test("コンテンツタイプの条件で絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    await omnio.putObject({
+      key: "a",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    await omnio.putObject({
+      key: "b",
+      data: new Uint8Array([2]),
+      contentType: "application/json",
+    });
+
+    // 実行：
+    const actual = await omnio.listObjects(
+      {
+        filter: { contentType: { endsWith: "JSON" } },
+      },
+      signal,
+    );
+
+    // 検証：
+    expect(actual.items.map((item) => item.key.key)).toStrictEqual(["b"]);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
   test("不正な一覧条件を ValiError にする", async ({ expect, signal }) => {
     // 準備：
     const omnio = await createTestOmnio(signal);

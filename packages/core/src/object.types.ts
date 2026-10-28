@@ -119,11 +119,39 @@ export type OmnioObject<TUserMetadata = Record<string, unknown>> = {
 };
 
 /**
+ * メタデータの文字列に対する絞り込み条件です。
+ *
+ * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
+ */
+export type MetadataFilterCondition = {
+  /** 部分一致を要求する値です。 */
+  readonly contains?: string | undefined;
+
+  /** 後方一致を要求する値です。 */
+  readonly endsWith?: string | undefined;
+
+  /** 完全一致を要求する値です。 */
+  readonly equals?: string | undefined;
+
+  /** いずれかに一致することを要求する値の一覧です。 */
+  readonly in?: readonly string[] | undefined;
+
+  /** 一致しないことを要求する値です。 */
+  readonly not?: string | undefined;
+
+  /** いずれにも一致しないことを要求する値の一覧です。 */
+  readonly notIn?: readonly string[] | undefined;
+
+  /** 前方一致を要求する値です。 */
+  readonly startsWith?: string | undefined;
+};
+
+/**
  * メタデータによる絞り込み条件です。
  */
 export type MetadataFilter = {
-  /** 対象とするコンテンツタイプの一覧です。 */
-  readonly contentTypes?: readonly string[] | undefined;
+  /** コンテンツタイプの条件です。文字列を指定すると完全一致を要求します。 */
+  readonly contentType?: string | MetadataFilterCondition | undefined;
 
   /** 作成時刻の下限です。ISO 8601 文字列で表します。 */
   readonly createdAfter?: string | undefined;
