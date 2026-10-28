@@ -201,6 +201,24 @@ async function readAll(source: AsyncIterable<Uint8Array> | null): Promise<Uint8A
 }
 
 /**
+ * ReadableStream を継承せずにインターフェースだけを満たすオブジェクトを作ります。
+ *
+ * @param source 元になる ReadableStream です。
+ *
+ * @returns ReadableStream のインターフェースを満たすオブジェクトです。
+ */
+function createReadableStreamLike(source: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  return new Proxy(source, {
+    get(target, property): unknown {
+      const value = Reflect.get(target, property, target);
+
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+    getPrototypeOf: (): object => Object.prototype,
+  });
+}
+
+/**
  * オブジェクトのハッシュ値を取り出します。
  *
  * ハッシュ値が必ず存在することを前提にした検証で使用します。
@@ -615,6 +633,36 @@ describe("putObject と getObject", () => {
     // 検証：
     expect(await omnio.getObject("b", signal)).toStrictEqual(new Uint8Array([4, 5]));
     expect(await omnio.getObject("s", signal)).toStrictEqual(new Uint8Array([6, 7, 8]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("ReadableStream のインターフェースを持つオブジェクトを受け付ける", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    const source = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        controller.enqueue(new Uint8Array([9, 10]));
+        controller.close();
+      },
+    });
+    // ReadableStream を継承しないが、インターフェースを満たすオブジェクトを作ります。
+    const stream = createReadableStreamLike(source);
+
+    // 実行：
+    await omnio.putObject({
+      key: "s",
+      data: stream,
+      contentType: "application/octet-stream",
+    });
+
+    // 検証：
+    expect(stream).not.toBeInstanceOf(ReadableStream);
+    expect(await omnio.getObject("s", signal)).toStrictEqual(new Uint8Array([9, 10]));
 
     // 後始末：
     await omnio.close(signal);

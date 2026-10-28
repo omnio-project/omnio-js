@@ -48,9 +48,16 @@ const Uint8ArraySchema = v.instance(Uint8Array);
 /** Blob のスキーマです。 */
 const BlobSchema = v.instance(Blob);
 
-/** ReadableStream のスキーマです。 */
+/**
+ * ReadableStream のスキーマです。
+ *
+ * ReadableStream のインターフェースを満たすオブジェクトを受け付けます。
+ */
 const ReadableStreamSchema = v.custom<ReadableStream<Uint8Array>>(
-  (input) => input instanceof ReadableStream,
+  (input) =>
+    isObject(input) &&
+    typeof input["locked"] === "boolean" &&
+    hasFunctions(input, ["cancel", "getReader", "pipeThrough", "pipeTo", "tee"]),
 );
 
 /** 保存データのスキーマです。 */
