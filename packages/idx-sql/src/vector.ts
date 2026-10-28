@@ -153,25 +153,6 @@ export function cosineSimilarity(query: Float32Array, target: Float32Array): num
 }
 
 /**
- * 内積を求めます。
- *
- * @param query 検索クエリーのベクトルです。
- * @param target 比較対象のベクトルです。
- *
- * @returns 内積です。
- */
-export function dotProduct(query: Float32Array, target: Float32Array): number {
-  const length = Math.min(query.length, target.length);
-  let dot = 0;
-
-  for (let index = 0; index < length; index += 1) {
-    dot += Number(query[index]) * Number(target[index]);
-  }
-
-  return dot;
-}
-
-/**
  * L2 距離を求めます。
  *
  * @param query 検索クエリーのベクトルです。
@@ -196,7 +177,6 @@ export function l2Distance(query: Float32Array, target: Float32Array): number {
  */
 const SCORERS: Record<VectorMetric, (left: Float32Array, right: Float32Array) => number> = {
   l2: (left, right) => -l2Distance(left, right),
-  dot: dotProduct,
   cosine: cosineSimilarity,
 };
 

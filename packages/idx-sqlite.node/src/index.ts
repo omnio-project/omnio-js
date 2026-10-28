@@ -14,7 +14,6 @@ export type { SqliteNodeIndexOptions } from "./sqlite-index.js";
 export { SqliteNodeIndex } from "./sqlite-index.js";
 
 export {
-  dotProduct,
   l2Distance,
   scoreVector,
   decodeEmbedding,

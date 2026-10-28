@@ -7,7 +7,7 @@ import type { OmnioObject, MetadataFilter, ObjectMetadataPatch } from "./object.
 /**
  * ベクトル類似度の計算方式です。
  */
-export type VectorMetric = "cosine" | "dot" | "l2";
+export type VectorMetric = "cosine" | "l2";
 
 /**
  * 類似度付きのオブジェクトです。

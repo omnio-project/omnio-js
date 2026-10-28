@@ -1493,40 +1493,6 @@ describe("search", () => {
     });
   });
 
-  test("dot では内積の大きい順に返す", async ({ expect, signal }) => {
-    // 準備：
-    const index = await createOpenedIndex(signal);
-    await index.upsert({
-      action: "upsert",
-      object: createVectorObject("a", new Float32Array([1, 0])),
-      signal,
-    });
-    await index.upsert({
-      action: "upsert",
-      object: createVectorObject("b", new Float32Array([0, 2])),
-      signal,
-    });
-
-    // 実行：
-    const actual = await index.search({
-      topK: 10,
-      action: "search",
-      metric: "dot",
-      signal,
-      vector: new Float32Array([2, 0]),
-    });
-
-    // 検証：
-    expect(keysOf(actual)).toStrictEqual(["a", "b"]);
-    expect(actual[0]?.score).toBeCloseTo(2);
-
-    // 後始末：
-    await index.close({
-      action: "close",
-      signal,
-    });
-  });
-
   test("ゼロベクトルの cosine は NaN ではなく 0 を返す", async ({ expect, signal }) => {
     // 準備：
     const index = await createOpenedIndex(signal);

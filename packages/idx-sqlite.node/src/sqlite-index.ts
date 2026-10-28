@@ -101,14 +101,10 @@ export class SqliteNodeIndex extends SqlObjectIndex {
    *
    * @param c 検索する操作のコンテキストです。
    *
-   * @returns sqlite-vec を使う場合は true です。dot と利用者メタデータの絞り込みには対応しません。
+   * @returns sqlite-vec を使う場合は true です。利用者メタデータの絞り込みには対応しません。
    */
   protected override canSearchScoredKeys(c: IObjectIndex.SearchContext): boolean {
-    return (
-      this.#vectorSearchAvailable &&
-      (c.metric ?? "cosine") !== "dot" &&
-      c.filter?.userMetadata === undefined
-    );
+    return this.#vectorSearchAvailable && c.filter?.userMetadata === undefined;
   }
 
   /**

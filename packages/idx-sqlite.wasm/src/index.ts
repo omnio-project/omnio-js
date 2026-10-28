@@ -14,7 +14,6 @@ export type { SqliteWasmIndexOptions } from "./sqlite-index.js";
 export { SqliteWasmIndex } from "./sqlite-index.js";
 
 export {
-  dotProduct,
   l2Distance,
   scoreVector,
   decodeEmbedding,

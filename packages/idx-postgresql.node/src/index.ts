@@ -8,7 +8,6 @@ export { PostgresqlIndex } from "./postgresql-index.js";
 export type { ObjectRow, ObjectTagRow, PostgresqlDatabase } from "./schema.js";
 
 export {
-  dotProduct,
   l2Distance,
   scoreVector,
   decodeEmbedding,

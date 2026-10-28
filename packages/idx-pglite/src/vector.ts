@@ -1,5 +1,4 @@
 export {
-  dotProduct,
   l2Distance,
   scoreVector,
   decodeEmbedding,

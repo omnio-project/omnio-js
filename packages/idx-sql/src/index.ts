@@ -12,7 +12,6 @@ export type { ScoredObjectKey, SqlIndexBackend } from "./sql-index.js";
 export { SqlObjectIndex } from "./sql-index.js";
 
 export {
-  dotProduct,
   l2Distance,
   parseVector,
   scoreVector,

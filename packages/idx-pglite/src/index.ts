@@ -8,7 +8,6 @@ export { PGliteIndex } from "./pglite-index.js";
 export type { ObjectRow, ObjectTagRow, PGliteDatabase } from "./schema.js";
 
 export {
-  dotProduct,
   l2Distance,
   scoreVector,
   decodeEmbedding,

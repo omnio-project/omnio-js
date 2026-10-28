@@ -48,8 +48,6 @@ export abstract class PgVectorObjectIndex extends SqlObjectIndex {
         when vector_norm(${embedding}) = 0 or vector_norm(${query}) = 0 then 0
         else 1 - (${embedding} <=> ${query})
       end`;
-    } else if (metric === "dot") {
-      score = sql<number>`-(${embedding} <#> ${query})`;
     } else {
       score = sql<number>`-(${embedding} <-> ${query})`;
     }
