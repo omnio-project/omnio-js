@@ -20,7 +20,7 @@ const DEFAULT_DATABASE_URL = "postgres://postgres:postgres@localhost:5432/postgr
  */
 export function getTestConnectionString(schema: string): string {
   const url = new URL(process.env["DATABASE_URL"] ?? DEFAULT_DATABASE_URL);
-  url.searchParams.set("options", `-c search_path=${schema}`);
+  url.searchParams.set("options", `-c search_path=${schema},public`);
 
   return url.toString();
 }
@@ -41,6 +41,7 @@ export async function resetTestSchema(schema: string): Promise<void> {
   try {
     await client.query(`drop schema if exists ${schema} cascade`);
     await client.query(`create schema ${schema}`);
+    await client.query("create extension if not exists vector schema public");
   } finally {
     await client.end();
   }

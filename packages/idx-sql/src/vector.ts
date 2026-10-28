@@ -1,6 +1,58 @@
 import { type VectorMetric, DbQueryError } from "@omniojs/core";
 
 /**
+ * 埋め込みベクトルを pgvector の入力形式に変換します。
+ *
+ * @param vector 埋め込みベクトルです。
+ *
+ * @returns pgvector の `vector` 型として解釈できる文字列です。
+ */
+export function formatVector(vector: Float32Array): string {
+  return `[${Array.from(vector).join(",")}]`;
+}
+
+/**
+ * pgvector の `vector` 型の文字列表現を埋め込みベクトルに変換します。
+ *
+ * @param value pgvector の `vector` 型の文字列表現です。
+ *
+ * @returns 埋め込みベクトルです。
+ */
+export function parseVector(value: string): Float32Array {
+  const trimmed = value.trim();
+
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
+    throw new DbQueryError({
+      cause: new Error(`Invalid vector value: ${value}`),
+      operation: "decode",
+    });
+  }
+
+  const body = trimmed.slice(1, -1).trim();
+
+  if (body === "") {
+    return new Float32Array();
+  }
+
+  const values = body.split(",").map((part) => {
+    const text = part.trim();
+    const number = Number(text);
+
+    // pgvector はゼロ除算などの結果として NaN を返すことがあるため、NaN だけは許可します。
+    if (text === "" || (Number.isNaN(number) && text !== "NaN")) {
+      throw new DbQueryError({
+        cause: new Error(`Invalid vector value: ${value}`),
+        operation: "decode",
+      });
+    }
+
+    return number;
+  });
+
+  return new Float32Array(values);
+}
+
+/**
  * 埋め込みベクトルを保存用のバイト列に変換します。
  *
  * @param vector 埋め込みベクトルです。

@@ -1,8 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
 
-import type { SqlIndexBackend } from "@omniojs/idx-sql";
-import { SqlObjectIndex } from "@omniojs/idx-sql";
-import { Kysely } from "kysely";
+import type { IObjectIndex } from "@omniojs/core";
+import type { ScoredObjectKey, SqlIndexBackend } from "@omniojs/idx-sql";
+import { SqlObjectIndex, encodeEmbedding, withMetadataFilter } from "@omniojs/idx-sql";
+import { sql, Kysely } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import * as v from "valibot";
 
@@ -53,6 +54,11 @@ export class SqliteNodeIndex extends SqlObjectIndex {
   readonly #location: string;
 
   /**
+   * sqlite-vec 拡張を読み込めたかを示します。
+   */
+  #vectorSearchAvailable = false;
+
+  /**
    * @param options データベースの保存場所などの設定です。
    */
   public constructor(options: SqliteNodeIndexOptions = {}) {
@@ -62,19 +68,104 @@ export class SqliteNodeIndex extends SqlObjectIndex {
     this.#location = parsed.location ?? ":memory:";
   }
 
-  protected override createBackend(): Promise<SqlIndexBackend> {
-    const handle = new DatabaseSync(this.#location);
+  protected override async createBackend(): Promise<SqlIndexBackend> {
+    const handle = new DatabaseSync(this.#location, {
+      allowExtension: true,
+    });
+
+    try {
+      const { load } = await import("sqlite-vec");
+      load(handle);
+
+      this.#vectorSearchAvailable = true;
+    } catch {
+      // sqlite-vec がない環境でも動くよう、JavaScript の総当たりにフォールバックします。
+      this.#vectorSearchAvailable = false;
+    }
+
     const kysely = new Kysely<SqliteNodeDatabase>({
       dialect: new SqliteNodeDialect(handle),
     });
 
-    return Promise.resolve({
+    return {
       kysely,
       dispose: async () => {
         await kysely.destroy().catch(() => undefined);
         closeHandle(handle);
       },
-    });
+    };
+  }
+
+  /**
+   * sqlite-vec の距離関数を使えるかを確認します。
+   *
+   * @param c 検索する操作のコンテキストです。
+   *
+   * @returns sqlite-vec を使う場合は true です。dot と利用者メタデータの絞り込みには対応しません。
+   */
+  protected override canSearchScoredKeys(c: IObjectIndex.SearchContext): boolean {
+    return (
+      this.#vectorSearchAvailable &&
+      (c.metric ?? "cosine") !== "dot" &&
+      c.filter?.userMetadata === undefined
+    );
+  }
+
+  /**
+   * sqlite-vec の距離関数を使って類似度の高い順にキーを取得します。
+   *
+   * @param kysely kysely のインスタンスです。
+   * @param c 検索する操作のコンテキストです。
+   *
+   * @returns スコア付きのキー一覧です。
+   */
+  protected override async searchScoredKeys(
+    kysely: Kysely<SqliteNodeDatabase>,
+    c: IObjectIndex.SearchContext,
+  ): Promise<ScoredObjectKey[]> {
+    const metric = c.metric ?? "cosine";
+    const query = encodeEmbedding(c.vector);
+    const embedding = sql.ref("journal.embedding");
+    const distance =
+      metric === "cosine"
+        ? sql<number>`vec_distance_cosine(${embedding}, ${query})`
+        : sql<number>`vec_distance_l2(${embedding}, ${query})`;
+    const score =
+      metric === "cosine"
+        ? sql<number>`case when ${distance} is null then 0 else 1 - ${distance} end`
+        : sql<number>`-${distance}`;
+
+    const candidates = withMetadataFilter(
+      kysely.selectFrom("journal").select(["journal.key", score.as("score")]),
+      c.filter,
+      this.fullTextOperator,
+    )
+      .where("journal.dirty", "=", 0)
+      .where("journal.embedding", "is not", null)
+      .where("journal.embedding_dims", "=", c.vector.length)
+      .where(sql<boolean>`length(${embedding}) = ${c.vector.length * 4}`);
+
+    const filtered =
+      c.embeddingModel === undefined
+        ? candidates
+        : candidates.where("journal.embedding_model", "=", c.embeddingModel);
+
+    let scored = kysely
+      .selectFrom(filtered.as("scored"))
+      .select(["scored.key", "scored.score"])
+      .orderBy("scored.score", "desc")
+      .limit(c.topK);
+
+    if (c.minScore !== undefined) {
+      scored = scored.where("scored.score", ">=", c.minScore);
+    }
+
+    const rows = await scored.execute();
+
+    return rows.map((row) => ({
+      key: row.key,
+      score: row.score,
+    }));
   }
 
   protected override createMigrationProvider(): MigrationProvider {

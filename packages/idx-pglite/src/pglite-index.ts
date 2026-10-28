@@ -1,11 +1,11 @@
 import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite-pgvector";
 import type { SqlIndexBackend } from "@omniojs/idx-sql";
-import { SqlObjectIndex } from "@omniojs/idx-sql";
+import { PgVectorObjectIndex } from "@omniojs/idx-sql";
 import { Kysely, PGliteDialect } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import * as v from "valibot";
 
-import { BYTEA_OID, parseBytea, serializeBytea } from "./bytea.js";
 import { PGliteMigrationProvider } from "./migrations.js";
 import type { PGliteDatabase } from "./schema.js";
 
@@ -46,7 +46,7 @@ async function closePGlite(pglite: PGlite): Promise<void> {
 /**
  * PGlite による `IObjectIndex` の実装です。
  */
-export class PGliteIndex extends SqlObjectIndex {
+export class PGliteIndex extends PgVectorObjectIndex {
   protected override readonly fullTextOperator = "ILIKE" as const;
 
   readonly #location: string;
@@ -63,11 +63,8 @@ export class PGliteIndex extends SqlObjectIndex {
 
   protected override createBackend(): Promise<SqlIndexBackend> {
     const pglite = new PGlite(this.#location, {
-      parsers: {
-        [BYTEA_OID]: parseBytea,
-      },
-      serializers: {
-        [BYTEA_OID]: serializeBytea,
+      extensions: {
+        vector,
       },
     });
     const kysely = new Kysely<PGliteDatabase>({

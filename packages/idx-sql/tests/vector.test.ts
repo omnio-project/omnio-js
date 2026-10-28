@@ -3,12 +3,46 @@ import { test, describe } from "vite-plus/test";
 import {
   dotProduct,
   l2Distance,
+  parseVector,
   scoreVector,
+  formatVector,
   decodeEmbedding,
   encodeEmbedding,
   cosineSimilarity,
   decodeEmbeddingInto,
 } from "../src/vector.js";
+
+describe("formatVector と parseVector", () => {
+  test("pgvector の形式に変換して復号すると元のベクトルに戻る", ({ expect }) => {
+    // 準備：
+    const vector = new Float32Array([1, -2.5, 3.25]);
+
+    // 実行：
+    const actual = parseVector(formatVector(vector));
+
+    // 検証：
+    expect(formatVector(vector)).toBe("[1,-2.5,3.25]");
+    expect(actual).toStrictEqual(vector);
+  });
+
+  test("空のベクトルを扱える", ({ expect }) => {
+    // 実行と検証：
+    expect(formatVector(new Float32Array())).toBe("[]");
+    expect(parseVector("[]")).toStrictEqual(new Float32Array());
+  });
+
+  test("NaN を含む値も復号できる", ({ expect }) => {
+    // 実行と検証：
+    expect(parseVector("[NaN,1]")[0]).toBeNaN();
+  });
+
+  test("不正な形式はエラーを投げる", ({ expect }) => {
+    // 実行と検証：
+    expect(() => parseVector("1,2,3")).toThrow();
+    expect(() => parseVector("[1,invalid,3]")).toThrow();
+    expect(() => parseVector("[1,,3]")).toThrow();
+  });
+});
 
 describe("encodeEmbedding と decodeEmbedding", () => {
   test("符号化して復号すると元のベクトルに戻る", ({ expect }) => {

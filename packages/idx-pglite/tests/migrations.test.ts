@@ -1,4 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite-pgvector";
 import { sql, Kysely, PGliteDialect } from "kysely";
 import type { Migration } from "kysely/migration";
 import { test, describe } from "vite-plus/test";
@@ -29,7 +30,11 @@ describe("マイグレーション", () => {
     expect(Object.keys(MIGRATIONS)).toStrictEqual(["001_create_journal"]);
 
     const migration = requireMigration("001_create_journal");
-    const pglite = new PGlite();
+    const pglite = new PGlite({
+      extensions: {
+        vector,
+      },
+    });
     const db = new Kysely<PGliteDatabase>({
       dialect: new PGliteDialect({ pglite }),
     });
@@ -122,7 +127,11 @@ describe("マイグレーション", () => {
   test("down で journal と object_tag を削除する", async ({ expect }) => {
     // 準備：
     const migration = requireMigration("001_create_journal");
-    const pglite = new PGlite();
+    const pglite = new PGlite({
+      extensions: {
+        vector,
+      },
+    });
     const db = new Kysely<PGliteDatabase>({
       dialect: new PGliteDialect({ pglite }),
     });

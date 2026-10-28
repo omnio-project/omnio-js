@@ -1,5 +1,5 @@
 import type { SqlIndexBackend } from "@omniojs/idx-sql";
-import { SqlObjectIndex } from "@omniojs/idx-sql";
+import { PgVectorObjectIndex } from "@omniojs/idx-sql";
 import { Kysely, PostgresDialect } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { Pool } from "pg";
@@ -45,7 +45,7 @@ async function closePool(pool: Pool): Promise<void> {
 /**
  * PostgreSQL による `IObjectIndex` の実装です。
  */
-export class PostgresqlIndex extends SqlObjectIndex {
+export class PostgresqlIndex extends PgVectorObjectIndex {
   protected override readonly fullTextOperator = "ILIKE" as const;
 
   readonly #connectionString: string;

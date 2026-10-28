@@ -6,7 +6,7 @@ import type { Migration } from "kysely/migration";
  */
 export const MIGRATIONS: Record<string, Migration> = createSqlMigrations({
   sizeColumnType: "bigint",
-  embeddingColumnType: "bytea",
+  embeddingColumnType: "vector",
 });
 
 /**

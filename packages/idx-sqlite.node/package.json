@@ -31,6 +31,7 @@
     "@omniojs/idx-sql": "workspace:*",
     "asyncmux": "^0.0.12",
     "kysely": "^0.29.7",
+    "sqlite-vec": "0.1.9",
     "valibot": "^1.0.0"
   },
   "devDependencies": {

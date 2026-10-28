@@ -13,8 +13,12 @@ export type SqlObjectRow = {
   /** 任意のテキスト形式の説明文です。存在しない場合もあります。 */
   readonly description: string | null;
 
-  /** 埋め込みベクトルです。リトルエンディアンのバイト列で表します。存在しない場合もあります。 */
-  readonly embedding: Uint8Array | null;
+  /**
+   * 埋め込みベクトルです。
+   *
+   * SQLite ではリトルエンディアンのバイト列、PostgreSQL と PGlite では pgvector の `vector` 型の文字列表現で表します。存在しない場合もあります。
+   */
+  readonly embedding: Uint8Array | string | null;
 
   /** 埋め込みベクトルの次元数です。存在しない場合もあります。 */
   readonly embedding_dims: number | null;

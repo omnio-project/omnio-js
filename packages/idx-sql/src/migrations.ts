@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 import type { Migration, MigrationProvider } from "kysely/migration";
 
 import type { SqlIndexDatabase } from "./schema.js";
@@ -7,8 +7,12 @@ import type { SqlIndexDatabase } from "./schema.js";
  * SQL インデックスのマイグレーションを構築する設定です。
  */
 export type SqlMigrationOptions = {
-  /** 埋め込みベクトルを保存する列の型です。 */
-  readonly embeddingColumnType: "blob" | "bytea";
+  /**
+   * 埋め込みベクトルを保存する列の型です。
+   *
+   * `"vector"` を指定した場合は pgvector 拡張を有効にします。
+   */
+  readonly embeddingColumnType: "blob" | "bytea" | "vector";
 
   /** バイト列のサイズを保存する列の型です。 */
   readonly sizeColumnType: "bigint" | "integer";
@@ -21,6 +25,12 @@ export type SqlMigrationOptions = {
  * @param options 列の型の設定です。
  */
 async function up001(db: Kysely<SqlIndexDatabase>, options: SqlMigrationOptions): Promise<void> {
+  if (options.embeddingColumnType === "vector") {
+    await sql`create extension if not exists vector`.execute(db);
+  }
+
+  const embeddingColumnType =
+    options.embeddingColumnType === "vector" ? sql`vector` : options.embeddingColumnType;
   await db.schema
     .createTable("journal")
     .addColumn("key", "text", (column) => column.notNull().primaryKey())
@@ -37,10 +47,11 @@ async function up001(db: Kysely<SqlIndexDatabase>, options: SqlMigrationOptions)
     .addColumn("embedding_dims", "integer")
     .addColumn("embedding_source", "text")
     .addColumn("dirty", "integer", (column) => column.notNull().defaultTo(0))
-    .addColumn("embedding", options.embeddingColumnType)
+    .addColumn("embedding", embeddingColumnType)
     .addColumn("created_at", "text")
     .addColumn("updated_at", "text")
     .execute();
+
   await db.schema
     .createTable("object_tag")
     .addColumn("key", "text", (column) =>

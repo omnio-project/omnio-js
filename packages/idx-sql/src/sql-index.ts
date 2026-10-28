@@ -21,7 +21,25 @@ import {
 } from "./filter.js";
 import { parseJson, stringifyJson } from "./json.js";
 import type { SqlObjectRow, SqlIndexDatabase } from "./schema.js";
-import { scoreVector, decodeEmbedding, encodeEmbedding, decodeEmbeddingInto } from "./vector.js";
+import {
+  parseVector,
+  scoreVector,
+  formatVector,
+  decodeEmbedding,
+  encodeEmbedding,
+  decodeEmbeddingInto,
+} from "./vector.js";
+
+/**
+ * 検索で得られたキーとスコアの組です。
+ */
+export type ScoredObjectKey = {
+  /** オブジェクトを一意に識別するキーです。 */
+  readonly key: string;
+
+  /** クエリーとの類似度です。 */
+  readonly score: number;
+};
 
 /**
  * SQL インデックスのデータベース接続です。
@@ -43,7 +61,8 @@ export type SqlIndexBackend = {
 /**
  * SQL データベースによる `IObjectIndex` の共通実装です。
  *
- * メタデータ検索は kysely で組み立てた SQL で行い、ベクトル検索は JavaScript で総当たり計算します。
+ * メタデータ検索は kysely で組み立てた SQL で行います。
+ * ベクトル検索は、派生クラスがデータベースネイティブの検索を提供しない場合は JavaScript で総当たり計算します。
  * データベースごとの接続方法とマイグレーションは派生クラスが用意します。
  *
  * すべての非同期メソッドは `asyncmux` によりインスタンス単位で排他します。
@@ -56,6 +75,13 @@ export abstract class SqlObjectIndex implements IObjectIndex {
    * SQLite は `LIKE`、PostgreSQL は `ILIKE` を使います。
    */
   protected abstract readonly fullTextOperator: FullTextOperator;
+
+  /**
+   * 埋め込みベクトルの保存形式です。
+   *
+   * PostgreSQL と PGlite は pgvector の `vector` 型を、それ以外はリトルエンディアンのバイト列を使います。
+   */
+  protected readonly embeddingFormat: "binary" | "pgvector" = "binary";
 
   #kysely: Kysely<SqlIndexDatabase> | undefined;
 
@@ -124,7 +150,7 @@ export abstract class SqlObjectIndex implements IObjectIndex {
     const kysely = this.#requireOpen("upsert");
     const object = c.object;
     const vector = object.embedding;
-    let embedding: Uint8Array<ArrayBuffer> | null = null;
+    let embedding: Uint8Array<ArrayBuffer> | string | null = null;
     let embeddingDims: number | null = null;
     let embeddingModel: string | null = null;
     let embeddingSource: string | null = null;
@@ -137,7 +163,8 @@ export abstract class SqlObjectIndex implements IObjectIndex {
         });
       }
 
-      embedding = encodeEmbedding(vector);
+      embedding =
+        this.embeddingFormat === "pgvector" ? formatVector(vector) : encodeEmbedding(vector);
       embeddingDims = vector.length;
       embeddingModel = object.embeddingModel ?? null;
 
@@ -653,6 +680,13 @@ export abstract class SqlObjectIndex implements IObjectIndex {
       return [];
     }
 
+    if (this.canSearchScoredKeys(c)) {
+      return await this.#toSearchResults<TUserMetadata>(
+        kysely,
+        await this.searchScoredKeys(kysely, c),
+      );
+    }
+
     const candidates = withMetadataFilter(
       kysely
         .selectFrom("journal")
@@ -668,17 +702,14 @@ export abstract class SqlObjectIndex implements IObjectIndex {
         : candidates.where("journal.embedding_model", "=", c.embeddingModel)
     ).execute();
     const metric = c.metric ?? "cosine";
-    const scored: {
-      row: (typeof rows)[number];
-      score: number;
-    }[] = [];
+    const scored: (ScoredObjectKey & { row: (typeof rows)[number] })[] = [];
     // 行ごとにベクトルを確保すると GC が増えるため、検索中は作業用のベクトルを使い回します。
     const scratch = new Float32Array(c.vector.length);
 
     for (const row of rows) {
-      const bytes = row.embedding;
+      const stored = row.embedding;
 
-      if (bytes === null) {
+      if (stored === null) {
         continue;
       }
 
@@ -686,29 +717,47 @@ export abstract class SqlObjectIndex implements IObjectIndex {
         continue;
       }
 
-      const length = bytes.byteLength / 4;
+      let vector: Float32Array;
 
-      if (!Number.isInteger(length)) {
-        // 不正なバイト長は、通常の復号と同じエラーにします。
-        decodeEmbedding(bytes);
+      if (typeof stored === "string") {
+        vector = parseVector(stored);
+      } else {
+        const length = stored.byteLength / 4;
 
-        continue;
+        if (!Number.isInteger(length)) {
+          // 不正なバイト長は、通常の復号と同じエラーにします。
+          decodeEmbedding(stored);
+
+          continue;
+        }
+
+        if (row.embedding_dims !== null && row.embedding_dims !== length) {
+          throw new VectorDimensionMismatchError({
+            actual: length,
+            expected: row.embedding_dims,
+          });
+        }
+
+        if (length !== c.vector.length) {
+          continue;
+        }
+
+        decodeEmbeddingInto(stored, scratch);
+        vector = scratch;
       }
 
-      if (row.embedding_dims !== null && row.embedding_dims !== length) {
+      if (row.embedding_dims !== null && row.embedding_dims !== vector.length) {
         throw new VectorDimensionMismatchError({
-          actual: length,
+          actual: vector.length,
           expected: row.embedding_dims,
         });
       }
 
-      if (length !== c.vector.length) {
+      if (vector.length !== c.vector.length) {
         continue;
       }
 
-      decodeEmbeddingInto(bytes, scratch);
-
-      const score = scoreVector(metric, c.vector, scratch);
+      const score = scoreVector(metric, c.vector, vector);
 
       if (c.minScore !== undefined && score < c.minScore) {
         continue;
@@ -725,6 +774,7 @@ export abstract class SqlObjectIndex implements IObjectIndex {
       }
 
       scored.push({
+        key: row.key,
         row,
         score,
       });
@@ -732,38 +782,39 @@ export abstract class SqlObjectIndex implements IObjectIndex {
 
     scored.sort((left, right) => right.score - left.score);
 
-    const top = scored.slice(0, c.topK);
-
-    if (top.length === 0) {
-      return [];
-    }
-
-    const topKeys = top.map(({ row }) => row.key);
-    const fullRows = await kysely
-      .selectFrom("journal")
-      .selectAll()
-      .where("key", "in", topKeys)
-      .execute();
-    const rowsByKey = new Map(fullRows.map((row) => [row.key, row]));
-    const tags = await this.#loadTags(kysely, topKeys);
-
-    return top.map(({ row, score }) => {
-      const full = rowsByKey.get(row.key);
-
-      if (full === undefined) {
-        throw new DbQueryError({
-          cause: new Error("Search result row disappeared"),
-          operation: "search",
-        });
-      }
-
-      const vector = this.#decodeRowEmbedding(full);
-
-      return {
-        ...this.#toObject<TUserMetadata>(full, tags.get(full.key) ?? [], "search", vector),
+    return await this.#toSearchResults<TUserMetadata>(
+      kysely,
+      scored.slice(0, c.topK).map(({ key, score }) => ({
+        key,
         score,
-      };
-    });
+      })),
+    );
+  }
+
+  /**
+   * データベースネイティブのベクトル検索を使えるかを確認します。
+   *
+   * @param _c 検索する操作のコンテキストです。
+   *
+   * @returns ネイティブ検索を使う場合は true です。
+   */
+  protected canSearchScoredKeys(_c: IObjectIndex.SearchContext): boolean {
+    return false;
+  }
+
+  /**
+   * データベースネイティブのベクトル検索を行います。
+   *
+   * @param _kysely kysely のインスタンスです。
+   * @param _c 検索する操作のコンテキストです。
+   *
+   * @returns スコア付きのキー一覧です。
+   */
+  protected searchScoredKeys(
+    _kysely: Kysely<SqlIndexDatabase>,
+    _c: IObjectIndex.SearchContext,
+  ): Promise<ScoredObjectKey[]> {
+    return Promise.reject(new Error("Native vector search is not implemented"));
   }
 
   /**
@@ -925,6 +976,50 @@ export abstract class SqlObjectIndex implements IObjectIndex {
   }
 
   /**
+   * スコア付きのキー一覧を検索結果に変換します。
+   *
+   * @param kysely kysely のインスタンスです。
+   * @param scored スコア付きのキー一覧です。スコアの降順で並んでいる必要があります。
+   *
+   * @returns 類似度付きのオブジェクト一覧です。
+   */
+  async #toSearchResults<TUserMetadata>(
+    kysely: Kysely<SqlIndexDatabase>,
+    scored: readonly ScoredObjectKey[],
+  ): Promise<IndexedObject<TUserMetadata>[]> {
+    if (scored.length === 0) {
+      return [];
+    }
+
+    const keys = scored.map(({ key }) => key);
+    const fullRows = await kysely
+      .selectFrom("journal")
+      .selectAll()
+      .where("key", "in", keys)
+      .execute();
+    const rowsByKey = new Map(fullRows.map((row) => [row.key, row]));
+    const tags = await this.#loadTags(kysely, keys);
+
+    return scored.map(({ key, score }) => {
+      const full = rowsByKey.get(key);
+
+      if (full === undefined) {
+        throw new DbQueryError({
+          cause: new Error("Search result row disappeared"),
+          operation: "search",
+        });
+      }
+
+      const vector = this.#decodeRowEmbedding(full);
+
+      return {
+        ...this.#toObject<TUserMetadata>(full, tags.get(full.key) ?? [], "search", vector),
+        score,
+      };
+    });
+  }
+
+  /**
    * 行の埋め込みを復号し、次元数を検証します。
    *
    * @param row `journal` テーブルの行です。
@@ -932,7 +1027,14 @@ export abstract class SqlObjectIndex implements IObjectIndex {
    * @returns 復号した埋め込みベクトル、埋め込みがない場合は undefined です。
    */
   #decodeRowEmbedding(row: SqlObjectRow): Float32Array | undefined {
-    const embedding = row.embedding === null ? undefined : decodeEmbedding(row.embedding);
+    let embedding: Float32Array | undefined;
+
+    if (row.embedding !== null) {
+      embedding =
+        typeof row.embedding === "string"
+          ? parseVector(row.embedding)
+          : decodeEmbedding(row.embedding);
+    }
 
     if (
       embedding !== undefined &&

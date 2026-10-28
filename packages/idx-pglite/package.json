@@ -27,7 +27,8 @@
     "build": "vp -C .config pack"
   },
   "dependencies": {
-    "@electric-sql/pglite": "^0.5.10",
+    "@electric-sql/pglite": "0.5.10",
+    "@electric-sql/pglite-pgvector": "0.0.11",
     "@omniojs/core": "workspace:*",
     "@omniojs/idx-sql": "workspace:*",
     "asyncmux": "^0.0.12",
