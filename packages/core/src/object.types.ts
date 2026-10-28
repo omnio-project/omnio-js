@@ -231,6 +231,28 @@ export type MetadataFilterSizeCondition = {
 };
 
 /**
+ * メタデータのタグに対する絞り込み条件です。
+ *
+ * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
+ */
+export type MetadataFilterTagsCondition = {
+  /** タグ一覧全体が一致することを要求するタグ一覧です。順序は問いません。 */
+  readonly equals?: readonly string[] | undefined;
+
+  /** 含まれることを要求するタグです。 */
+  readonly has?: string | undefined;
+
+  /** 指定したタグがすべて含まれることを要求するタグ一覧です。 */
+  readonly hasEvery?: readonly string[] | undefined;
+
+  /** 指定したタグのいずれかが含まれることを要求するタグ一覧です。 */
+  readonly hasSome?: readonly string[] | undefined;
+
+  /** 空であることを要求する場合は true、空でないことを要求する場合は false です。 */
+  readonly isEmpty?: boolean | undefined;
+};
+
+/**
  * メタデータによる絞り込み条件です。
  */
 export type MetadataFilter = {
@@ -259,6 +281,9 @@ export type MetadataFilter = {
 
   /** サイズの条件です。数値または bigint を指定すると完全一致を要求します。 */
   readonly size?: number | bigint | MetadataFilterSizeCondition | undefined;
+
+  /** タグの条件です。文字列を指定するとそのタグを含むことを要求します。 */
+  readonly tags?: string | MetadataFilterTagsCondition | undefined;
 
   /** すべて含むことを要求するタグ一覧です。 */
   readonly tagsAll?: readonly string[] | undefined;

@@ -1143,6 +1143,55 @@ describe("PostgresqlIndex", () => {
       });
     });
 
+    test("タグの条件で絞り込む", async ({ expect, signal }) => {
+      // 準備：
+      const index = await createOpenedIndex(signal);
+      await seedThree(index, signal);
+      await index.upsert({
+        action: "upsert",
+        object: createObject("k4"),
+        signal,
+      });
+
+      const cases = [
+        ["red", ["k1", "k3"]],
+        [{ has: "red" }, ["k1", "k3"]],
+        [{ hasSome: ["square", "blue"] }, ["k2", "k3"]],
+        [{ hasEvery: ["red", "round"] }, ["k1"]],
+        [{ hasEvery: ["red", "square"] }, ["k3"]],
+        [{ isEmpty: true }, ["k4"]],
+        [{ isEmpty: false }, ["k1", "k2", "k3"]],
+        [{ equals: ["round", "red"] }, ["k1"]],
+        [{ equals: [] }, ["k4"]],
+        [{ equals: ["red"] }, []],
+        [
+          {
+            has: "red",
+            hasSome: ["square"],
+          },
+          ["k3"],
+        ],
+      ] as const;
+
+      for (const [tags, expected] of cases) {
+        // 実行：
+        const actual = await index.list({
+          action: "list",
+          filter: { tags },
+          signal,
+        });
+
+        // 検証：
+        expect(keysOf(actual.items)).toStrictEqual(expected);
+      }
+
+      // 後始末：
+      await index.close({
+        action: "close",
+        signal,
+      });
+    });
+
     test("コンテンツタイプと日時で絞り込む", async ({ expect, signal }) => {
       // 準備：
       const index = await createOpenedIndex(signal);

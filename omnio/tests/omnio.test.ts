@@ -1576,6 +1576,65 @@ describe("listObjects", () => {
     await omnio.close(signal);
   });
 
+  test("タグの条件で絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    await omnio.putObject({
+      key: "a",
+      data: new Uint8Array([1]),
+      tags: ["red", "round"],
+      contentType: "text/plain",
+    });
+    await omnio.putObject({
+      key: "b",
+      data: new Uint8Array([2]),
+      tags: ["blue", "round"],
+      contentType: "text/plain",
+    });
+    await omnio.putObject({
+      key: "c",
+      data: new Uint8Array([3]),
+      tags: ["red", "square"],
+      contentType: "text/plain",
+    });
+    await omnio.putObject({
+      key: "d",
+      data: new Uint8Array([4]),
+      contentType: "text/plain",
+    });
+
+    const cases = [
+      ["red", ["a", "c"]],
+      [{ has: "red" }, ["a", "c"]],
+      [{ hasSome: ["square", "blue"] }, ["b", "c"]],
+      [{ hasEvery: ["red", "round"] }, ["a"]],
+      [{ hasEvery: ["red", "square"] }, ["c"]],
+      [{ isEmpty: true }, ["d"]],
+      [{ isEmpty: false }, ["a", "b", "c"]],
+      [{ equals: ["round", "red"] }, ["a"]],
+      [{ equals: [] }, ["d"]],
+      [{ equals: ["red"] }, []],
+      [
+        {
+          has: "red",
+          hasSome: ["square"],
+        },
+        ["c"],
+      ],
+    ] as const;
+
+    for (const [tags, expected] of cases) {
+      // 実行：
+      const actual = await omnio.listObjects({ filter: { tags } }, signal);
+
+      // 検証：
+      expect(actual.items.map((item) => item.key.key)).toStrictEqual(expected);
+    }
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
   test("不正な一覧条件を ValiError にする", async ({ expect, signal }) => {
     // 準備：
     const omnio = await createTestOmnio(signal);

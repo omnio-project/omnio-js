@@ -2,6 +2,7 @@ import {
   type IEmbedder,
   type IObjectIndex,
   OmnioKey,
+  TagSchema,
   TagsSchema,
   TimestampSchema,
   ContentTypeSchema,
@@ -159,6 +160,15 @@ const MetadataFilterRecordTypeConditionSchema = v.object({
   not: v.optional(v.union([RecordTypeSchema, v.array(RecordTypeSchema)])),
 });
 
+/** メタデータのタグに対する絞り込み条件を検証するスキーマです。 */
+const MetadataFilterTagsConditionSchema = v.object({
+  has: v.optional(TagSchema),
+  equals: v.optional(TagsSchema),
+  hasSome: v.optional(TagsSchema),
+  isEmpty: v.optional(v.boolean()),
+  hasEvery: v.optional(TagsSchema),
+});
+
 /** 日時の条件に使う値を検証するスキーマです。ISO 8601 文字列または有効な Date を受け付けます。 */
 const TimestampOrDateSchema = v.union([
   TimestampSchema,
@@ -180,6 +190,7 @@ const MetadataFilterDateConditionSchema = v.object({
 /** メタデータの絞り込み条件を検証するスキーマです。 */
 const MetadataFilterSchema = v.object({
   size: v.optional(v.union([SizeValueSchema, MetadataFilterSizeConditionSchema])),
+  tags: v.optional(v.union([TagSchema, MetadataFilterTagsConditionSchema])),
   tagsAll: v.optional(TagsSchema),
   tagsAny: v.optional(TagsSchema),
   fullText: v.optional(v.string()),

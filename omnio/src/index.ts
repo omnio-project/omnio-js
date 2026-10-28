@@ -20,5 +20,6 @@ export type {
   MetadataFilterCondition,
   MetadataFilterDateCondition,
   MetadataFilterSizeCondition,
+  MetadataFilterTagsCondition,
   MetadataFilterRecordTypeCondition,
 } from "@omniojs/core";

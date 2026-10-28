@@ -322,6 +322,133 @@ function withSizeFilter<T>(
 }
 
 /**
+ * 指定したタグを含むオブジェクトのキーでクエリーを絞り込みます。
+ *
+ * @param query 絞り込む前のクエリーです。
+ * @param tag 含まれることを要求するタグです。
+ *
+ * @returns 絞り込んだクエリーです。
+ */
+function withTagsHasFilter<T>(
+  query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
+  tag: string,
+): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
+  return query.where("journal.key", "in", (inner) =>
+    inner.selectFrom("object_tag").select("object_tag.key").where("object_tag.tag", "=", tag),
+  );
+}
+
+/**
+ * タグを持たないオブジェクトのキーでクエリーを絞り込みます。
+ *
+ * @param query 絞り込む前のクエリーです。
+ *
+ * @returns 絞り込んだクエリーです。
+ */
+function withTagsEmptyFilter<T>(
+  query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
+): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
+  return query.where("journal.key", "not in", (inner) =>
+    inner.selectFrom("object_tag").select("object_tag.key"),
+  );
+}
+
+/**
+ * タグを持つオブジェクトのキーでクエリーを絞り込みます。
+ *
+ * @param query 絞り込む前のクエリーです。
+ *
+ * @returns 絞り込んだクエリーです。
+ */
+function withTagsNotEmptyFilter<T>(
+  query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
+): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
+  return query.where("journal.key", "in", (inner) =>
+    inner.selectFrom("object_tag").select("object_tag.key"),
+  );
+}
+
+/**
+ * タグの条件をクエリーに適用します。
+ *
+ * @param query 絞り込む前のクエリーです。
+ * @param condition タグの条件です。
+ *
+ * @returns 絞り込んだクエリーです。
+ */
+function withTagsFilter<T>(
+  query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
+  condition: NonNullable<MetadataFilter["tags"]>,
+): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
+  if (typeof condition === "string") {
+    return withTagsHasFilter(query, condition);
+  }
+
+  let filtered = query;
+
+  if (condition.equals !== undefined) {
+    const tags = [...new Set(condition.equals)];
+
+    if (tags.length === 0) {
+      filtered = withTagsEmptyFilter(filtered);
+    } else {
+      filtered = filtered
+        .where("journal.key", "in", (inner) =>
+          inner
+            .selectFrom("object_tag")
+            .select("object_tag.key")
+            .where("object_tag.tag", "in", tags)
+            .groupBy("object_tag.key")
+            .having(sql<boolean>`count(*) = ${tags.length}`),
+        )
+        .where("journal.key", "not in", (inner) =>
+          inner
+            .selectFrom("object_tag")
+            .select("object_tag.key")
+            .where("object_tag.tag", "not in", tags),
+        );
+    }
+  }
+
+  if (condition.has !== undefined) {
+    filtered = withTagsHasFilter(filtered, condition.has);
+  }
+
+  if (condition.hasEvery !== undefined) {
+    const tags = [...new Set(condition.hasEvery)];
+
+    if (tags.length > 0) {
+      filtered = filtered.where("journal.key", "in", (inner) =>
+        inner
+          .selectFrom("object_tag")
+          .select("object_tag.key")
+          .where("object_tag.tag", "in", tags)
+          .groupBy("object_tag.key")
+          .having(sql<boolean>`count(*) = ${tags.length}`),
+      );
+    }
+  }
+
+  if (condition.hasSome !== undefined) {
+    const tags = [...new Set(condition.hasSome)];
+
+    if (tags.length === 0) {
+      filtered = filtered.where(sql<boolean>`1 = 0`);
+    } else {
+      filtered = filtered.where("journal.key", "in", (inner) =>
+        inner.selectFrom("object_tag").select("object_tag.key").where("object_tag.tag", "in", tags),
+      );
+    }
+  }
+
+  if (condition.isEmpty !== undefined) {
+    filtered = condition.isEmpty ? withTagsEmptyFilter(filtered) : withTagsNotEmptyFilter(filtered);
+  }
+
+  return filtered;
+}
+
+/**
  * カーソルを offset に変換します。
  *
  * @param cursor 一覧の続きを示すカーソルです。
@@ -379,6 +506,10 @@ export function withMetadataFilter<T>(
 
   if (filter?.size !== undefined) {
     filtered = withSizeFilter(filtered, filter.size);
+  }
+
+  if (filter?.tags !== undefined) {
+    filtered = withTagsFilter(filtered, filter.tags);
   }
 
   if (filter?.tagsAll !== undefined && filter.tagsAll.length > 0) {
