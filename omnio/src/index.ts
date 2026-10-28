@@ -3,6 +3,9 @@ export type { IOmnioEntity, IOmnioEntityBuilder } from "./entity.js";
 export type {
   OmnioOptions,
   PutObjectInput,
+  HeadObjectField,
+  HeadObjectSelect,
+  HeadObjectOptions,
   ObjectSearchQuery,
   SearchObjectsInput,
   UpdateObjectMetadataInput,

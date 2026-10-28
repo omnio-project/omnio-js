@@ -22,6 +22,7 @@ import {
   IOmnioEntitySchema,
   OmnioOptionsSchema,
   PutObjectInputSchema,
+  HeadObjectOptionsSchema,
   SearchObjectsInputSchema,
   OptionalAbortSignalSchema,
   UpdateObjectMetadataInputSchema,
@@ -126,6 +127,48 @@ export type UpdateObjectMetadataInput<TUserMetadata = Record<string, unknown>> =
 };
 
 /**
+ * `headObject` で取得するメタデータの項目です。
+ */
+export type HeadObjectField = keyof OmnioObject;
+
+/**
+ * `headObject` で取得するメタデータの選択です。
+ *
+ * `true` を指定した項目だけを取得します。`false` を指定した項目や省略した項目は取得しません。
+ */
+export type HeadObjectSelect = Readonly<Partial<Record<HeadObjectField, boolean | undefined>>>;
+
+/**
+ * すべてのメタデータを選択する型です。
+ */
+type HeadObjectSelectAll = Readonly<Record<HeadObjectField, true>>;
+
+/**
+ * 選択した項目の型を求めます。
+ *
+ * @template TSelect メタデータの選択です。
+ */
+type SelectedHeadObjectField<TSelect extends HeadObjectSelect> = keyof TSelect extends never
+  ? never
+  : HeadObjectSelect extends TSelect
+    ? HeadObjectField
+    : {
+        [TField in keyof TSelect]: TSelect[TField] extends true ? TField : never;
+      }[keyof TSelect] &
+        HeadObjectField;
+
+/**
+ * `headObject` のオプションです。
+ */
+export type HeadObjectOptions<TSelect extends HeadObjectSelect = HeadObjectSelect> = {
+  /** 取得するメタデータの項目です。`true` を指定した項目だけを取得します。`select` 自体を省略した場合はすべての項目を取得します。 */
+  readonly select?: TSelect | undefined;
+
+  /** 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。 */
+  readonly signal?: AbortSignal | undefined;
+};
+
+/**
  * 意味検索のクエリーです。
  */
 export type ObjectSearchQuery =
@@ -177,6 +220,21 @@ export type SearchObjectsInput = {
  */
 function toOmnioKey(key: OmnioKey | string): OmnioKey {
   return typeof key === "string" ? OmnioKey.parse(key) : key;
+}
+
+/**
+ * オブジェクトから指定した項目だけを選択します。
+ *
+ * @param source 選択元のオブジェクトです。
+ * @param fields 選択する項目です。
+ *
+ * @returns 選択した項目だけを持つオブジェクトです。
+ */
+function selectFields<T extends object, TField extends keyof T>(
+  source: T,
+  fields: readonly TField[],
+): Pick<T, TField> {
+  return Object.fromEntries(fields.map((field) => [field, source[field]])) as Pick<T, TField>;
 }
 
 /**
@@ -736,6 +794,8 @@ export class Omnio {
   /**
    * メタデータを取得します。
    *
+   * `select` で取得する項目を選択できます。省略時はすべての項目を取得します。
+   *
    * @param key 取得するキーです。
    * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
    *
@@ -744,20 +804,54 @@ export class Omnio {
   public async headObject<TUserMetadata = Record<string, unknown>>(
     key: OmnioKey | string,
     signal?: AbortSignal,
-  ): Promise<OmnioObject<TUserMetadata> | null> {
+  ): Promise<OmnioObject<TUserMetadata> | null>;
+  /**
+   * メタデータを取得します。
+   *
+   * @param key 取得するキーです。
+   * @param options 取得する項目と中断シグナルです。
+   *
+   * @returns 選択したメタデータ、存在しない場合は null です。
+   */
+  public async headObject<
+    TUserMetadata = Record<string, unknown>,
+    const TSelect extends HeadObjectSelect = HeadObjectSelectAll,
+  >(
+    key: OmnioKey | string,
+    options: HeadObjectOptions<TSelect>,
+  ): Promise<Pick<OmnioObject<TUserMetadata>, SelectedHeadObjectField<TSelect>> | null>;
+  public async headObject<TUserMetadata = Record<string, unknown>>(
+    key: OmnioKey | string,
+    optionsOrSignal?: AbortSignal | HeadObjectOptions,
+  ): Promise<Partial<OmnioObject<TUserMetadata>> | null> {
     this.#requireOpen("headObject");
 
     const objectKey = toOmnioKey(v.parse(OmnioKeySchema, key));
-    const active = this.#activeSignal(v.parse(OptionalAbortSignalSchema, signal));
+    const options =
+      optionsOrSignal instanceof AbortSignal ? { signal: optionsOrSignal } : optionsOrSignal;
+    const parsed = v.parse(HeadObjectOptionsSchema, options ?? {});
+    const selectedFields =
+      parsed.select === undefined
+        ? undefined
+        : Object.entries(parsed.select)
+            .filter(([, enabled]) => enabled === true)
+            .map(([field]) => field as HeadObjectField);
+    const active = this.#activeSignal(parsed.signal);
     active.throwIfAborted();
 
     using _lock = await asyncmux.readonly(this, active);
 
-    return await this.#index.get<TUserMetadata>({
+    const object = await this.#index.get<TUserMetadata>({
       key: objectKey,
       action: "get",
       signal: active,
     });
+
+    if (object === null || selectedFields === undefined) {
+      return object;
+    }
+
+    return selectFields(object, selectedFields);
   }
 
   /**

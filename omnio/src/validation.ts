@@ -1,5 +1,6 @@
 import {
   type IEmbedder,
+  type OmnioObject,
   type IObjectIndex,
   OmnioKey,
   TagSchema,
@@ -41,6 +42,56 @@ export const OptionalAbortSignalSchema = v.optional(v.instance(AbortSignal));
 
 /** オブジェクトキーのスキーマです。文字列の内容は OmnioKey で検証します。 */
 export const OmnioKeySchema = v.union([v.string(), v.instance(OmnioKey)]);
+
+/**
+ * `headObject` で選択できるメタデータの項目です。
+ *
+ * `OmnioObject` のキーと一致させます。
+ */
+const HEAD_OBJECT_FIELD_FLAGS = {
+  key: true,
+  hash: true,
+  size: true,
+  tags: true,
+  entityId: true,
+  createdAt: true,
+  embedding: true,
+  updatedAt: true,
+  contentType: true,
+  description: true,
+  userMetadata: true,
+  embeddingDims: true,
+  hashAlgorithm: true,
+  embeddingModel: true,
+  embeddingSource: true,
+} as const satisfies Record<keyof OmnioObject, true>;
+
+/**
+ * `headObject` の選択の入力を表します。
+ */
+type HeadObjectSelectInput = Readonly<Record<string, boolean | undefined>>;
+
+/**
+ * `headObject` で取得するメタデータの選択を検証するスキーマです。
+ *
+ * 既知の項目だけを真偽値で指定できます。
+ */
+const HeadObjectSelectSchema = v.custom<HeadObjectSelectInput>((input) => {
+  if (!isObject(input) || Array.isArray(input)) {
+    return false;
+  }
+
+  return Object.entries(input).every(
+    ([field, enabled]) =>
+      Object.hasOwn(HEAD_OBJECT_FIELD_FLAGS, field) && typeof enabled === "boolean",
+  );
+});
+
+/** `headObject` のオプションを検証するスキーマです。 */
+export const HeadObjectOptionsSchema = v.object({
+  select: v.optional(HeadObjectSelectSchema),
+  signal: OptionalAbortSignalSchema,
+});
 
 /** バイト列のスキーマです。 */
 const Uint8ArraySchema = v.instance(Uint8Array);

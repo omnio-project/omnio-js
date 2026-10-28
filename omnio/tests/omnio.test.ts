@@ -925,6 +925,131 @@ describe("putObject と getObject", () => {
   });
 });
 
+describe("headObject", () => {
+  test("選択したメタデータだけを返す", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1, 2, 3]),
+      tags: ["pet"],
+      contentType: "text/plain",
+      description: "cat on the mat",
+      userMetadata: { genre: "test" },
+    });
+
+    // 実行：
+    const head = await omnio.headObject("k", {
+      select: {
+        key: true,
+        size: true,
+        tags: true,
+        description: true,
+      },
+      signal,
+    });
+
+    // 検証：
+    expect(head).not.toBeNull();
+    expect(head?.key.key).toBe("k");
+    expect(head?.size).toBe(3);
+    expect(head?.tags).toStrictEqual(["pet"]);
+    expect(head?.description).toBe("cat on the mat");
+    expect(Object.keys(head as object).sort()).toStrictEqual([
+      "description",
+      "key",
+      "size",
+      "tags",
+    ]);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("select を省略した場合はすべてのメタデータを返す", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      tags: ["pet"],
+      contentType: "text/plain",
+      description: "cat on the mat",
+      userMetadata: { genre: "test" },
+    });
+
+    // 実行：
+    const head = await omnio.headObject("k", { signal });
+
+    // 検証：
+    expect(head?.description).toBe("cat on the mat");
+    expect(head?.tags).toStrictEqual(["pet"]);
+    expect(head?.userMetadata).toStrictEqual({ genre: "test" });
+    expect(head?.embedding).toStrictEqual(new Float32Array([1, 0]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("false を指定した項目は返さない", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+      description: "cat on the mat",
+    });
+
+    // 実行：
+    const head = await omnio.headObject("k", {
+      select: {
+        key: true,
+        description: false,
+      },
+    });
+
+    // 検証：
+    expect(head?.key.key).toBe("k");
+    expect(Object.keys(head as object)).toStrictEqual(["key"]);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("存在しないキーは null を返す", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+
+    // 実行と検証：
+    expect(await omnio.headObject("missing", { select: { size: true } })).toBeNull();
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("不正な項目は ValiError にする", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+
+    // 実行と検証：
+    await expect(
+      omnio.headObject("k", { select: { invalid: true } as never }),
+    ).rejects.toBeInstanceOf(ValiError);
+    await expect(
+      omnio.headObject("k", { select: { size: "yes" } as never }),
+    ).rejects.toBeInstanceOf(ValiError);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+});
+
 describe("copyObject", () => {
   test("実体とメタデータを複製する", async ({ expect, signal }) => {
     // 準備：
