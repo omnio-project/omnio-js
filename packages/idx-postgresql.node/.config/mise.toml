@@ -1,9 +1,18 @@
 [tasks.test]
-run = [{ task = "test:server" }, { task = "test:check" }]
+description = "ローカルの PostgreSQL を起動してテストします"
+run = "bash ./scripts/test.sh"
 env = { CI = 1 }
 
 [tasks."test:server"]
 run = "npx vp test --config ./.config/vite.config.ts"
+
+[tasks."db:start"]
+description = "ローカルの PostgreSQL を起動します"
+run = "docker compose --file ./.config/compose.yaml up --detach --wait"
+
+[tasks."db:stop"]
+description = "ローカルの PostgreSQL を停止します"
+run = "docker compose --file ./.config/compose.yaml down --volumes --remove-orphans"
 
 [tasks."test:coverage"]
 run = "npx vp test run --coverage --config ./.config/vite.config.ts"

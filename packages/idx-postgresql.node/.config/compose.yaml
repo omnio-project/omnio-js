@@ -1,0 +1,16 @@
+name: omnio-idx-postgresql-node
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    network_mode: host
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1"]
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+      interval: 1s
+      timeout: 5s
+      retries: 30
