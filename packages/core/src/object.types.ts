@@ -119,34 +119,6 @@ export type OmnioObject<TUserMetadata = Record<string, unknown>> = {
 };
 
 /**
- * メタデータの文字列に対する絞り込み条件です。
- *
- * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
- */
-export type MetadataFilterCondition = {
-  /** 部分一致を要求する値です。 */
-  readonly contains?: string | undefined;
-
-  /** 後方一致を要求する値です。 */
-  readonly endsWith?: string | undefined;
-
-  /** 完全一致を要求する値です。 */
-  readonly equals?: string | undefined;
-
-  /** いずれかに一致することを要求する値の一覧です。 */
-  readonly in?: readonly string[] | undefined;
-
-  /** 一致しないことを要求する値です。 */
-  readonly not?: string | undefined;
-
-  /** いずれにも一致しないことを要求する値の一覧です。 */
-  readonly notIn?: readonly string[] | undefined;
-
-  /** 前方一致を要求する値です。 */
-  readonly startsWith?: string | undefined;
-};
-
-/**
  * レコードの種類です。
  *
  * - `"CREATE"`: オブジェクトを新規作成したレコードです。
@@ -156,142 +128,182 @@ export type MetadataFilterCondition = {
 export type RecordType = "CREATE" | "UPDATE_METADATA" | "DELETE";
 
 /**
- * メタデータのレコードタイプに対する絞り込み条件です。
+ * `MetadataFilter` に関連する型定義を格納する名前空間です。
  *
- * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
- */
-export type MetadataFilterRecordTypeCondition = {
-  /** いずれかに一致することを要求するレコードタイプです。単一のレコードタイプも指定できます。 */
-  readonly in?: RecordType | readonly RecordType[] | undefined;
-
-  /** 一致しないことを要求するレコードタイプです。単一のレコードタイプも指定できます。 */
-  readonly not?: RecordType | readonly RecordType[] | undefined;
-};
-
-/**
- * メタデータの日時に対する絞り込み条件です。
+ * @example
+ * ```
+ * import type { MetadataFilter } from "@omniojs/core";
  *
- * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
+ * const condition: MetadataFilter.Condition = { startsWith: "image/" };
+ * ```
  */
-export type MetadataFilterDateCondition = {
-  /** 完全一致を要求する日時です。 */
-  readonly equals?: string | Date | undefined;
+export namespace MetadataFilter {
+  /**
+   * メタデータの文字列に対する絞り込み条件です。
+   *
+   * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
+   */
+  export type Condition = {
+    /** 部分一致を要求する値です。 */
+    readonly contains?: string | undefined;
 
-  /** 指定日時より後であることを要求する日時です。 */
-  readonly gt?: string | Date | undefined;
+    /** 後方一致を要求する値です。 */
+    readonly endsWith?: string | undefined;
 
-  /** 指定日時以降であることを要求する日時です。 */
-  readonly gte?: string | Date | undefined;
+    /** 完全一致を要求する値です。 */
+    readonly equals?: string | undefined;
 
-  /** いずれかに一致することを要求する日時の一覧です。単一の日時も指定できます。 */
-  readonly in?: string | Date | readonly (string | Date)[] | undefined;
+    /** いずれかに一致することを要求する値の一覧です。 */
+    readonly in?: readonly string[] | undefined;
 
-  /** 指定日時より前であることを要求する日時です。 */
-  readonly lt?: string | Date | undefined;
+    /** 一致しないことを要求する値です。 */
+    readonly not?: string | undefined;
 
-  /** 指定日時以前であることを要求する日時です。 */
-  readonly lte?: string | Date | undefined;
+    /** いずれにも一致しないことを要求する値の一覧です。 */
+    readonly notIn?: readonly string[] | undefined;
 
-  /** 一致しないことを要求する日時です。 */
-  readonly not?: string | Date | undefined;
+    /** 前方一致を要求する値です。 */
+    readonly startsWith?: string | undefined;
+  };
 
-  /** いずれにも一致しないことを要求する日時の一覧です。単一の日時も指定できます。 */
-  readonly notIn?: string | Date | readonly (string | Date)[] | undefined;
-};
+  /**
+   * メタデータのレコードタイプに対する絞り込み条件です。
+   *
+   * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
+   */
+  export type RecordTypeCondition = {
+    /** いずれかに一致することを要求するレコードタイプです。単一のレコードタイプも指定できます。 */
+    readonly in?: RecordType | readonly RecordType[] | undefined;
 
-/**
- * メタデータのサイズに対する絞り込み条件です。
- *
- * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
- */
-export type MetadataFilterSizeCondition = {
-  /** 完全一致を要求するサイズです。 */
-  readonly equals?: number | bigint | undefined;
+    /** 一致しないことを要求するレコードタイプです。単一のレコードタイプも指定できます。 */
+    readonly not?: RecordType | readonly RecordType[] | undefined;
+  };
 
-  /** 指定サイズより大きいことを要求するサイズです。 */
-  readonly gt?: number | bigint | undefined;
+  /**
+   * メタデータの日時に対する絞り込み条件です。
+   *
+   * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
+   */
+  export type DateCondition = {
+    /** 完全一致を要求する日時です。 */
+    readonly equals?: string | Date | undefined;
 
-  /** 指定サイズ以上であることを要求するサイズです。 */
-  readonly gte?: number | bigint | undefined;
+    /** 指定日時より後であることを要求する日時です。 */
+    readonly gt?: string | Date | undefined;
 
-  /** いずれかに一致することを要求するサイズの一覧です。単一のサイズも指定できます。 */
-  readonly in?: number | bigint | readonly (number | bigint)[] | undefined;
+    /** 指定日時以降であることを要求する日時です。 */
+    readonly gte?: string | Date | undefined;
 
-  /** 指定サイズより小さいことを要求するサイズです。 */
-  readonly lt?: number | bigint | undefined;
+    /** いずれかに一致することを要求する日時の一覧です。単一の日時も指定できます。 */
+    readonly in?: string | Date | readonly (string | Date)[] | undefined;
 
-  /** 指定サイズ以下であることを要求するサイズです。 */
-  readonly lte?: number | bigint | undefined;
+    /** 指定日時より前であることを要求する日時です。 */
+    readonly lt?: string | Date | undefined;
 
-  /** 一致しないことを要求するサイズです。単一のサイズも指定できます。 */
-  readonly not?: number | bigint | readonly (number | bigint)[] | undefined;
+    /** 指定日時以前であることを要求する日時です。 */
+    readonly lte?: string | Date | undefined;
 
-  /** いずれにも一致しないことを要求するサイズの一覧です。 */
-  readonly notIn?: readonly (number | bigint)[] | undefined;
-};
+    /** 一致しないことを要求する日時です。 */
+    readonly not?: string | Date | undefined;
 
-/**
- * メタデータのタグに対する絞り込み条件です。
- *
- * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
- */
-export type MetadataFilterTagsCondition = {
-  /** タグ一覧全体が一致することを要求するタグ一覧です。順序は問いません。 */
-  readonly equals?: readonly string[] | undefined;
+    /** いずれにも一致しないことを要求する日時の一覧です。単一の日時も指定できます。 */
+    readonly notIn?: string | Date | readonly (string | Date)[] | undefined;
+  };
 
-  /** 含まれることを要求するタグです。 */
-  readonly has?: string | undefined;
+  /**
+   * メタデータのサイズに対する絞り込み条件です。
+   *
+   * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
+   */
+  export type SizeCondition = {
+    /** 完全一致を要求するサイズです。 */
+    readonly equals?: number | bigint | undefined;
 
-  /** 指定したタグがすべて含まれることを要求するタグ一覧です。 */
-  readonly hasEvery?: readonly string[] | undefined;
+    /** 指定サイズより大きいことを要求するサイズです。 */
+    readonly gt?: number | bigint | undefined;
 
-  /** 指定したタグのいずれかが含まれることを要求するタグ一覧です。 */
-  readonly hasSome?: readonly string[] | undefined;
+    /** 指定サイズ以上であることを要求するサイズです。 */
+    readonly gte?: number | bigint | undefined;
 
-  /** 空であることを要求する場合は true、空でないことを要求する場合は false です。 */
-  readonly isEmpty?: boolean | undefined;
-};
+    /** いずれかに一致することを要求するサイズの一覧です。単一のサイズも指定できます。 */
+    readonly in?: number | bigint | readonly (number | bigint)[] | undefined;
+
+    /** 指定サイズより小さいことを要求するサイズです。 */
+    readonly lt?: number | bigint | undefined;
+
+    /** 指定サイズ以下であることを要求するサイズです。 */
+    readonly lte?: number | bigint | undefined;
+
+    /** 一致しないことを要求するサイズです。単一のサイズも指定できます。 */
+    readonly not?: number | bigint | readonly (number | bigint)[] | undefined;
+
+    /** いずれにも一致しないことを要求するサイズの一覧です。 */
+    readonly notIn?: readonly (number | bigint)[] | undefined;
+  };
+
+  /**
+   * メタデータのタグに対する絞り込み条件です。
+   *
+   * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
+   */
+  export type TagsCondition = {
+    /** タグ一覧全体が一致することを要求するタグ一覧です。順序は問いません。 */
+    readonly equals?: readonly string[] | undefined;
+
+    /** 含まれることを要求するタグです。 */
+    readonly has?: string | undefined;
+
+    /** 指定したタグがすべて含まれることを要求するタグ一覧です。 */
+    readonly hasEvery?: readonly string[] | undefined;
+
+    /** 指定したタグのいずれかが含まれることを要求するタグ一覧です。 */
+    readonly hasSome?: readonly string[] | undefined;
+
+    /** 空であることを要求する場合は true、空でないことを要求する場合は false です。 */
+    readonly isEmpty?: boolean | undefined;
+  };
+}
 
 /**
  * メタデータによる絞り込み条件です。
  */
-export type MetadataFilter = {
+export interface MetadataFilter {
   /** コンテンツタイプの条件です。文字列を指定すると完全一致を要求します。 */
-  readonly contentType?: string | MetadataFilterCondition | undefined;
+  readonly contentType?: string | MetadataFilter.Condition | undefined;
 
   /**
    * 作成時刻の条件です。文字列または Date を指定すると完全一致を要求します。
    *
    * 日時は ISO 8601 形式で指定します。
    */
-  readonly createdAt?: string | Date | MetadataFilterDateCondition | undefined;
+  readonly createdAt?: string | Date | MetadataFilter.DateCondition | undefined;
 
   /** 全文検索のクエリーです。 */
   readonly fullText?: string | undefined;
 
   /** ハッシュ値の条件です。文字列を指定すると完全一致を要求します。 */
-  readonly hash?: string | MetadataFilterCondition | undefined;
+  readonly hash?: string | MetadataFilter.Condition | undefined;
 
   /**
    * レコード時刻の条件です。文字列または Date を指定すると完全一致を要求します。
    *
    * 日時は ISO 8601 形式で指定します。
    */
-  readonly recordTimestamp?: string | Date | MetadataFilterDateCondition | undefined;
+  readonly recordTimestamp?: string | Date | MetadataFilter.DateCondition | undefined;
 
   /** レコードタイプの条件です。レコードタイプを指定すると完全一致を要求します。 */
-  readonly recordType?: RecordType | MetadataFilterRecordTypeCondition | undefined;
+  readonly recordType?: RecordType | MetadataFilter.RecordTypeCondition | undefined;
 
   /** サイズの条件です。数値または bigint を指定すると完全一致を要求します。 */
-  readonly size?: number | bigint | MetadataFilterSizeCondition | undefined;
+  readonly size?: number | bigint | MetadataFilter.SizeCondition | undefined;
 
   /** タグの条件です。文字列を指定するとそのタグを含むことを要求します。 */
-  readonly tags?: string | MetadataFilterTagsCondition | undefined;
+  readonly tags?: string | MetadataFilter.TagsCondition | undefined;
 
   /**
    * 更新時刻の条件です。文字列または Date を指定すると完全一致を要求します。
    *
    * 日時は ISO 8601 形式で指定します。
    */
-  readonly updatedAt?: string | Date | MetadataFilterDateCondition | undefined;
-};
+  readonly updatedAt?: string | Date | MetadataFilter.DateCondition | undefined;
+}

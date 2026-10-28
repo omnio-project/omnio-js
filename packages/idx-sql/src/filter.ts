@@ -1,4 +1,4 @@
-import type { RecordType, MetadataFilter, MetadataFilterCondition } from "@omniojs/core";
+import type { RecordType, MetadataFilter } from "@omniojs/core";
 import { type SelectQueryBuilder, sql } from "kysely";
 
 import type { SqlIndexDatabase } from "./schema.js";
@@ -53,7 +53,7 @@ function toLikePattern(value: string, position: "contains" | "endsWith" | "start
 function withStringFilter<T>(
   query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
   column: "content_type" | "hash",
-  condition: string | MetadataFilterCondition,
+  condition: string | MetadataFilter.Condition,
 ): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
   if (typeof condition === "string") {
     return query.where(`journal.${column}`, "=", condition);

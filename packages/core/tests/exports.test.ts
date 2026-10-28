@@ -144,6 +144,11 @@ describe("exports", () => {
     expectTypeOf<objectTypes.ObjectMetadataPatch>().toEqualTypeOf<core.ObjectMetadataPatch>();
     expectTypeOf<objectTypes.EmbedSource>().toEqualTypeOf<core.EmbedSource>();
     expectTypeOf<objectTypes.MetadataFilter>().toEqualTypeOf<core.MetadataFilter>();
+    expectTypeOf<objectTypes.MetadataFilter.Condition>().toEqualTypeOf<core.MetadataFilter.Condition>();
+    expectTypeOf<objectTypes.MetadataFilter.DateCondition>().toEqualTypeOf<core.MetadataFilter.DateCondition>();
+    expectTypeOf<objectTypes.MetadataFilter.RecordTypeCondition>().toEqualTypeOf<core.MetadataFilter.RecordTypeCondition>();
+    expectTypeOf<objectTypes.MetadataFilter.SizeCondition>().toEqualTypeOf<core.MetadataFilter.SizeCondition>();
+    expectTypeOf<objectTypes.MetadataFilter.TagsCondition>().toEqualTypeOf<core.MetadataFilter.TagsCondition>();
   });
 
   test("schemas の型はエントリーポイントから同一に解決される", () => {
