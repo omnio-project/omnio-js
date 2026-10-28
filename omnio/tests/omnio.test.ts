@@ -9,7 +9,7 @@ import {
 import { SqliteWasmIndex } from "@omniojs/idx-sqlite.wasm";
 import { ChecksumSha256 } from "@unikvs/checksum";
 import { Memory } from "@unikvs/memory";
-import { type Value, Builder, KeyNotFoundError } from "unikvs";
+import * as unikvs from "unikvs";
 import { ValiError } from "valibot";
 import { vi, test, describe } from "vite-plus/test";
 
@@ -97,7 +97,7 @@ class FakeEmbedder implements IEmbedder {
   }
 }
 
-type TestMapping = Record<string, Value<Uint8Array>>;
+type TestMapping = Record<string, unikvs.Value<Uint8Array>>;
 
 /**
  * 検証用の実体ストレージーのビルダーを作ります。
@@ -107,7 +107,7 @@ type TestMapping = Record<string, Value<Uint8Array>>;
  * @returns 開く前の実体ストレージーを構築するビルダーです。
  */
 function createTestEntityBuilder(): IOmnioEntityBuilder {
-  return new Builder<TestMapping>().persist(new Memory());
+  return new unikvs.Builder<TestMapping>().persist(new Memory());
 }
 
 /**
@@ -121,7 +121,7 @@ function createInspectableTestEntity(): {
   builder: IOmnioEntityBuilder;
   getEntity: () => IOmnioEntity;
 } {
-  const builder = new Builder<TestMapping>().persist(new Memory());
+  const builder = new unikvs.Builder<TestMapping>().persist(new Memory());
   let entity: IOmnioEntity | undefined;
 
   return {
@@ -239,7 +239,7 @@ describe("コンストラクター", () => {
 
   test("実体ビルダーの build を実行する", ({ expect }) => {
     // 準備：
-    const entity = new Builder<TestMapping>().persist(new Memory()).build();
+    const entity = new unikvs.Builder<TestMapping>().persist(new Memory()).build();
     const build = vi.fn<IOmnioEntityBuilder["build"]>(() => entity);
     const builder: IOmnioEntityBuilder = { build };
 
@@ -260,7 +260,7 @@ describe("コンストラクター", () => {
 describe("open と close", () => {
   test("開くと利用可能になり閉じると操作できない", async ({ expect, signal }) => {
     // 準備：
-    const entity = new Builder<TestMapping>().persist(new Memory());
+    const entity = new unikvs.Builder<TestMapping>().persist(new Memory());
     const omnio = new Omnio({
       index: new SqliteWasmIndex(),
       entity,
@@ -692,7 +692,7 @@ describe("putObject と getObject", () => {
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
     );
     expect(await getEntity().get(stored.entityId)).toStrictEqual(new Uint8Array([1, 2, 3]));
-    await expect(getEntity().get("k")).rejects.toBeInstanceOf(KeyNotFoundError);
+    await expect(getEntity().get("k")).rejects.toBeInstanceOf(unikvs.KeyNotFoundError);
 
     // 後始末：
     await omnio.close(signal);
