@@ -147,6 +147,28 @@ export type MetadataFilterCondition = {
 };
 
 /**
+ * レコードの種類です。
+ *
+ * - `"CREATE"`: オブジェクトを新規作成したレコードです。
+ * - `"UPDATE_METADATA"`: オブジェクトのメタデータを更新したレコードです。
+ * - `"DELETE"`: オブジェクトを削除したレコードです。
+ */
+export type RecordType = "CREATE" | "UPDATE_METADATA" | "DELETE";
+
+/**
+ * メタデータのレコードタイプに対する絞り込み条件です。
+ *
+ * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
+ */
+export type MetadataFilterRecordTypeCondition = {
+  /** いずれかに一致することを要求するレコードタイプです。単一のレコードタイプも指定できます。 */
+  readonly in?: RecordType | readonly RecordType[] | undefined;
+
+  /** 一致しないことを要求するレコードタイプです。単一のレコードタイプも指定できます。 */
+  readonly not?: RecordType | readonly RecordType[] | undefined;
+};
+
+/**
  * メタデータの日時に対する絞り込み条件です。
  *
  * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
@@ -193,6 +215,9 @@ export type MetadataFilter = {
 
   /** 全文検索のクエリーです。 */
   readonly fullText?: string | undefined;
+
+  /** レコードタイプの条件です。レコードタイプを指定すると完全一致を要求します。 */
+  readonly recordType?: RecordType | MetadataFilterRecordTypeCondition | undefined;
 
   /** すべて含むことを要求するタグ一覧です。 */
   readonly tagsAll?: readonly string[] | undefined;

@@ -12,10 +12,12 @@ export { Omnio } from "./omnio.js";
 export type {
   OmnioKey,
   IEmbedder,
+  RecordType,
   OmnioObject,
   IObjectIndex,
   IndexedObject,
   MetadataFilter,
   MetadataFilterCondition,
   MetadataFilterDateCondition,
+  MetadataFilterRecordTypeCondition,
 } from "@omniojs/core";

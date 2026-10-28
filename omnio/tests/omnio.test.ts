@@ -1452,6 +1452,54 @@ describe("listObjects", () => {
     await omnio.close(signal);
   });
 
+  test("レコードタイプの条件で絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    await omnio.putObject({
+      key: "a",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    await omnio.putObject({
+      key: "b",
+      data: new Uint8Array([2]),
+      contentType: "text/plain",
+    });
+    await omnio.updateObjectMetadata({
+      key: "b",
+      signal,
+      description: "更新済み",
+    });
+
+    // 実行：
+    const byValue = await omnio.listObjects(
+      {
+        filter: { recordType: "CREATE" },
+      },
+      signal,
+    );
+    const byCondition = await omnio.listObjects(
+      {
+        filter: { recordType: { in: "UPDATE_METADATA" } },
+      },
+      signal,
+    );
+    const byNot = await omnio.listObjects(
+      {
+        filter: { recordType: { not: ["UPDATE_METADATA"] } },
+      },
+      signal,
+    );
+
+    // 検証：
+    expect(byValue.items.map((item) => item.key.key)).toStrictEqual(["a"]);
+    expect(byCondition.items.map((item) => item.key.key)).toStrictEqual(["b"]);
+    expect(byNot.items.map((item) => item.key.key)).toStrictEqual(["a"]);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
   test("不正な一覧条件を ValiError にする", async ({ expect, signal }) => {
     // 準備：
     const omnio = await createTestOmnio(signal);

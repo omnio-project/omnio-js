@@ -1,4 +1,4 @@
-import type { MetadataFilter } from "@omniojs/core";
+import type { RecordType, MetadataFilter } from "@omniojs/core";
 import { type SelectQueryBuilder, sql } from "kysely";
 
 import type { SqlIndexDatabase } from "./schema.js";
@@ -88,6 +88,54 @@ function withContentTypeFilter<T>(
   if (condition.startsWith !== undefined) {
     const pattern = toLikePattern(condition.startsWith, "startsWith");
     filtered = filtered.where(sql<boolean>`${sql.ref("content_type")} LIKE ${pattern} ESCAPE '\\'`);
+  }
+
+  return filtered;
+}
+
+/**
+ * レコードタイプの条件に使う値の一覧に変換します。
+ *
+ * @param value 変換するレコードタイプまたはレコードタイプの一覧です。
+ *
+ * @returns レコードタイプの一覧です。
+ */
+function toRecordTypes(value: RecordType | readonly RecordType[]): readonly RecordType[] {
+  return typeof value === "string" ? [value] : value;
+}
+
+/**
+ * レコードタイプの条件をクエリーに適用します。
+ *
+ * @param query 絞り込む前のクエリーです。
+ * @param condition レコードタイプの条件です。
+ *
+ * @returns 絞り込んだクエリーです。
+ */
+function withRecordTypeFilter<T>(
+  query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
+  condition: NonNullable<MetadataFilter["recordType"]>,
+): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
+  if (typeof condition === "string") {
+    return query.where("journal.record_type", "=", condition);
+  }
+
+  let filtered = query;
+
+  if (condition.in !== undefined) {
+    const values = toRecordTypes(condition.in);
+
+    if (values.length > 0) {
+      filtered = filtered.where("journal.record_type", "in", [...values]);
+    }
+  }
+
+  if (condition.not !== undefined) {
+    const values = toRecordTypes(condition.not);
+
+    if (values.length > 0) {
+      filtered = filtered.where("journal.record_type", "not in", [...values]);
+    }
   }
 
   return filtered;
@@ -228,6 +276,10 @@ export function withMetadataFilter<T>(
     filtered = filtered.where(
       sql<boolean>`(coalesce(${sql.ref("description")}, '') || ' ' || ${sql.ref("key")}) ${sql.raw(fullTextOperator)} ${pattern} ESCAPE '\\'`,
     );
+  }
+
+  if (filter?.recordType !== undefined) {
+    filtered = withRecordTypeFilter(filtered, filter.recordType);
   }
 
   if (filter?.tagsAll !== undefined && filter.tagsAll.length > 0) {

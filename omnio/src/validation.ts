@@ -135,6 +135,15 @@ const MetadataFilterConditionSchema = v.object({
   startsWith: v.optional(ContentTypeSchema),
 });
 
+/** レコードタイプを検証するスキーマです。 */
+const RecordTypeSchema = v.picklist(["CREATE", "UPDATE_METADATA", "DELETE"]);
+
+/** メタデータのレコードタイプに対する絞り込み条件を検証するスキーマです。 */
+const MetadataFilterRecordTypeConditionSchema = v.object({
+  in: v.optional(v.union([RecordTypeSchema, v.array(RecordTypeSchema)])),
+  not: v.optional(v.union([RecordTypeSchema, v.array(RecordTypeSchema)])),
+});
+
 /** 日時の条件に使う値を検証するスキーマです。ISO 8601 文字列または有効な Date を受け付けます。 */
 const TimestampOrDateSchema = v.union([
   TimestampSchema,
@@ -160,6 +169,7 @@ const MetadataFilterSchema = v.object({
   fullText: v.optional(v.string()),
   createdAt: v.optional(v.union([TimestampOrDateSchema, MetadataFilterDateConditionSchema])),
   updatedAt: v.optional(v.union([TimestampOrDateSchema, MetadataFilterDateConditionSchema])),
+  recordType: v.optional(v.union([RecordTypeSchema, MetadataFilterRecordTypeConditionSchema])),
   contentType: v.optional(v.union([ContentTypeSchema, MetadataFilterConditionSchema])),
 });
 

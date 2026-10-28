@@ -1148,6 +1148,45 @@ describe("list", () => {
     });
   });
 
+  test("レコードタイプの条件で絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+    await index.updateMetadata({
+      key: OmnioKey.parse("k2"),
+      action: "updateMetadata",
+      signal,
+      metadata: { updatedAt: "2026-02-06T00:00:00Z" },
+    });
+
+    const cases = [
+      ["CREATE", ["k1", "k3"]],
+      ["UPDATE_METADATA", ["k2"]],
+      [{ in: "CREATE" }, ["k1", "k3"]],
+      [{ in: ["CREATE", "UPDATE_METADATA"] }, ["k1", "k2", "k3"]],
+      [{ not: "UPDATE_METADATA" }, ["k1", "k3"]],
+      [{ not: ["CREATE"] }, ["k2"]],
+    ] as const;
+
+    for (const [recordType, expected] of cases) {
+      // 実行：
+      const actual = await index.list({
+        action: "list",
+        filter: { recordType },
+        signal,
+      });
+
+      // 検証：
+      expect(keysOf(actual.items)).toStrictEqual(expected);
+    }
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
   test("全文で絞り込む", async ({ expect, signal }) => {
     // 準備：
     const index = await createOpenedIndex(signal);
