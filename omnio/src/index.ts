@@ -17,4 +17,5 @@ export type {
   IndexedObject,
   MetadataFilter,
   MetadataFilterCondition,
+  MetadataFilterDateCondition,
 } from "@omniojs/core";

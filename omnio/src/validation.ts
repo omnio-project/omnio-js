@@ -135,14 +135,31 @@ const MetadataFilterConditionSchema = v.object({
   startsWith: v.optional(ContentTypeSchema),
 });
 
+/** 日時の条件に使う値を検証するスキーマです。ISO 8601 文字列または有効な Date を受け付けます。 */
+const TimestampOrDateSchema = v.union([
+  TimestampSchema,
+  v.custom<Date>((input) => input instanceof Date && !Number.isNaN(input.getTime())),
+]);
+
+/** メタデータの日時に対する絞り込み条件を検証するスキーマです。 */
+const MetadataFilterDateConditionSchema = v.object({
+  gt: v.optional(TimestampOrDateSchema),
+  in: v.optional(v.union([TimestampOrDateSchema, v.array(TimestampOrDateSchema)])),
+  lt: v.optional(TimestampOrDateSchema),
+  gte: v.optional(TimestampOrDateSchema),
+  lte: v.optional(TimestampOrDateSchema),
+  not: v.optional(TimestampOrDateSchema),
+  notIn: v.optional(v.union([TimestampOrDateSchema, v.array(TimestampOrDateSchema)])),
+  equals: v.optional(TimestampOrDateSchema),
+});
+
 /** メタデータの絞り込み条件を検証するスキーマです。 */
 const MetadataFilterSchema = v.object({
   tagsAll: v.optional(TagsSchema),
   tagsAny: v.optional(TagsSchema),
   fullText: v.optional(v.string()),
+  createdAt: v.optional(v.union([TimestampOrDateSchema, MetadataFilterDateConditionSchema])),
   contentType: v.optional(v.union([ContentTypeSchema, MetadataFilterConditionSchema])),
-  createdAfter: v.optional(TimestampSchema),
-  createdBefore: v.optional(TimestampSchema),
 });
 
 /** オブジェクト保存の入力を検証するスキーマです。 */

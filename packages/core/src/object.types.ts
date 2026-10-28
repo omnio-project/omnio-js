@@ -147,17 +147,49 @@ export type MetadataFilterCondition = {
 };
 
 /**
+ * メタデータの日時に対する絞り込み条件です。
+ *
+ * 複数のプロパティーを指定した場合は、すべての条件を満たす必要があります。
+ */
+export type MetadataFilterDateCondition = {
+  /** 完全一致を要求する日時です。 */
+  readonly equals?: string | Date | undefined;
+
+  /** 指定日時より後であることを要求する日時です。 */
+  readonly gt?: string | Date | undefined;
+
+  /** 指定日時以降であることを要求する日時です。 */
+  readonly gte?: string | Date | undefined;
+
+  /** いずれかに一致することを要求する日時の一覧です。単一の日時も指定できます。 */
+  readonly in?: string | Date | readonly (string | Date)[] | undefined;
+
+  /** 指定日時より前であることを要求する日時です。 */
+  readonly lt?: string | Date | undefined;
+
+  /** 指定日時以前であることを要求する日時です。 */
+  readonly lte?: string | Date | undefined;
+
+  /** 一致しないことを要求する日時です。 */
+  readonly not?: string | Date | undefined;
+
+  /** いずれにも一致しないことを要求する日時の一覧です。単一の日時も指定できます。 */
+  readonly notIn?: string | Date | readonly (string | Date)[] | undefined;
+};
+
+/**
  * メタデータによる絞り込み条件です。
  */
 export type MetadataFilter = {
   /** コンテンツタイプの条件です。文字列を指定すると完全一致を要求します。 */
   readonly contentType?: string | MetadataFilterCondition | undefined;
 
-  /** 作成時刻の下限です。ISO 8601 文字列で表します。 */
-  readonly createdAfter?: string | undefined;
-
-  /** 作成時刻の上限です。ISO 8601 文字列で表します。 */
-  readonly createdBefore?: string | undefined;
+  /**
+   * 作成時刻の条件です。文字列または Date を指定すると完全一致を要求します。
+   *
+   * 日時は ISO 8601 形式で指定します。
+   */
+  readonly createdAt?: string | Date | MetadataFilterDateCondition | undefined;
 
   /** 全文検索のクエリーです。 */
   readonly fullText?: string | undefined;

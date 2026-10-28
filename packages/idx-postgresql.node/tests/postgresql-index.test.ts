@@ -1151,12 +1151,12 @@ describe("PostgresqlIndex", () => {
       });
       const after = await index.list({
         action: "list",
-        filter: { createdAfter: "2026-02-01T00:00:00Z" },
+        filter: { createdAt: { gte: "2026-02-01T00:00:00Z" } },
         signal,
       });
       const before = await index.list({
         action: "list",
-        filter: { createdBefore: "2026-01-15T00:00:00Z" },
+        filter: { createdAt: { lte: "2026-01-15T00:00:00Z" } },
         signal,
       });
 

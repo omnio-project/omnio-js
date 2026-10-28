@@ -94,6 +94,93 @@ function withContentTypeFilter<T>(
 }
 
 /**
+ * 日時の条件に使う値を ISO 8601 文字列に変換します。
+ *
+ * @param value 変換する日時です。
+ *
+ * @returns ISO 8601 文字列です。
+ */
+function toTimestamp(value: string | Date): string {
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+/**
+ * 日時の条件に使う値の一覧を ISO 8601 文字列に変換します。
+ *
+ * @param value 変換する日時または日時の一覧です。
+ *
+ * @returns ISO 8601 文字列の一覧です。
+ */
+function toTimestamps(value: string | Date | readonly (string | Date)[]): string[] {
+  if (typeof value === "string" || value instanceof Date) {
+    return [toTimestamp(value)];
+  }
+
+  return value.map((item) => toTimestamp(item));
+}
+
+/**
+ * 作成時刻の条件をクエリーに適用します。
+ *
+ * @param query 絞り込む前のクエリーです。
+ * @param condition 作成時刻の条件です。
+ *
+ * @returns 絞り込んだクエリーです。
+ */
+function withCreatedAtFilter<T>(
+  query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
+  condition: NonNullable<MetadataFilter["createdAt"]>,
+): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
+  if (typeof condition === "string" || condition instanceof Date) {
+    return query.where("journal.created_at", "=", toTimestamp(condition));
+  }
+
+  let filtered = query;
+
+  if (condition.equals !== undefined) {
+    filtered = filtered.where("journal.created_at", "=", toTimestamp(condition.equals));
+  }
+
+  if (condition.gt !== undefined) {
+    filtered = filtered.where("journal.created_at", ">", toTimestamp(condition.gt));
+  }
+
+  if (condition.gte !== undefined) {
+    filtered = filtered.where("journal.created_at", ">=", toTimestamp(condition.gte));
+  }
+
+  if (condition.in !== undefined) {
+    const values = toTimestamps(condition.in);
+
+    if (values.length > 0) {
+      filtered = filtered.where("journal.created_at", "in", values);
+    }
+  }
+
+  if (condition.lt !== undefined) {
+    filtered = filtered.where("journal.created_at", "<", toTimestamp(condition.lt));
+  }
+
+  if (condition.lte !== undefined) {
+    filtered = filtered.where("journal.created_at", "<=", toTimestamp(condition.lte));
+  }
+
+  if (condition.not !== undefined) {
+    filtered = filtered.where("journal.created_at", "!=", toTimestamp(condition.not));
+  }
+
+  if (condition.notIn !== undefined) {
+    const values = toTimestamps(condition.notIn);
+
+    if (values.length > 0) {
+      filtered = filtered.where("journal.created_at", "not in", values);
+    }
+  }
+
+  return filtered;
+}
+
+/**
  * カーソルを offset に変換します。
  *
  * @param cursor 一覧の続きを示すカーソルです。
@@ -130,12 +217,8 @@ export function withMetadataFilter<T>(
     filtered = withContentTypeFilter(filtered, filter.contentType);
   }
 
-  if (filter?.createdAfter !== undefined) {
-    filtered = filtered.where("journal.created_at", ">=", filter.createdAfter);
-  }
-
-  if (filter?.createdBefore !== undefined) {
-    filtered = filtered.where("journal.created_at", "<=", filter.createdBefore);
+  if (filter?.createdAt !== undefined) {
+    filtered = withCreatedAtFilter(filtered, filter.createdAt);
   }
 
   if (filter?.fullText !== undefined && filter.fullText !== "") {
