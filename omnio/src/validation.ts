@@ -159,6 +159,7 @@ const MetadataFilterSchema = v.object({
   tagsAny: v.optional(TagsSchema),
   fullText: v.optional(v.string()),
   createdAt: v.optional(v.union([TimestampOrDateSchema, MetadataFilterDateConditionSchema])),
+  updatedAt: v.optional(v.union([TimestampOrDateSchema, MetadataFilterDateConditionSchema])),
   contentType: v.optional(v.union([ContentTypeSchema, MetadataFilterConditionSchema])),
 });
 

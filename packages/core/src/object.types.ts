@@ -199,4 +199,11 @@ export type MetadataFilter = {
 
   /** いずれかを含むことを要求するタグ一覧です。 */
   readonly tagsAny?: readonly string[] | undefined;
+
+  /**
+   * 更新時刻の条件です。文字列または Date を指定すると完全一致を要求します。
+   *
+   * 日時は ISO 8601 形式で指定します。
+   */
+  readonly updatedAt?: string | Date | MetadataFilterDateCondition | undefined;
 };

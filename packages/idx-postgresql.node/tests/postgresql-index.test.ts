@@ -122,6 +122,7 @@ async function seedThree(index: PostgresqlIndex, signal: AbortSignal): Promise<v
       system: {
         ...createObject("k1").system,
         createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-05T00:00:00Z",
       },
       userMetadata: { color: "red" },
     },
@@ -132,6 +133,7 @@ async function seedThree(index: PostgresqlIndex, signal: AbortSignal): Promise<v
         ...createObject("k2").system,
         contentType: "image/png",
         createdAt: "2026-02-01T00:00:00Z",
+        updatedAt: "2026-02-05T00:00:00Z",
       },
       userMetadata: { color: "blue" },
     },
@@ -141,6 +143,7 @@ async function seedThree(index: PostgresqlIndex, signal: AbortSignal): Promise<v
       system: {
         ...createObject("k3").system,
         createdAt: "2026-03-01T00:00:00Z",
+        updatedAt: "2026-03-05T00:00:00Z",
       },
       userMetadata: { color: "red" },
     },
@@ -1138,7 +1141,7 @@ describe("PostgresqlIndex", () => {
       });
     });
 
-    test("コンテンツタイプと作成時刻で絞り込む", async ({ expect, signal }) => {
+    test("コンテンツタイプと日時で絞り込む", async ({ expect, signal }) => {
       // 準備：
       const index = await createOpenedIndex(signal);
       await seedThree(index, signal);
@@ -1159,11 +1162,17 @@ describe("PostgresqlIndex", () => {
         filter: { createdAt: { lte: "2026-01-15T00:00:00Z" } },
         signal,
       });
+      const byUpdatedAt = await index.list({
+        action: "list",
+        filter: { updatedAt: { gte: "2026-02-05T00:00:00Z" } },
+        signal,
+      });
 
       // 検証：
       expect(keysOf(byType.items)).toStrictEqual(["k2"]);
       expect(keysOf(after.items)).toStrictEqual(["k2", "k3"]);
       expect(keysOf(before.items)).toStrictEqual(["k1"]);
+      expect(keysOf(byUpdatedAt.items)).toStrictEqual(["k2", "k3"]);
 
       // 後始末：
       await index.close({

@@ -109,6 +109,7 @@ async function seedThree(index: SqliteNodeIndex, signal: AbortSignal): Promise<v
       system: {
         ...createObject("k1").system,
         createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-05T00:00:00Z",
       },
       userMetadata: { color: "red" },
     },
@@ -119,6 +120,7 @@ async function seedThree(index: SqliteNodeIndex, signal: AbortSignal): Promise<v
         ...createObject("k2").system,
         contentType: "image/png",
         createdAt: "2026-02-01T00:00:00Z",
+        updatedAt: "2026-02-05T00:00:00Z",
       },
       userMetadata: { color: "blue" },
     },
@@ -128,6 +130,7 @@ async function seedThree(index: SqliteNodeIndex, signal: AbortSignal): Promise<v
       system: {
         ...createObject("k3").system,
         createdAt: "2026-03-01T00:00:00Z",
+        updatedAt: "2026-03-05T00:00:00Z",
       },
       userMetadata: { color: "red" },
     },
@@ -1168,7 +1171,7 @@ describe("list", () => {
     });
   });
 
-  test("コンテンツタイプと作成時刻で絞り込む", async ({ expect, signal }) => {
+  test("コンテンツタイプと日時で絞り込む", async ({ expect, signal }) => {
     // 準備：
     const index = await createOpenedIndex(signal);
     await seedThree(index, signal);
@@ -1275,6 +1278,52 @@ describe("list", () => {
       const actual = await index.list({
         action: "list",
         filter: { createdAt },
+        signal,
+      });
+
+      // 検証：
+      expect(keysOf(actual.items)).toStrictEqual(expected);
+    }
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("更新時刻の条件で絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    const cases = [
+      ["2026-01-05T00:00:00Z", ["k1"]],
+      [{ equals: "2026-01-05T00:00:00Z" }, ["k1"]],
+      [{ not: "2026-01-05T00:00:00Z" }, ["k2", "k3"]],
+      [{ in: ["2026-01-05T00:00:00Z", "2026-03-05T00:00:00Z"] }, ["k1", "k3"]],
+      [{ in: "2026-02-05T00:00:00Z" }, ["k2"]],
+      [{ notIn: ["2026-01-05T00:00:00Z", "2026-03-05T00:00:00Z"] }, ["k2"]],
+      [{ notIn: "2026-02-05T00:00:00Z" }, ["k1", "k3"]],
+      [{ lt: "2026-02-05T00:00:00Z" }, ["k1"]],
+      [{ lte: "2026-02-05T00:00:00Z" }, ["k1", "k2"]],
+      [{ gt: "2026-02-05T00:00:00Z" }, ["k3"]],
+      [{ gte: "2026-02-05T00:00:00Z" }, ["k2", "k3"]],
+      [{ gt: new Date("2026-01-15T00:00:00Z") }, ["k2", "k3"]],
+      [
+        {
+          gt: new Date("2026-01-15T00:00:00Z"),
+          lte: new Date("2026-02-15T00:00:00Z"),
+        },
+        ["k2"],
+      ],
+    ] as const;
+
+    for (const [updatedAt, expected] of cases) {
+      // 実行：
+      const actual = await index.list({
+        action: "list",
+        filter: { updatedAt },
         signal,
       });
 

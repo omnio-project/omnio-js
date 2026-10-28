@@ -120,60 +120,62 @@ function toTimestamps(value: string | Date | readonly (string | Date)[]): string
 }
 
 /**
- * 作成時刻の条件をクエリーに適用します。
+ * 日時の条件をクエリーに適用します。
  *
  * @param query 絞り込む前のクエリーです。
- * @param condition 作成時刻の条件です。
+ * @param column 日時を保存する列です。
+ * @param condition 日時の条件です。
  *
  * @returns 絞り込んだクエリーです。
  */
-function withCreatedAtFilter<T>(
+function withDateFilter<T>(
   query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
+  column: "created_at" | "updated_at",
   condition: NonNullable<MetadataFilter["createdAt"]>,
 ): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
   if (typeof condition === "string" || condition instanceof Date) {
-    return query.where("journal.created_at", "=", toTimestamp(condition));
+    return query.where(`journal.${column}`, "=", toTimestamp(condition));
   }
 
   let filtered = query;
 
   if (condition.equals !== undefined) {
-    filtered = filtered.where("journal.created_at", "=", toTimestamp(condition.equals));
+    filtered = filtered.where(`journal.${column}`, "=", toTimestamp(condition.equals));
   }
 
   if (condition.gt !== undefined) {
-    filtered = filtered.where("journal.created_at", ">", toTimestamp(condition.gt));
+    filtered = filtered.where(`journal.${column}`, ">", toTimestamp(condition.gt));
   }
 
   if (condition.gte !== undefined) {
-    filtered = filtered.where("journal.created_at", ">=", toTimestamp(condition.gte));
+    filtered = filtered.where(`journal.${column}`, ">=", toTimestamp(condition.gte));
   }
 
   if (condition.in !== undefined) {
     const values = toTimestamps(condition.in);
 
     if (values.length > 0) {
-      filtered = filtered.where("journal.created_at", "in", values);
+      filtered = filtered.where(`journal.${column}`, "in", values);
     }
   }
 
   if (condition.lt !== undefined) {
-    filtered = filtered.where("journal.created_at", "<", toTimestamp(condition.lt));
+    filtered = filtered.where(`journal.${column}`, "<", toTimestamp(condition.lt));
   }
 
   if (condition.lte !== undefined) {
-    filtered = filtered.where("journal.created_at", "<=", toTimestamp(condition.lte));
+    filtered = filtered.where(`journal.${column}`, "<=", toTimestamp(condition.lte));
   }
 
   if (condition.not !== undefined) {
-    filtered = filtered.where("journal.created_at", "!=", toTimestamp(condition.not));
+    filtered = filtered.where(`journal.${column}`, "!=", toTimestamp(condition.not));
   }
 
   if (condition.notIn !== undefined) {
     const values = toTimestamps(condition.notIn);
 
     if (values.length > 0) {
-      filtered = filtered.where("journal.created_at", "not in", values);
+      filtered = filtered.where(`journal.${column}`, "not in", values);
     }
   }
 
@@ -218,7 +220,7 @@ export function withMetadataFilter<T>(
   }
 
   if (filter?.createdAt !== undefined) {
-    filtered = withCreatedAtFilter(filtered, filter.createdAt);
+    filtered = withDateFilter(filtered, "created_at", filter.createdAt);
   }
 
   if (filter?.fullText !== undefined && filter.fullText !== "") {
@@ -245,6 +247,10 @@ export function withMetadataFilter<T>(
     filtered = filtered.where("journal.key", "in", (inner) =>
       inner.selectFrom("object_tag").select("object_tag.key").where("object_tag.tag", "in", tags),
     );
+  }
+
+  if (filter?.updatedAt !== undefined) {
+    filtered = withDateFilter(filtered, "updated_at", filter.updatedAt);
   }
 
   return filtered;
