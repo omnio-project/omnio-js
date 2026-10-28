@@ -216,6 +216,13 @@ export type MetadataFilter = {
   /** 全文検索のクエリーです。 */
   readonly fullText?: string | undefined;
 
+  /**
+   * レコード時刻の条件です。文字列または Date を指定すると完全一致を要求します。
+   *
+   * 日時は ISO 8601 形式で指定します。
+   */
+  readonly recordTimestamp?: string | Date | MetadataFilterDateCondition | undefined;
+
   /** レコードタイプの条件です。レコードタイプを指定すると完全一致を要求します。 */
   readonly recordType?: RecordType | MetadataFilterRecordTypeCondition | undefined;
 

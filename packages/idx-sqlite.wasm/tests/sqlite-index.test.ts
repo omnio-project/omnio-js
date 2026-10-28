@@ -1134,12 +1134,18 @@ describe("list", () => {
       filter: { updatedAt: { gte: "2026-02-05T00:00:00Z" } },
       signal,
     });
+    const byRecordTimestamp = await index.list({
+      action: "list",
+      filter: { recordTimestamp: { gte: "2026-02-05T00:00:00Z" } },
+      signal,
+    });
 
     // 検証：
     expect(keysOf(byType.items)).toStrictEqual(["k2"]);
     expect(keysOf(after.items)).toStrictEqual(["k2", "k3"]);
     expect(keysOf(before.items)).toStrictEqual(["k1"]);
     expect(keysOf(byUpdatedAt.items)).toStrictEqual(["k2", "k3"]);
+    expect(keysOf(byRecordTimestamp.items)).toStrictEqual(["k2", "k3"]);
 
     // 後始末：
     await index.close({

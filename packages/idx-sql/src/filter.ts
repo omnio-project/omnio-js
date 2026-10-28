@@ -178,7 +178,7 @@ function toTimestamps(value: string | Date | readonly (string | Date)[]): string
  */
 function withDateFilter<T>(
   query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
-  column: "created_at" | "updated_at",
+  column: "created_at" | "record_timestamp" | "updated_at",
   condition: NonNullable<MetadataFilter["createdAt"]>,
 ): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
   if (typeof condition === "string" || condition instanceof Date) {
@@ -276,6 +276,10 @@ export function withMetadataFilter<T>(
     filtered = filtered.where(
       sql<boolean>`(coalesce(${sql.ref("description")}, '') || ' ' || ${sql.ref("key")}) ${sql.raw(fullTextOperator)} ${pattern} ESCAPE '\\'`,
     );
+  }
+
+  if (filter?.recordTimestamp !== undefined) {
+    filtered = withDateFilter(filtered, "record_timestamp", filter.recordTimestamp);
   }
 
   if (filter?.recordType !== undefined) {

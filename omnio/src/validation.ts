@@ -171,6 +171,7 @@ const MetadataFilterSchema = v.object({
   updatedAt: v.optional(v.union([TimestampOrDateSchema, MetadataFilterDateConditionSchema])),
   recordType: v.optional(v.union([RecordTypeSchema, MetadataFilterRecordTypeConditionSchema])),
   contentType: v.optional(v.union([ContentTypeSchema, MetadataFilterConditionSchema])),
+  recordTimestamp: v.optional(v.union([TimestampOrDateSchema, MetadataFilterDateConditionSchema])),
 });
 
 /** オブジェクト保存の入力を検証するスキーマです。 */

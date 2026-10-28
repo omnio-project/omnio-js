@@ -1452,6 +1452,37 @@ describe("listObjects", () => {
     await omnio.close(signal);
   });
 
+  test("レコード時刻の条件で絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    const stored = await omnio.putObject({
+      key: "a",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+
+    // 実行：
+    const byValue = await omnio.listObjects(
+      {
+        filter: { recordTimestamp: new Date(stored.system.updatedAt) },
+      },
+      signal,
+    );
+    const byCondition = await omnio.listObjects(
+      {
+        filter: { recordTimestamp: { equals: new Date(stored.system.updatedAt) } },
+      },
+      signal,
+    );
+
+    // 検証：
+    expect(byValue.items.map((item) => item.key.key)).toStrictEqual(["a"]);
+    expect(byCondition.items.map((item) => item.key.key)).toStrictEqual(["a"]);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
   test("レコードタイプの条件で絞り込む", async ({ expect, signal }) => {
     // 準備：
     const omnio = await createTestOmnio(signal);
