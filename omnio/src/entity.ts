@@ -58,6 +58,17 @@ export interface IOmnioEntity {
   ): Promise<void>;
 
   /**
+   * バイト列を別のキーへ複製します。
+   *
+   * 複製先が既に存在する場合は上書きします。
+   *
+   * @param key 複製元のキーです。
+   * @param destinationKey 複製先のキーです。
+   * @param options 中断シグナルなどの任意項目です。
+   */
+  copy(key: string, destinationKey: string, options?: { signal?: AbortSignal }): Promise<void>;
+
+  /**
    * バイト列を削除します。存在しない場合は何もしません。
    *
    * @param key 削除するキーです。

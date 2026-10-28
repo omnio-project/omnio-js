@@ -1021,6 +1021,30 @@ describe("copyObject", () => {
     await omnio.close(signal);
   });
 
+  test("複製元の実体が存在しない場合は null を返す", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const omnio = await createTestOmnio(signal, new SqliteWasmIndex(), builder);
+    const source = await omnio.putObject({
+      key: "source",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    await omnio.putObject({
+      key: "dest",
+      data: new Uint8Array([9]),
+      contentType: "text/plain",
+    });
+    await getEntity().delete(source.entityId);
+
+    // 実行と検証：
+    expect(await omnio.copyObject("source", "dest", signal)).toBeNull();
+    expect(await omnio.getObject("dest", signal)).toStrictEqual(new Uint8Array([9]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
   test("索引保存に失敗したら複製先の実体を元に戻す", async ({ expect, signal }) => {
     // 準備：
     const index = new SqliteWasmIndex();

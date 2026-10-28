@@ -521,12 +521,6 @@ export class Omnio {
       return source;
     }
 
-    const bytes = await this.#readEntityBytes(source.entityId, active);
-
-    if (bytes === null) {
-      return null;
-    }
-
     const existing = await this.#index.get<TUserMetadata>({
       key: destinationObjectKey,
       action: "get",
@@ -540,13 +534,16 @@ export class Omnio {
         ? undefined
         : ((await this.#readEntityBytes(existing.entityId, active)) ?? undefined);
 
+    let copied = false;
+
     try {
-      await this.#entity.set(entityId, bytes, { signal: active });
+      await this.#entity.copy(source.entityId, entityId, { signal: active });
+      copied = true;
 
       const object: OmnioObject<TUserMetadata> = {
         key: destinationObjectKey,
         hash: source.hash,
-        size: bytes.byteLength,
+        size: source.size,
         tags: [...source.tags],
         entityId,
         createdAt: existing?.createdAt ?? now,
@@ -568,6 +565,10 @@ export class Omnio {
 
       return object;
     } catch (ex) {
+      if (!copied && ex instanceof KeyNotFoundError) {
+        return null;
+      }
+
       await this.#restoreEntity(entityId, previousBytes).catch(() => undefined);
       throw ex;
     }

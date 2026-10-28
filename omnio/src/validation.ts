@@ -81,7 +81,7 @@ const EmbedderInfoSchema = v.object({
 
 /** 実体ストレージーのスキーマです。 */
 export const IOmnioEntitySchema = v.custom<IOmnioEntity>((input) =>
-  hasFunctions(input, ["open", "close", "has", "get", "set", "delete", "stream"]),
+  hasFunctions(input, ["open", "close", "has", "get", "set", "copy", "delete", "stream"]),
 );
 
 /** 実体ストレージーのビルダーのスキーマです。 */

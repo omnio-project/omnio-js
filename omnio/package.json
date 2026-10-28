@@ -28,14 +28,14 @@
   "dependencies": {
     "@noble/hashes": "^2.4.0",
     "@omniojs/core": "workspace:*",
-    "@unikvs/checksum": "^0.0.15",
+    "@unikvs/checksum": "^0.0.16",
     "asyncmux": "^0.0.12",
-    "unikvs": "^0.0.15",
+    "unikvs": "^0.0.16",
     "valibot": "^1.5.0"
   },
   "devDependencies": {
     "@omniojs/idx-sqlite.wasm": "workspace:*",
-    "@unikvs/memory": "^0.0.15",
+    "@unikvs/memory": "^0.0.16",
     "@vitest/browser-playwright": "catalog:",
     "@vitest/coverage-istanbul": "catalog:",
     "@vitest/coverage-v8": "catalog:",
