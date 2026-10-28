@@ -518,25 +518,6 @@ export function withMetadataFilter<T>(
     filtered = withTagsFilter(filtered, filter.tags);
   }
 
-  if (filter?.tagsAll !== undefined && filter.tagsAll.length > 0) {
-    const tags = [...new Set(filter.tagsAll)];
-    filtered = filtered.where("journal.key", "in", (inner) =>
-      inner
-        .selectFrom("object_tag")
-        .select("object_tag.key")
-        .where("object_tag.tag", "in", tags)
-        .groupBy("object_tag.key")
-        .having(sql<boolean>`count(*) = ${tags.length}`),
-    );
-  }
-
-  if (filter?.tagsAny !== undefined && filter.tagsAny.length > 0) {
-    const tags = [...new Set(filter.tagsAny)];
-    filtered = filtered.where("journal.key", "in", (inner) =>
-      inner.selectFrom("object_tag").select("object_tag.key").where("object_tag.tag", "in", tags),
-    );
-  }
-
   if (filter?.updatedAt !== undefined) {
     filtered = withDateFilter(filtered, "updated_at", filter.updatedAt);
   }

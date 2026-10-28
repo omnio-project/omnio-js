@@ -1808,7 +1808,7 @@ describe("searchObjects", () => {
     // 実行：
     const actual = await omnio.searchObjects({
       query: { text: "cat" },
-      filter: { tagsAny: ["wild"] },
+      filter: { tags: { hasSome: ["wild"] } },
       signal,
     });
 

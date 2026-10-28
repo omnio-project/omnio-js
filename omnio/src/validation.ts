@@ -192,8 +192,6 @@ const MetadataFilterSchema = v.object({
   hash: v.optional(v.union([v.string(), MetadataFilterConditionSchema])),
   size: v.optional(v.union([SizeValueSchema, MetadataFilterSizeConditionSchema])),
   tags: v.optional(v.union([TagSchema, MetadataFilterTagsConditionSchema])),
-  tagsAll: v.optional(TagsSchema),
-  tagsAny: v.optional(TagsSchema),
   fullText: v.optional(v.string()),
   createdAt: v.optional(v.union([TimestampOrDateSchema, MetadataFilterDateConditionSchema])),
   updatedAt: v.optional(v.union([TimestampOrDateSchema, MetadataFilterDateConditionSchema])),

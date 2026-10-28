@@ -469,7 +469,7 @@ describe("upsert と get", () => {
     });
     const byOldTag = await index.list({
       action: "list",
-      filter: { tagsAny: ["old"] },
+      filter: { tags: { hasSome: ["old"] } },
       signal,
     });
 
@@ -801,12 +801,12 @@ describe("rename", () => {
     });
     const bySourceTag = await index.list({
       action: "list",
-      filter: { tagsAny: ["source-tag"] },
+      filter: { tags: { hasSome: ["source-tag"] } },
       signal,
     });
     const byDestinationTag = await index.list({
       action: "list",
-      filter: { tagsAny: ["dest-tag"] },
+      filter: { tags: { hasSome: ["dest-tag"] } },
       signal,
     });
 
@@ -869,7 +869,7 @@ describe("delete", () => {
     });
     const byTag = await index.list({
       action: "list",
-      filter: { tagsAny: ["gone"] },
+      filter: { tags: { hasSome: ["gone"] } },
       signal,
     });
 
@@ -911,7 +911,7 @@ describe("delete", () => {
     });
     const byTag = await index.list({
       action: "list",
-      filter: { tagsAny: ["gone"] },
+      filter: { tags: { hasSome: ["gone"] } },
       signal,
     });
     const byVector = await index.search({
@@ -1149,34 +1149,6 @@ describe("list", () => {
       items: [],
       nextCursor: null,
     });
-
-    // 後始末：
-    await index.close({
-      action: "close",
-      signal,
-    });
-  });
-
-  test("タグで絞り込む", async ({ expect, signal }) => {
-    // 準備：
-    const index = await createOpenedIndex(signal);
-    await seedThree(index, signal);
-
-    // 実行：
-    const all = await index.list({
-      action: "list",
-      filter: { tagsAll: ["red", "round"] },
-      signal,
-    });
-    const any = await index.list({
-      action: "list",
-      filter: { tagsAny: ["square", "blue"] },
-      signal,
-    });
-
-    // 検証：
-    expect(keysOf(all.items)).toStrictEqual(["k1"]);
-    expect(keysOf(any.items)).toStrictEqual(["k2", "k3"]);
 
     // 後始末：
     await index.close({
@@ -1716,7 +1688,7 @@ describe("search", () => {
     const actual = await index.search({
       topK: 10,
       action: "search",
-      filter: { tagsAny: ["wanted"] },
+      filter: { tags: { hasSome: ["wanted"] } },
       signal,
       vector: new Float32Array([1, 0]),
     });

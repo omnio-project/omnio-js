@@ -288,12 +288,6 @@ export type MetadataFilter = {
   /** タグの条件です。文字列を指定するとそのタグを含むことを要求します。 */
   readonly tags?: string | MetadataFilterTagsCondition | undefined;
 
-  /** すべて含むことを要求するタグ一覧です。 */
-  readonly tagsAll?: readonly string[] | undefined;
-
-  /** いずれかを含むことを要求するタグ一覧です。 */
-  readonly tagsAny?: readonly string[] | undefined;
-
   /**
    * 更新時刻の条件です。文字列または Date を指定すると完全一致を要求します。
    *
