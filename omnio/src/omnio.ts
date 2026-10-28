@@ -15,6 +15,7 @@ import { asyncmux } from "asyncmux";
 import { type IValueStream, KeyNotFoundError } from "unikvs";
 import * as v from "valibot";
 
+import { BackgroundTaskManager } from "./_background-task-manager.js";
 import type { IOmnioEntity, IOmnioEntityBuilder } from "./entity.js";
 import {
   OmnioKeySchema,
@@ -283,21 +284,13 @@ export class Omnio {
 
   readonly #embedder: IEmbedder;
 
-  #deletionTask: Promise<void> | undefined;
+  readonly #deletions = new BackgroundTaskManager();
 
   #lifecycle: AbortController;
 
   #opened: boolean;
 
-  readonly #pendingDeletions = new Map<
-    string,
-    {
-      key: OmnioKey;
-      entityId: string;
-    }
-  >();
-
-  #reindexTask: Promise<void> | undefined;
+  readonly #reindex = new BackgroundTaskManager();
 
   /**
    * @param options データベースと埋め込み、ストレージーです。すべて必須です。
@@ -365,7 +358,7 @@ export class Omnio {
     }
 
     this.#opened = true;
-    this.#scheduleReindex();
+    this.#reindex.schedule("reindex", () => this.#drainDirtyObjects());
   }
 
   /**
@@ -377,18 +370,16 @@ export class Omnio {
     const active = withLifecycleTimeout(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
-    while (this.#deletionTask !== undefined) {
-      await this.#deletionTask;
+    if (this.#deletions.isRunning) {
+      await this.#deletions.wait();
       active.throwIfAborted();
     }
 
     if (this.#opened) {
       this.#lifecycle.abort(new OperationAbortedError());
 
-      const reindexTask = this.#reindexTask;
-
-      if (reindexTask !== undefined) {
-        await reindexTask;
+      if (this.#reindex.isRunning) {
+        await this.#reindex.wait();
         active.throwIfAborted();
       }
     }
@@ -1035,30 +1026,6 @@ export class Omnio {
   }
 
   /**
-   * dirty フラグが立ったオブジェクトの再インデックスを開始します。
-   */
-  #scheduleReindex(): void {
-    if (this.#reindexTask !== undefined) {
-      return;
-    }
-
-    this.#reindexTask = this.#runReindexSchedule();
-  }
-
-  /**
-   * バックグラウンドの再インデックスを実行し、終了後にタスクを解放します。
-   */
-  async #runReindexSchedule(): Promise<void> {
-    try {
-      await this.#drainDirtyObjects();
-    } catch {
-      // 失敗したオブジェクトは dirty フラグを残し、次回の open に委ねます。
-    } finally {
-      this.#reindexTask = undefined;
-    }
-  }
-
-  /**
    * dirty フラグが立ったオブジェクトを 1 件ずつ再インデックスします。
    *
    * 1 件ごとにロックを解放し、他の操作を妨げないようにします。
@@ -1110,68 +1077,16 @@ export class Omnio {
    * @param entityId 削除する実体 ID です。
    */
   #enqueueDeletion(key: OmnioKey, entityId: string): void {
-    this.#pendingDeletions.set(entityId, {
-      key,
-      entityId,
-    });
-    this.#scheduleDeletion();
-  }
+    this.#deletions.schedule(entityId, async () => {
+      const signal = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+      using _lock = await asyncmux.readonly(this, signal);
 
-  /**
-   * 実体削除のバックグラウンド処理を開始します。
-   */
-  #scheduleDeletion(): void {
-    if (this.#deletionTask !== undefined) {
-      return;
-    }
-
-    this.#deletionTask = this.#runDeletionSchedule();
-  }
-
-  /**
-   * 実体削除のバックグラウンド処理を実行し、終了後に次の予約を確認します。
-   */
-  async #runDeletionSchedule(): Promise<void> {
-    try {
-      await this.#drainDeletions();
-    } catch {
-      // バックグラウンド処理の失敗は削除フラグを残して次の機会に委ねます。
-    } finally {
-      this.#deletionTask = undefined;
-
-      if (this.#pendingDeletions.size > 0) {
-        this.#scheduleDeletion();
-      }
-    }
-  }
-
-  /**
-   * 予約された実体削除を順番に実行します。
-   */
-  async #drainDeletions(): Promise<void> {
-    while (this.#pendingDeletions.size > 0) {
-      const entry = this.#pendingDeletions.entries().next().value;
-
-      if (entry === undefined) {
+      if (!this.#opened) {
         return;
       }
 
-      const [entityId, task] = entry;
-      this.#pendingDeletions.delete(entityId);
-
-      try {
-        const signal = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
-        using _lock = await asyncmux.readonly(this, signal);
-
-        if (!this.#opened) {
-          return;
-        }
-
-        await this.#purgeEntity(task.key, task.entityId, signal);
-      } catch {
-        // 失敗した場合は削除フラグを残し、後続の処理を継続します。
-      }
-    }
+      await this.#purgeEntity(key, entityId, signal);
+    });
   }
 
   /**
