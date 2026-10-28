@@ -10,7 +10,7 @@ import {
   DbNotOpenError,
   OperationAbortedError,
 } from "@omniojs/core";
-import { ChecksumSha256 } from "@unikvs/checksum";
+import { type Checksum, type ChecksumOnHash, ChecksumSha256 } from "@unikvs/checksum";
 import { asyncmux } from "asyncmux";
 import { type IValueStream, KeyNotFoundError } from "unikvs";
 import * as v from "valibot";
@@ -336,6 +336,8 @@ async function nullIfKeyNotFound<T>(load: () => Promise<T>): Promise<T | null> {
  * 公開メソッドの入力値は valibot により検証します。
  */
 export class Omnio {
+  readonly #checksum: ChecksumSha256;
+
   readonly #entity: IOmnioEntity;
 
   readonly #index: IObjectIndex;
@@ -355,10 +357,12 @@ export class Omnio {
    */
   public constructor(options: OmnioOptions) {
     const parsed = v.parse(OmnioOptionsSchema, options);
+    const checksum = new ChecksumSha256();
+    this.#checksum = checksum;
     this.#entity = v.parse(
       IOmnioEntitySchema,
       parsed.entity.build({
-        beforeAll: [new ChecksumSha256()],
+        beforeAll: [checksum],
       }),
     );
     this.#index = parsed.index;
@@ -1222,6 +1226,7 @@ export class Omnio {
    * 実体を保存し、チェックサムを返します。
    *
    * チェックサムはビルド時に先頭へ挿入した `ChecksumSha256` が計算します。
+   * 実体ビルダーに別の `ChecksumSha256` が含まれていても、`Omnio` が挿入したインスタンスの結果だけを使います。
    *
    * @param entityId 保存先の実体 ID です。
    * @param bytes 保存するバイト列です。
@@ -1235,11 +1240,17 @@ export class Omnio {
     signal: AbortSignal,
   ): Promise<string> {
     let hash: string | undefined;
+    const checksum = this.#checksum;
+
+    function onHash(this: Checksum, _context: Parameters<ChecksumOnHash>[0], value: string): void {
+      if (this === checksum) {
+        hash ??= value;
+      }
+    }
+
     await this.#entity.set(entityId, bytes, {
       vars: {
-        [ChecksumSha256.CHECKSUM_ON_HASH_VAR_NAME]: (value: string) => {
-          hash = value;
-        },
+        [ChecksumSha256.CHECKSUM_ON_HASH_VAR_NAME]: onHash,
       },
       signal,
     });

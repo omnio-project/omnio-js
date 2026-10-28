@@ -100,6 +100,40 @@ class FakeEmbedder implements IEmbedder {
 type TestMapping = Record<string, unikvs.Value<Uint8Array>>;
 
 /**
+ * 実体ストレージーに追加するミドルウェアの型です。
+ */
+type Middleware = NonNullable<unikvs.UniKvsBuildOptions["beforeAll"]>[number];
+
+/**
+ * 検証用のバイト列変換ミドルウェアです。
+ *
+ * すべてのバイトを反転して、チェックサムの計算対象が変わる状況を作ります。
+ */
+class XorMiddleware implements Middleware {
+  public readonly name = "Xor";
+
+  public readonly isOpen = true;
+
+  public async encode(
+    c: Parameters<NonNullable<Middleware["encode"]>>[0],
+    next: Parameters<NonNullable<Middleware["encode"]>>[1],
+  ): Promise<void> {
+    c.destination = c.source.map((byte: number) => byte ^ 255);
+
+    await next();
+  }
+
+  public async decode(
+    c: Parameters<NonNullable<Middleware["decode"]>>[0],
+    next: Parameters<NonNullable<Middleware["decode"]>>[1],
+  ): Promise<void> {
+    c.destination = c.source.map((byte: number) => byte ^ 255);
+
+    await next();
+  }
+}
+
+/**
  * 検証用の実体ストレージーのビルダーを作ります。
  *
  * メモリー上にバイト列を保存します。
@@ -597,6 +631,32 @@ describe("putObject と getObject", () => {
       kind: "description",
       model: "fake-model",
     });
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("実体ビルダーに別の ChecksumSha256 があっても Omnio のチェックサムを使う", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const entity = new unikvs.Builder<TestMapping>()
+      .use(new XorMiddleware())
+      .use(new ChecksumSha256())
+      .persist(new Memory());
+    const omnio = await createTestOmnio(signal, new SqliteWasmIndex(), entity);
+
+    // 実行：
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1, 2, 3]),
+      contentType: "text/plain",
+    });
+
+    // 検証：
+    expect(stored.hash).toBe("039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81");
+    expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([1, 2, 3]));
 
     // 後始末：
     await omnio.close(signal);

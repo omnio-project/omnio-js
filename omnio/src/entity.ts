@@ -98,6 +98,7 @@ export interface IOmnioEntityBuilder {
    * 実体ストレージーを構築します。
    *
    * `Omnio` は SHA-256 チェックサムを計算するミドルウェアを `beforeAll` に指定して呼び出します。
+   * 実体ビルダーに別の `ChecksumSha256` が含まれていても、`Omnio` が指定したインスタンスの結果だけを使います。
    * 実装はこのオプションを unikvs の `build()` に引き渡してください。
    *
    * @param options ビルドオプションです。
