@@ -189,6 +189,7 @@ const MetadataFilterDateConditionSchema = v.object({
 
 /** メタデータの絞り込み条件を検証するスキーマです。 */
 const MetadataFilterSchema = v.object({
+  hash: v.optional(v.union([v.string(), MetadataFilterConditionSchema])),
   size: v.optional(v.union([SizeValueSchema, MetadataFilterSizeConditionSchema])),
   tags: v.optional(v.union([TagSchema, MetadataFilterTagsConditionSchema])),
   tagsAll: v.optional(TagsSchema),

@@ -269,6 +269,9 @@ export type MetadataFilter = {
   /** 全文検索のクエリーです。 */
   readonly fullText?: string | undefined;
 
+  /** ハッシュ値の条件です。文字列を指定すると完全一致を要求します。 */
+  readonly hash?: string | MetadataFilterCondition | undefined;
+
   /**
    * レコード時刻の条件です。文字列または Date を指定すると完全一致を要求します。
    *

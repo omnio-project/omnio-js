@@ -1,4 +1,4 @@
-import type { RecordType, MetadataFilter } from "@omniojs/core";
+import type { RecordType, MetadataFilter, MetadataFilterCondition } from "@omniojs/core";
 import { type SelectQueryBuilder, sql } from "kysely";
 
 import type { SqlIndexDatabase } from "./schema.js";
@@ -42,52 +42,54 @@ function toLikePattern(value: string, position: "contains" | "endsWith" | "start
 }
 
 /**
- * コンテンツタイプの条件をクエリーに適用します。
+ * 文字列の条件をクエリーに適用します。
  *
  * @param query 絞り込む前のクエリーです。
- * @param condition コンテンツタイプの条件です。
+ * @param column 文字列を保存する列です。
+ * @param condition 文字列の条件です。
  *
  * @returns 絞り込んだクエリーです。
  */
-function withContentTypeFilter<T>(
+function withStringFilter<T>(
   query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
-  condition: NonNullable<MetadataFilter["contentType"]>,
+  column: "content_type" | "hash",
+  condition: string | MetadataFilterCondition,
 ): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
   if (typeof condition === "string") {
-    return query.where("journal.content_type", "=", condition);
+    return query.where(`journal.${column}`, "=", condition);
   }
 
   let filtered = query;
 
   if (condition.contains !== undefined) {
     const pattern = toLikePattern(condition.contains, "contains");
-    filtered = filtered.where(sql<boolean>`${sql.ref("content_type")} LIKE ${pattern} ESCAPE '\\'`);
+    filtered = filtered.where(sql<boolean>`${sql.ref(column)} LIKE ${pattern} ESCAPE '\\'`);
   }
 
   if (condition.endsWith !== undefined) {
     const pattern = toLikePattern(condition.endsWith, "endsWith");
-    filtered = filtered.where(sql<boolean>`${sql.ref("content_type")} LIKE ${pattern} ESCAPE '\\'`);
+    filtered = filtered.where(sql<boolean>`${sql.ref(column)} LIKE ${pattern} ESCAPE '\\'`);
   }
 
   if (condition.equals !== undefined) {
-    filtered = filtered.where("journal.content_type", "=", condition.equals);
+    filtered = filtered.where(`journal.${column}`, "=", condition.equals);
   }
 
   if (condition.in !== undefined && condition.in.length > 0) {
-    filtered = filtered.where("journal.content_type", "in", [...condition.in]);
+    filtered = filtered.where(`journal.${column}`, "in", [...condition.in]);
   }
 
   if (condition.not !== undefined) {
-    filtered = filtered.where("journal.content_type", "!=", condition.not);
+    filtered = filtered.where(`journal.${column}`, "!=", condition.not);
   }
 
   if (condition.notIn !== undefined && condition.notIn.length > 0) {
-    filtered = filtered.where("journal.content_type", "not in", [...condition.notIn]);
+    filtered = filtered.where(`journal.${column}`, "not in", [...condition.notIn]);
   }
 
   if (condition.startsWith !== undefined) {
     const pattern = toLikePattern(condition.startsWith, "startsWith");
-    filtered = filtered.where(sql<boolean>`${sql.ref("content_type")} LIKE ${pattern} ESCAPE '\\'`);
+    filtered = filtered.where(sql<boolean>`${sql.ref(column)} LIKE ${pattern} ESCAPE '\\'`);
   }
 
   return filtered;
@@ -482,7 +484,7 @@ export function withMetadataFilter<T>(
   let filtered = query.where("journal.record_type", "!=", "DELETE");
 
   if (filter?.contentType !== undefined) {
-    filtered = withContentTypeFilter(filtered, filter.contentType);
+    filtered = withStringFilter(filtered, "content_type", filter.contentType);
   }
 
   if (filter?.createdAt !== undefined) {
@@ -494,6 +496,10 @@ export function withMetadataFilter<T>(
     filtered = filtered.where(
       sql<boolean>`(coalesce(${sql.ref("description")}, '') || ' ' || ${sql.ref("key")}) ${sql.raw(fullTextOperator)} ${pattern} ESCAPE '\\'`,
     );
+  }
+
+  if (filter?.hash !== undefined) {
+    filtered = withStringFilter(filtered, "hash", filter.hash);
   }
 
   if (filter?.recordTimestamp !== undefined) {

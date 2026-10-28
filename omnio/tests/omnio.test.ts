@@ -1,5 +1,6 @@
 import {
   type IEmbedder,
+  type IndexedObject,
   OmnioKey,
   DbNotOpenError,
   InvalidOmnioKeyError,
@@ -197,6 +198,25 @@ async function readAll(source: AsyncIterable<Uint8Array> | null): Promise<Uint8A
   }
 
   return bytes;
+}
+
+/**
+ * オブジェクトのハッシュ値を取り出します。
+ *
+ * ハッシュ値が必ず存在することを前提にした検証で使用します。
+ *
+ * @param object ハッシュ値を持つオブジェクトです。
+ *
+ * @returns ハッシュ値です。
+ */
+function hashOf(object: IndexedObject): string {
+  const hash = object.system.hash;
+
+  if (hash === undefined) {
+    throw new Error("ハッシュ値がありません。");
+  }
+
+  return hash;
 }
 
 describe("コンストラクター", () => {
@@ -1385,6 +1405,51 @@ describe("listObjects", () => {
 
     // 検証：
     expect(actual.items.map((item) => item.key.key)).toStrictEqual(["b"]);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("ハッシュの条件で絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    const a = await omnio.putObject({
+      key: "a",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    const b = await omnio.putObject({
+      key: "b",
+      data: new Uint8Array([2]),
+      contentType: "text/plain",
+    });
+    const c = await omnio.putObject({
+      key: "c",
+      data: new Uint8Array([3]),
+      contentType: "text/plain",
+    });
+    const hashA = hashOf(a);
+    const hashB = hashOf(b);
+    const hashC = hashOf(c);
+
+    const cases = [
+      [hashA, ["a"]],
+      [{ equals: hashA }, ["a"]],
+      [{ not: hashA }, ["b", "c"]],
+      [{ in: [hashA, hashC] }, ["a", "c"]],
+      [{ notIn: [hashA, hashC] }, ["b"]],
+      [{ contains: hashB.slice(4, 12) }, ["b"]],
+      [{ startsWith: hashA.slice(0, 8) }, ["a"]],
+      [{ endsWith: hashC.slice(-8) }, ["c"]],
+    ] as const;
+
+    for (const [hash, expected] of cases) {
+      // 実行：
+      const actual = await omnio.listObjects({ filter: { hash } }, signal);
+
+      // 検証：
+      expect(actual.items.map((item) => item.key.key)).toStrictEqual(expected);
+    }
 
     // 後始末：
     await omnio.close(signal);

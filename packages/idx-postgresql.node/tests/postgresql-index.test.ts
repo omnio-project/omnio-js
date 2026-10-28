@@ -15,6 +15,15 @@ import { resetTestSchema, INDEX_TEST_SCHEMA, getTestConnectionString } from "./d
 
 const indexes = new Set<PostgresqlIndex>();
 
+/** ハッシュの絞り込み条件の検証に使うハッシュ値です。 */
+const HASH_K1 = "1".repeat(64);
+
+/** ハッシュの絞り込み条件の検証に使うハッシュ値です。 */
+const HASH_K2 = "2".repeat(64);
+
+/** ハッシュの絞り込み条件の検証に使うハッシュ値です。 */
+const HASH_K3 = "3".repeat(64);
+
 /**
  * テスト終了時に接続を閉じるため、生成したインデックスを追跡します。
  *
@@ -121,6 +130,7 @@ async function seedThree(index: PostgresqlIndex, signal: AbortSignal): Promise<v
       description: "赤い丸",
       system: {
         ...createObject("k1").system,
+        hash: HASH_K1,
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-05T00:00:00Z",
       },
@@ -131,6 +141,7 @@ async function seedThree(index: PostgresqlIndex, signal: AbortSignal): Promise<v
       description: "青い丸",
       system: {
         ...createObject("k2").system,
+        hash: HASH_K2,
         contentType: "image/png",
         createdAt: "2026-02-01T00:00:00Z",
         size: 8,
@@ -143,6 +154,7 @@ async function seedThree(index: PostgresqlIndex, signal: AbortSignal): Promise<v
       description: "赤い四角",
       system: {
         ...createObject("k3").system,
+        hash: HASH_K3,
         createdAt: "2026-03-01T00:00:00Z",
         size: 5,
         updatedAt: "2026-03-05T00:00:00Z",
@@ -1230,6 +1242,48 @@ describe("PostgresqlIndex", () => {
       expect(keysOf(before.items)).toStrictEqual(["k1"]);
       expect(keysOf(byUpdatedAt.items)).toStrictEqual(["k2", "k3"]);
       expect(keysOf(byRecordTimestamp.items)).toStrictEqual(["k2", "k3"]);
+
+      // 後始末：
+      await index.close({
+        action: "close",
+        signal,
+      });
+    });
+
+    test("ハッシュの条件で絞り込む", async ({ expect, signal }) => {
+      // 準備：
+      const index = await createOpenedIndex(signal);
+      await seedThree(index, signal);
+
+      const cases = [
+        [HASH_K1, ["k1"]],
+        [{ equals: HASH_K1 }, ["k1"]],
+        [{ not: HASH_K1 }, ["k2", "k3"]],
+        [{ in: [HASH_K1, HASH_K3] }, ["k1", "k3"]],
+        [{ notIn: [HASH_K1, HASH_K3] }, ["k2"]],
+        [{ contains: "2222" }, ["k2"]],
+        [{ startsWith: "1" }, ["k1"]],
+        [{ endsWith: "3" }, ["k3"]],
+        [
+          {
+            endsWith: "2",
+            startsWith: "2",
+          },
+          ["k2"],
+        ],
+      ] as const;
+
+      for (const [hash, expected] of cases) {
+        // 実行：
+        const actual = await index.list({
+          action: "list",
+          filter: { hash },
+          signal,
+        });
+
+        // 検証：
+        expect(keysOf(actual.items)).toStrictEqual(expected);
+      }
 
       // 後始末：
       await index.close({
