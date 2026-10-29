@@ -1,4 +1,11 @@
-export type { IOmnioEntity, IOmnioEntityBuilder } from "./entity.js";
+export type {
+  IOmnioEntity,
+  IOmnioEntityBuilder,
+  IOmnioEntityVariables,
+  IOmnioEntityReadOptions,
+} from "./entity.js";
+
+export { ChecksumMismatchError } from "@unikvs/checksum";
 
 export type {
   OmnioOptions,

@@ -1,10 +1,35 @@
 import type { IValueStream, UniKvsBuildOptions } from "unikvs";
 
 /**
+ * 実体ストレージーの操作に渡す実行時変数です。
+ */
+export type IOmnioEntityVariables =
+  | Readonly<Record<string, unknown>>
+  | Iterable<readonly [name: string, value: unknown]>;
+
+/**
+ * 実体ストレージーの読み取りオプションです。
+ */
+export type IOmnioEntityReadOptions = {
+  /** 中断シグナルです。 */
+  readonly signal?: AbortSignal | undefined;
+
+  /**
+   * 実行時変数です。
+   *
+   * チェックサムの期待値を渡すと、実体ストレージーのミドルウェアが読み取り時に検証します。
+   */
+  readonly vars?: IOmnioEntityVariables | undefined;
+};
+
+/**
  * `Omnio` が実体の保存に使うストレージーの JavaScript インターフェースです。
  *
  * unikvs ビルダーが `build()` で作成した `UniKvs` インスタンスがこの形を満たします。
  * キーは文字列であり、値はバイト列です。
+ *
+ * `Omnio` は一度保存した `entityId` のバイト列を変更しません。
+ * 同じ `entityId` の内容が変わることはないという前提で読み取ります。
  */
 export interface IOmnioEntity {
   /**
@@ -35,11 +60,11 @@ export interface IOmnioEntity {
    * バイト列を取得します。存在しない場合はエラーを投げます。
    *
    * @param key 取得するキーです。
-   * @param options 中断シグナルなどの任意項目です。
+   * @param options 中断シグナルと実行時変数などの任意項目です。
    *
    * @returns バイト列を解決する Promise です。
    */
-  get(key: string, options?: { signal?: AbortSignal }): Promise<Uint8Array>;
+  get(key: string, options?: IOmnioEntityReadOptions): Promise<Uint8Array>;
 
   /**
    * バイト列を保存します。
@@ -52,8 +77,8 @@ export interface IOmnioEntity {
     key: string,
     value: Uint8Array | ReadableStream<Uint8Array>,
     options?: {
-      vars?: Readonly<Record<string, unknown>> | Iterable<readonly [name: string, value: unknown]>;
-      signal?: AbortSignal;
+      vars?: IOmnioEntityVariables | undefined;
+      signal?: AbortSignal | undefined;
     },
   ): Promise<void>;
 
@@ -80,11 +105,11 @@ export interface IOmnioEntity {
    * バイト列をストリームで取得します。存在しない場合はエラーを投げます。
    *
    * @param key 取得するキーです。
-   * @param options 中断シグナルなどの任意項目です。
+   * @param options 中断シグナルと実行時変数などの任意項目です。
    *
    * @returns バイト列のストリームを解決する Promise です。
    */
-  stream(key: string, options?: { signal?: AbortSignal }): Promise<IValueStream<Uint8Array>>;
+  stream(key: string, options?: IOmnioEntityReadOptions): Promise<IValueStream<Uint8Array>>;
 }
 
 /**
@@ -97,7 +122,7 @@ export interface IOmnioEntityBuilder {
   /**
    * 実体ストレージーを構築します。
    *
-   * `Omnio` は SHA-256 チェックサムを計算するミドルウェアを `beforeAll` に指定して呼び出します。
+   * `Omnio` は SHA-256 チェックサムを計算・検証するミドルウェアを `beforeAll` に指定して呼び出します。
    * 実体ビルダーに別の `ChecksumSha256` が含まれていても、`Omnio` が指定したインスタンスの結果だけを使います。
    * 実装はこのオプションを unikvs の `build()` に引き渡してください。
    *

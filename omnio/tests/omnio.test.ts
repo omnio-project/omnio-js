@@ -9,7 +9,7 @@ import {
   OperationAbortedError,
 } from "@omniojs/core";
 import { SqliteWasmIndex } from "@omniojs/idx-sqlite.wasm";
-import { ChecksumSha256 } from "@unikvs/checksum";
+import { ChecksumSha256, ChecksumMismatchError } from "@unikvs/checksum";
 import { Memory } from "@unikvs/memory";
 import * as unikvs from "unikvs";
 import { ValiError } from "valibot";
@@ -215,6 +215,14 @@ class XorMiddleware implements Middleware {
 
   public readonly isOpen = true;
 
+  static #transformStream(): TransformStream<Uint8Array, Uint8Array> {
+    return new TransformStream({
+      transform(chunk, controller): void {
+        controller.enqueue(chunk.map((byte: number) => byte ^ 255));
+      },
+    });
+  }
+
   public async encode(
     c: Parameters<NonNullable<Middleware["encode"]>>[0],
     next: Parameters<NonNullable<Middleware["encode"]>>[1],
@@ -229,6 +237,24 @@ class XorMiddleware implements Middleware {
     next: Parameters<NonNullable<Middleware["decode"]>>[1],
   ): Promise<void> {
     c.destination = c.source.map((byte: number) => byte ^ 255);
+
+    await next();
+  }
+
+  public async encodeStream(
+    c: Parameters<NonNullable<Middleware["encodeStream"]>>[0],
+    next: Parameters<NonNullable<Middleware["encodeStream"]>>[1],
+  ): Promise<void> {
+    c.destination = c.source.pipeThrough(XorMiddleware.#transformStream());
+
+    await next();
+  }
+
+  public async decodeStream(
+    c: Parameters<NonNullable<Middleware["decodeStream"]>>[0],
+    next: Parameters<NonNullable<Middleware["decodeStream"]>>[1],
+  ): Promise<void> {
+    c.destination = c.source.pipeThrough(XorMiddleware.#transformStream());
 
     await next();
   }
@@ -370,6 +396,19 @@ function hashOf(object: IndexedObject): string {
   }
 
   return hash;
+}
+
+/**
+ * バイト列の SHA-256 ハッシュを 16 進数で計算します。
+ *
+ * @param bytes ハッシュを計算するバイト列です。
+ *
+ * @returns SHA-256 の 16 進数表記です。
+ */
+async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 describe("コンストラクター", () => {
@@ -988,7 +1027,7 @@ describe("排他制御", () => {
 
     // 検証：
     expect(entityWrites).toBe(2);
-    expect(secondObject.entityId).toBe(firstObject.entityId);
+    expect(secondObject.entityId).not.toBe(firstObject.entityId);
     expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([2]));
 
     const head = await omnio.headObject("k", signal);
@@ -1815,6 +1854,12 @@ describe("putObject と getObject", () => {
     expect(stored.hash).toBe("039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81");
     expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([1, 2, 3]));
 
+    const stream = await omnio.streamObject("k", signal);
+    expect(stream).not.toBeNull();
+
+    const readable = stream as NonNullable<typeof stream>;
+    expect(await readAll(readable)).toStrictEqual(new Uint8Array([1, 2, 3]));
+
     // 後始末：
     await omnio.close(signal);
   });
@@ -1984,8 +2029,60 @@ describe("putObject と getObject", () => {
 
     // 検証：
     expect(second.createdAt).toBe(first.createdAt);
-    expect(second.entityId).toBe(first.entityId);
+    expect(second.entityId).not.toBe(first.entityId);
     expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([1, 2]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("上書きすると新しい実体を作り、古い実体を削除する", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const omnio = await createTestOmnio(signal, new SqliteWasmIndex(), builder);
+    const first = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+
+    // 実行：
+    const second = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([2]),
+      contentType: "text/plain",
+    });
+
+    // 検証：
+    expect(second.entityId).not.toBe(first.entityId);
+    expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([2]));
+    await vi.waitFor(async () => {
+      expect(await getEntity().has(first.entityId, { signal })).toBe(false);
+    });
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("取得時にチェックサムを検証する", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const omnio = await createTestOmnio(signal, new SqliteWasmIndex(), builder);
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1, 2, 3]),
+      contentType: "text/plain",
+    });
+    await getEntity().set(stored.entityId, new Uint8Array([9, 9, 9]), { signal });
+
+    // 実行と検証：
+    await expect(omnio.getObject("k", signal)).rejects.toBeInstanceOf(ChecksumMismatchError);
+
+    const stream = await omnio.streamObject("k", signal);
+    expect(stream).not.toBeNull();
+
+    const readable = stream as NonNullable<typeof stream>;
+    await expect(readAll(readable)).rejects.toBeInstanceOf(ChecksumMismatchError);
 
     // 後始末：
     await omnio.close(signal);
@@ -2358,7 +2455,8 @@ describe("copyObject", () => {
 
   test("複製先が存在する場合は上書きする", async ({ expect, signal }) => {
     // 準備：
-    const omnio = await createTestOmnio(signal);
+    const { builder, getEntity } = createInspectableTestEntity();
+    const omnio = await createTestOmnio(signal, new SqliteWasmIndex(), builder);
     await omnio.putObject({
       key: "source",
       data: new Uint8Array([1]),
@@ -2376,12 +2474,15 @@ describe("copyObject", () => {
     const copied = await omnio.copyObject("source", "dest", signal);
 
     // 検証：
-    expect(copied?.entityId).toBe(destination.entityId);
+    expect(copied?.entityId).not.toBe(destination.entityId);
     expect(copied?.createdAt).toBe(destination.createdAt);
     expect(copied?.contentType).toBe("text/plain");
     expect(copied?.userMetadata).toStrictEqual({});
 
     expect(await omnio.getObject("dest", signal)).toStrictEqual(new Uint8Array([1]));
+    await vi.waitFor(async () => {
+      expect(await getEntity().has(destination.entityId, { signal })).toBe(false);
+    });
 
     // 後始末：
     await omnio.close(signal);
@@ -2442,7 +2543,7 @@ describe("copyObject", () => {
     await omnio.close(signal);
   });
 
-  test("索引保存に失敗したら複製先の実体を元に戻す", async ({ expect, signal }) => {
+  test("索引保存に失敗したら複製先の実体を残す", async ({ expect, signal }) => {
     // 準備：
     const index = new SqliteWasmIndex();
     const omnio = await createTestOmnio(signal, index);
@@ -2805,81 +2906,6 @@ describe("deleteObject", () => {
     await omnio.close(signal);
   });
 
-  test("索引の削除に成功しなければ再作成された実体を消さない", async ({ expect, signal }) => {
-    // 準備：
-    const { builder, getEntity } = createInspectableTestEntity();
-    const index = new SqliteWasmIndex();
-    const omnio = await createTestOmnio(signal, index, builder);
-    const stored = await omnio.putObject({
-      key: "k",
-      data: new Uint8Array([1]),
-      contentType: "text/plain",
-    });
-    const entity = getEntity();
-    const purgeStarted = Promise.withResolvers<void>();
-    const allowPurge = Promise.withResolvers<void>();
-    const purgeFinished = Promise.withResolvers<void>();
-    const originalPurge = index.purge.bind(index);
-    using _purge = vi.spyOn(index, "purge").mockImplementation(async (c) => {
-      purgeStarted.resolve();
-      await allowPurge.promise;
-
-      const result = await originalPurge(c);
-
-      purgeFinished.resolve();
-
-      return result;
-    });
-    const originalHas = entity.has.bind(entity);
-    using _has = vi.spyOn(entity, "has").mockImplementation(async (id, options) => {
-      purgeStarted.resolve();
-      await allowPurge.promise;
-
-      return originalHas(id, options);
-    });
-
-    // 実行：
-    expect(await omnio.deleteObject("k", signal)).toBe(true);
-    await purgeStarted.promise;
-
-    // バックグラウンドの削除が判断する前に、同じキーが再作成された状態を再現します。
-    const newer = {
-      ...stored,
-      size: 1,
-      tags: [],
-      updatedAt: new Date().toISOString(),
-      contentType: "application/json",
-      description: "newer",
-      userMetadata: { version: 2 },
-      embedding: undefined,
-      embeddingDims: undefined,
-      embeddingModel: undefined,
-      embeddingSource: undefined,
-    };
-    await index.upsert({
-      action: "upsert",
-      object: newer,
-      signal,
-    });
-
-    await entity.set(stored.entityId, new Uint8Array([9]), { signal });
-    allowPurge.resolve();
-    await purgeFinished.promise;
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
-
-    // 検証：
-    const head = await omnio.headObject("k", signal);
-
-    expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([9]));
-    expect(head?.userMetadata).toStrictEqual({ version: 2 });
-    expect(await entity.has(stored.entityId)).toBe(true);
-
-    // 後始末：
-    await omnio.close(signal);
-  });
-
   test("索引の削除に失敗した古い実体は、参照されていなければ削除する", async ({
     expect,
     signal,
@@ -2909,6 +2935,7 @@ describe("deleteObject", () => {
       return result;
     });
     const newerEntityId = crypto.randomUUID();
+    const newerBytes = new Uint8Array([9]);
 
     // 実行：
     expect(await omnio.deleteObject("k", signal)).toBe(true);
@@ -2916,8 +2943,9 @@ describe("deleteObject", () => {
 
     const newer = {
       ...stored,
+      hash: await sha256Hex(newerBytes),
+      size: newerBytes.byteLength,
       entityId: newerEntityId,
-      size: 1,
       tags: [],
       updatedAt: new Date().toISOString(),
       contentType: "application/json",
@@ -2934,7 +2962,7 @@ describe("deleteObject", () => {
       signal,
     });
 
-    await entity.set(newerEntityId, new Uint8Array([9]), { signal });
+    await entity.set(newerEntityId, newerBytes, { signal });
     allowPurge.resolve();
     await purgeFinished.promise;
     await new Promise<void>((resolve) => {

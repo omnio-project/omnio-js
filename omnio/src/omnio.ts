@@ -58,6 +58,16 @@ type ReindexOutcome = "applied" | "stale" | "failed";
 const ENTITY_HASH_ALGORITHM = "sha256";
 
 /**
+ * Omnio 専用の SHA-256 チェックサムです。
+ *
+ * 利用者が実体ビルダーに追加した `ChecksumSha256` と同じ変数名を使うと、読み取り時に利用者側のインスタンスが先に検証してしまいます。
+ * そのため、専用の変数名に分けます。
+ */
+class OmnioChecksum extends ChecksumSha256 {
+  public static override readonly CHECKSUM_VAR_NAME = "@omniojs/entity:checksum";
+}
+
+/**
  * ライフサイクル操作で使う中断シグナルを返します。
  *
  * @param signal 呼び出し側が指定した中断シグナルです。
@@ -370,6 +380,25 @@ async function toBytes(
 }
 
 /**
+ * チェックサム検証に使う実行時変数を作ります。
+ *
+ * @param hash インデックスに保存されたハッシュ値です。
+ * @param hashAlgorithm ハッシュアルゴリズムの識別子です。
+ *
+ * @returns 検証に使う実行時変数、検証できない場合は undefined です。
+ */
+function checksumVars(
+  hash: string | undefined,
+  hashAlgorithm: string | undefined,
+): Record<string, string> | undefined {
+  return hash === undefined || hashAlgorithm !== ENTITY_HASH_ALGORITHM
+    ? undefined
+    : {
+        [OmnioChecksum.CHECKSUM_VAR_NAME]: hash,
+      };
+}
+
+/**
  * キーが見つからない例外を null に変換します。
  *
  * @param load 実行する取得処理です。
@@ -412,7 +441,7 @@ async function nullIfKeyNotFound<T>(load: () => Promise<T>): Promise<T | null> {
  * 公開メソッドの入力値は valibot により検証します。
  */
 export class Omnio {
-  readonly #checksum: ChecksumSha256;
+  readonly #checksum: OmnioChecksum;
 
   readonly #entity: IOmnioEntity;
 
@@ -441,7 +470,7 @@ export class Omnio {
    */
   public constructor(options: OmnioOptions) {
     const parsed = v.parse(OmnioOptionsSchema, options);
-    const checksum = new ChecksumSha256();
+    const checksum = new OmnioChecksum();
     this.#checksum = checksum;
     this.#entity = v.parse(
       IOmnioEntitySchema,
@@ -623,6 +652,9 @@ export class Omnio {
   /**
    * オブジェクトを保存します。
    *
+   * 上書き時も既存の実体 ID は再利用せず、新しい実体として保存します。
+   * これにより、保存済みの実体のバイト列は不変になります。
+   *
    * @param input 保存する入力です。
    *
    * @returns 保存したオブジェクトです。
@@ -663,12 +695,8 @@ export class Omnio {
       signal: active,
     });
     const now = new Date().toISOString();
-    const entityId =
-      existing === null || existing.entityId === "" ? crypto.randomUUID() : existing.entityId;
-    const previousBytes =
-      existing === null
-        ? undefined
-        : ((await this.#readEntityBytes(existing.entityId, active)) ?? undefined);
+    // 実体は不変であるため、上書きでも既存の entityId を再利用しません。
+    const entityId = crypto.randomUUID();
 
     try {
       const hash = await this.#setEntity(entityId, bytes, active);
@@ -695,9 +723,17 @@ export class Omnio {
         signal: active,
       });
 
+      if (existing !== null && existing.entityId !== entityId) {
+        this.#enqueueDiscardedEntity(key, existing.entityId);
+      }
+
       return object;
     } catch (ex) {
-      await this.#restoreEntity(entityId, previousBytes).catch(() => undefined);
+      await this.#deleteUnreferencedEntity(
+        key,
+        entityId,
+        AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
+      ).catch(() => undefined);
       throw ex;
     }
   }
@@ -706,7 +742,8 @@ export class Omnio {
    * オブジェクトを複製します。
    *
    * 実体のバイト列とメタデータを複製先へコピーします。
-   * 複製先が既に存在する場合は上書きし、元の作成時刻と実体 ID を引き継ぎます。
+   * 複製先が既に存在する場合は上書きし、複製先の作成時刻を引き継ぎます。
+   * 実体は不変であるため、複製先の実体 ID は書き込みごとに新しく発行します。
    * 同じキーを指定した場合は何もせず、元のオブジェクトを返します。
    *
    * @param sourceKey 複製元のキーです。
@@ -750,13 +787,8 @@ export class Omnio {
       signal: active,
     });
     const now = new Date().toISOString();
-    const entityId =
-      existing === null || existing.entityId === "" ? crypto.randomUUID() : existing.entityId;
-    const previousBytes =
-      existing === null
-        ? undefined
-        : ((await this.#readEntityBytes(existing.entityId, active)) ?? undefined);
-
+    // 実体は不変であるため、上書きでも複製先の entityId を再利用しません。
+    const entityId = crypto.randomUUID();
     let copied = false;
 
     try {
@@ -786,13 +818,21 @@ export class Omnio {
         signal: active,
       });
 
+      if (existing !== null && existing.entityId !== entityId) {
+        this.#enqueueDiscardedEntity(destinationObjectKey, existing.entityId);
+      }
+
       return object;
     } catch (ex) {
       if (!copied && ex instanceof KeyNotFoundError) {
         return null;
       }
 
-      await this.#restoreEntity(entityId, previousBytes).catch(() => undefined);
+      await this.#deleteUnreferencedEntity(
+        destinationObjectKey,
+        entityId,
+        AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
+      ).catch(() => undefined);
       throw ex;
     }
   }
@@ -898,6 +938,9 @@ export class Omnio {
   /**
    * 実体のバイト列を取得します。
    *
+   * インデックスの `hashAlgorithm` が `sha256` の場合、返却前に実体のチェックサムを検証します。
+   * 検証に失敗した場合は `ChecksumMismatchError` を投げます。
+   *
    * @param key 取得するキーです。
    * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
    *
@@ -922,11 +965,16 @@ export class Omnio {
       return null;
     }
 
-    return await this.#readEntityBytes(object.entityId, active);
+    return await this.#readEntityBytes(object.entityId, active, object.hash, object.hashAlgorithm);
   }
 
   /**
    * 実体をストリームで取得します。
+   *
+   * インデックスの `hashAlgorithm` が `sha256` の場合、ストリームの終端でチェックサムを検証します。
+   * 検証に失敗した場合は `ChecksumMismatchError` を投げます。
+   * ストリームの性質上、検証はデータの一部が消費された後になります。
+   * 途中でキャンセルしたり、最後まで読み取らなかった場合は検証されません。
    *
    * 取得したストリームは呼び出し側で破棄してください。
    *
@@ -957,7 +1005,12 @@ export class Omnio {
       return null;
     }
 
-    return await nullIfKeyNotFound(() => this.#entity.stream(object.entityId, { signal: active }));
+    return await nullIfKeyNotFound(() =>
+      this.#entity.stream(object.entityId, {
+        vars: checksumVars(object.hash, object.hashAlgorithm),
+        signal: active,
+      }),
+    );
   }
 
   /**
@@ -1631,13 +1684,27 @@ export class Omnio {
   /**
    * 実体のバイト列を取得します。
    *
+   * インデックスに保存されたハッシュがある場合は、実体ストレージーのチェックサム検証に使います。
+   *
    * @param entityId 取得する実体 ID です。
    * @param signal 処理を中断するための中断シグナルです。
+   * @param hash インデックスに保存されたハッシュ値です。
+   * @param hashAlgorithm ハッシュアルゴリズムの識別子です。
    *
    * @returns バイト列、存在しない場合は null です。
    */
-  async #readEntityBytes(entityId: string, signal: AbortSignal): Promise<Uint8Array | null> {
-    return nullIfKeyNotFound(() => this.#entity.get(entityId, { signal }));
+  async #readEntityBytes(
+    entityId: string,
+    signal: AbortSignal,
+    hash?: string,
+    hashAlgorithm?: string,
+  ): Promise<Uint8Array | null> {
+    return nullIfKeyNotFound(() =>
+      this.#entity.get(entityId, {
+        vars: checksumVars(hash, hashAlgorithm),
+        signal,
+      }),
+    );
   }
 
   /**
@@ -1668,7 +1735,7 @@ export class Omnio {
 
     await this.#entity.set(entityId, bytes, {
       vars: {
-        [ChecksumSha256.CHECKSUM_ON_HASH_VAR_NAME]: onHash,
+        [OmnioChecksum.CHECKSUM_ON_HASH_VAR_NAME]: onHash,
       },
       signal,
     });
@@ -1680,27 +1747,6 @@ export class Omnio {
     }
 
     return hash;
-  }
-
-  /**
-   * 失敗した保存の実体を元の状態に戻します。
-   *
-   * 保存前のバイト列があればそれを書き戻し、ない場合は削除します。
-   * 補償処理には既定のタイムアウトを設定し、close 時の中断の影響を受けないようにします。
-   *
-   * @param entityId 復元する実体キーです。
-   * @param previousBytes 保存前のバイト列です。存在しない場合もあります。
-   */
-  async #restoreEntity(entityId: string, previousBytes: Uint8Array | undefined): Promise<void> {
-    const signal = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
-
-    if (previousBytes !== undefined) {
-      await this.#entity.set(entityId, previousBytes, { signal });
-
-      return;
-    }
-
-    await this.#entity.delete(entityId, { signal });
   }
 
   /**

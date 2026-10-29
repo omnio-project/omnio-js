@@ -102,7 +102,12 @@ export type OmnioObject<TUserMetadata = Record<string, unknown>> = OmnioSystemMe
   /** 埋め込みベクトルの由来です。未生成の場合もあります。 */
   readonly embeddingSource?: EmbedSource | undefined;
 
-  /** 実体ストレージー上のキーです。UUID で表します。 */
+  /**
+   * 実体ストレージー上のキーです。UUID で表します。
+   *
+   * `putObject` と `copyObject` で実体を書き込むと新しい値になり、`renameObject` では維持されます。
+   * 同じ `entityId` のバイト列は変更されません。
+   */
   readonly entityId: string;
 
   /** オブジェクトを一意に識別するキーです。 */
