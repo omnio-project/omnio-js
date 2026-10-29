@@ -33,6 +33,15 @@ import {
 /** `open` と `close` の既定タイムアウトです。ミリ秒単位で表します。 */
 const DEFAULT_LIFECYCLE_TIMEOUT_MS = 30_000;
 
+/** 削除した実体の物理削除を猶予する既定時間です。ミリ秒単位で表します。 */
+const DEFAULT_PURGE_GRACE_PERIOD_MS = 60_000;
+
+/** 削除済みオブジェクトを一度に取得する最大件数です。 */
+const DELETED_BATCH_SIZE = 100;
+
+/** `setTimeout` に指定できる最大待ち時間です。ミリ秒単位で表します。 */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 /** dirty 再インデックスの 1 回の走査で処理する最大件数です。 */
 const DIRTY_BATCH_SIZE = 10;
 
@@ -122,6 +131,15 @@ export type OmnioOptions = {
 
   /** 埋め込み推論器です。 */
   readonly embedder: IEmbedder;
+
+  /**
+   * 削除した実体の物理削除を猶予する時間です。ミリ秒単位で表します。
+   *
+   * 論理削除は即座に反映されます。物理削除を遅らせることで、削除と並行している読み取りやストリームを保護します。
+   * 既定値は 60000 ミリ秒です。0 を指定すると即座に物理削除します。
+   * 指定できる最大値は 2147483647 ミリ秒です。
+   */
+  readonly purgeGracePeriodMs?: number | undefined;
 };
 
 /**
@@ -445,6 +463,10 @@ export class Omnio {
 
   #opened: boolean;
 
+  readonly #purgeGracePeriodMs: number;
+
+  readonly #purgeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
   readonly #reindex = new BackgroundTaskManager();
 
   /**
@@ -462,6 +484,7 @@ export class Omnio {
     );
     this.#index = parsed.index;
     this.#embedder = parsed.embedder;
+    this.#purgeGracePeriodMs = parsed.purgeGracePeriodMs ?? DEFAULT_PURGE_GRACE_PERIOD_MS;
 
     this.#lifecycle = new AbortController();
     this.#entityOpen = false;
@@ -542,6 +565,7 @@ export class Omnio {
     }
 
     this.#opened = true;
+    this.#deletions.schedule("purgeExpired", () => this.#schedulePendingPurges());
     this.#reindex.schedule("reindex", () => this.#drainDirtyObjects());
   }
 
@@ -622,6 +646,10 @@ export class Omnio {
     } finally {
       this.#closingCount--;
 
+      if (!this.#indexOpen && !this.#entityOpen) {
+        this.#clearPurgeTimers();
+      }
+
       if (
         this.#closingCount === 0 &&
         (this.#indexOpen || this.#entityOpen || this.#lifecycle.signal.aborted)
@@ -699,7 +727,7 @@ export class Omnio {
         embeddingModel,
         embeddingSource,
       };
-      await this.#index.upsert({
+      const replacedDeletedEntityId = await this.#index.upsert({
         action: "upsert",
         object,
         signal: active,
@@ -707,6 +735,14 @@ export class Omnio {
 
       if (existing !== null && existing.entityId !== entityId) {
         this.#enqueueDiscardedEntity(key, existing.entityId);
+      }
+
+      if (
+        replacedDeletedEntityId !== undefined &&
+        replacedDeletedEntityId !== entityId &&
+        replacedDeletedEntityId !== existing?.entityId
+      ) {
+        this.#enqueueDiscardedEntity(key, replacedDeletedEntityId);
       }
 
       return object;
@@ -794,7 +830,7 @@ export class Omnio {
         embeddingModel: source.embeddingModel,
         embeddingSource: source.embeddingSource,
       };
-      await this.#index.upsert({
+      const replacedDeletedEntityId = await this.#index.upsert({
         action: "upsert",
         object,
         signal: active,
@@ -802,6 +838,14 @@ export class Omnio {
 
       if (existing !== null && existing.entityId !== entityId) {
         this.#enqueueDiscardedEntity(destinationObjectKey, existing.entityId);
+      }
+
+      if (
+        replacedDeletedEntityId !== undefined &&
+        replacedDeletedEntityId !== entityId &&
+        replacedDeletedEntityId !== existing?.entityId
+      ) {
+        this.#enqueueDiscardedEntity(destinationObjectKey, replacedDeletedEntityId);
       }
 
       return object;
@@ -1530,16 +1574,125 @@ export class Omnio {
    * @param entityId 削除する実体 ID です。
    */
   #enqueueDeletion(key: OmnioKey, entityId: string): void {
-    this.#deletions.schedule(entityId, async () => {
-      const signal = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+    this.#schedulePurge(key, entityId, this.#purgeGracePeriodMs);
+  }
+
+  /**
+   * 物理削除を予約します。
+   *
+   * @param key 削除するオブジェクトのキーです。
+   * @param entityId 削除する実体 ID です。
+   * @param delay 実行までの待ち時間です。ミリ秒単位で表します。
+   */
+  #schedulePurge(key: OmnioKey, entityId: string, delay: number): void {
+    const run = (): void => {
+      this.#deletions.schedule(entityId, async () => {
+        const signal = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+        using _lock = await asyncmux.readonly(this, signal);
+
+        if (!this.#opened) {
+          return;
+        }
+
+        await this.#purgeEntity(key, entityId, signal, this.#purgeCutoff());
+      });
+    };
+
+    if (delay <= 0) {
+      run();
+
+      return;
+    }
+
+    if (this.#purgeTimers.has(entityId)) {
+      return;
+    }
+
+    const timer = setTimeout(
+      () => {
+        this.#purgeTimers.delete(entityId);
+        run();
+      },
+      Math.min(delay, MAX_TIMER_DELAY_MS),
+    );
+    timer.unref?.();
+    this.#purgeTimers.set(entityId, timer);
+  }
+
+  /**
+   * 物理削除の猶予期限を計算します。
+   *
+   * @returns この時刻以前に削除された実体を物理削除できます。
+   */
+  #purgeCutoff(): string {
+    return new Date(Date.now() - this.#purgeGracePeriodMs).toISOString();
+  }
+
+  /**
+   * 予約済みの物理削除タイマーを破棄します。
+   *
+   * 破棄した削除は、次回の open 時の期限切れ削除の走査で回収します。
+   */
+  #clearPurgeTimers(): void {
+    for (const timer of this.#purgeTimers.values()) {
+      clearTimeout(timer);
+    }
+
+    this.#purgeTimers.clear();
+  }
+
+  /**
+   * 削除済みオブジェクトの物理削除を、それぞれの猶予期限に合わせて予約します。
+   *
+   * プロセス再起動後も、猶予期間の途中にある削除を回収できます。
+   */
+  async #schedulePendingPurges(): Promise<void> {
+    let afterKey: string | undefined;
+    const seenAnchors = new Set<string>();
+
+    for (;;) {
+      const signal = AbortSignal.any([
+        this.#lifecycle.signal,
+        AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
+      ]);
       using _lock = await asyncmux.readonly(this, signal);
 
       if (!this.#opened) {
         return;
       }
 
-      await this.#purgeEntity(key, entityId, signal);
-    });
+      const now = Date.now();
+      const deleted = await this.#index.listDeleted({
+        limit: DELETED_BATCH_SIZE,
+        action: "listDeleted",
+        before: new Date(now).toISOString(),
+        signal,
+        afterKey,
+      });
+
+      if (deleted.length === 0) {
+        return;
+      }
+
+      for (const item of deleted) {
+        const deletedAt = Date.parse(item.recordTimestamp);
+        const delay = Number.isNaN(deletedAt) ? 0 : deletedAt + this.#purgeGracePeriodMs - now;
+        this.#schedulePurge(item.key, item.entityId, delay);
+      }
+
+      const nextAfterKey = deleted.at(-1)?.key.key;
+
+      if (
+        nextAfterKey === undefined ||
+        seenAnchors.has(nextAfterKey) ||
+        deleted.length < DELETED_BATCH_SIZE
+      ) {
+        return;
+      }
+
+      seenAnchors.add(nextAfterKey);
+      afterKey = nextAfterKey;
+    }
   }
 
   /**
@@ -1552,6 +1705,13 @@ export class Omnio {
    * @param entityId 削除する実体 ID です。
    */
   #enqueueDiscardedEntity(key: OmnioKey, entityId: string): void {
+    const timer = this.#purgeTimers.get(entityId);
+
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.#purgeTimers.delete(entityId);
+    }
+
     this.#deletions.schedule(entityId, async () => {
       const signal = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
       using _lock = await asyncmux.readonly(this, signal);
@@ -1614,18 +1774,38 @@ export class Omnio {
    * @param key 削除するオブジェクトのキーです。
    * @param entityId 削除する実体 ID です。
    * @param signal 処理を中断するための中断シグナルです。
+   * @param before この時刻以前に削除されたレコードだけを対象にします。
    */
-  async #purgeEntity(key: OmnioKey, entityId: string, signal: AbortSignal): Promise<void> {
+  async #purgeEntity(
+    key: OmnioKey,
+    entityId: string,
+    signal: AbortSignal,
+    before?: string,
+  ): Promise<void> {
     using _keyLock = await this.#lockKeys(signal, [key]);
 
     const purged = await this.#index.purge({
       key,
       action: "purge",
+      before,
       signal,
       entityId,
     });
 
     if (!purged) {
+      const stillDeleted = await this.#index.hasDeleted({
+        key,
+        action: "hasDeleted",
+        signal,
+        entityId,
+      });
+
+      if (stillDeleted) {
+        this.#schedulePurge(key, entityId, 1000);
+
+        return;
+      }
+
       await this.#deleteUnreferencedEntity(key, entityId, signal);
 
       return;

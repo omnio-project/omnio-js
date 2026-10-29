@@ -112,6 +112,9 @@ export interface IPurgeContext extends IActionContext {
   /** 操作の種別です。 */
   readonly action: "purge";
 
+  /** この時刻以前に削除されたオブジェクトだけを物理削除します。省略時は時刻を問いません。 */
+  readonly before?: string | undefined;
+
   /** 物理削除するオブジェクトの実体 ID です。 */
   readonly entityId: string;
 
@@ -134,6 +137,51 @@ export interface IListContext extends IActionContext {
 
   /** 取得する最大件数です。 */
   readonly limit?: number | undefined;
+}
+
+/**
+ * 削除フラグが立ったオブジェクトの参照情報です。
+ */
+export type IDeletedObject = {
+  /** オブジェクトを一意に識別するキーです。 */
+  readonly key: OmnioKey;
+
+  /** 実体ストレージー上のキーです。 */
+  readonly entityId: string;
+
+  /** 削除フラグを立てた時刻です。ISO 8601 文字列で表します。 */
+  readonly recordTimestamp: string;
+};
+
+/**
+ * 削除フラグが立ったオブジェクトを一覧する操作のコンテキストです。
+ */
+export interface IListDeletedContext extends IActionContext {
+  /** 操作の種別です。 */
+  readonly action: "listDeleted";
+
+  /** このキーより後ろのオブジェクトだけを取得します。 */
+  readonly afterKey?: string | undefined;
+
+  /** この時刻以前に削除されたオブジェクトだけを取得します。 */
+  readonly before: string;
+
+  /** 取得する最大件数です。 */
+  readonly limit?: number | undefined;
+}
+
+/**
+ * 削除フラグが立ったオブジェクトが存在するか確認する操作のコンテキストです。
+ */
+export interface IHasDeletedContext extends IActionContext {
+  /** 操作の種別です。 */
+  readonly action: "hasDeleted";
+
+  /** 実体ストレージー上のキーです。 */
+  readonly entityId: string;
+
+  /** 確認するオブジェクトのキーです。 */
+  readonly key: OmnioKey;
 }
 
 /**
@@ -214,6 +262,11 @@ export namespace IObjectIndex {
   export type DeleteContext = IDeleteContext;
 
   /**
+   * 削除フラグが立ったオブジェクトの参照情報です。
+   */
+  export type DeletedObject = IDeletedObject;
+
+  /**
    * 取得する操作のコンテキストです。
    */
   export type GetContext = IGetContext;
@@ -224,9 +277,19 @@ export namespace IObjectIndex {
   export type HasContext = IHasContext;
 
   /**
+   * 削除フラグが立ったオブジェクトが存在するか確認する操作のコンテキストです。
+   */
+  export type HasDeletedContext = IHasDeletedContext;
+
+  /**
    * 一覧する操作のコンテキストです。
    */
   export type ListContext = IListContext;
+
+  /**
+   * 削除フラグが立ったオブジェクトを一覧する操作のコンテキストです。
+   */
+  export type ListDeletedContext = IListDeletedContext;
 
   /**
    * オブジェクトの一覧結果です。
@@ -332,9 +395,11 @@ export interface IObjectIndex {
    *
    * @param c 保存する操作のコンテキストです。
    *
-   * @returns 保存処理の完了を示す Promise です。
+   * @returns 削除フラグ付きレコードを置き換えた場合は、そのレコードの実体 ID を解決する Promise です。
    */
-  upsert<TUserMetadata>(c: IObjectIndex.UpsertContext<TUserMetadata>): MaybePromise<void>;
+  upsert<TUserMetadata>(
+    c: IObjectIndex.UpsertContext<TUserMetadata>,
+  ): MaybePromise<string | undefined>;
 
   /**
    * オブジェクトの変更可能なメタデータだけを更新します。
@@ -400,12 +465,24 @@ export interface IObjectIndex {
    * 削除フラグが立ったオブジェクトを物理削除します。
    *
    * `entityId` とキーが一致する削除フラグ付きレコードだけを削除します。
+   * `before` が指定された場合は、その時刻以前に削除されたレコードだけを対象にします。
    *
    * @param c 物理削除する操作のコンテキストです。
    *
    * @returns 物理削除した場合は true、対象が存在しなかった場合は false を解決する Promise です。
    */
   purge(c: IObjectIndex.PurgeContext): MaybePromise<boolean>;
+
+  /**
+   * 削除フラグが立ったレコードが存在するか確認します。
+   *
+   * 実体の物理削除後に、レコードが新しい実体で置き換えられていないかを確認するために使います。
+   *
+   * @param c 確認する操作のコンテキストです。
+   *
+   * @returns 削除フラグ付きレコードが存在する場合は true を解決する Promise です。
+   */
+  hasDeleted(c: IObjectIndex.HasDeletedContext): MaybePromise<boolean>;
 
   /**
    * オブジェクトを一覧します。
@@ -417,6 +494,15 @@ export interface IObjectIndex {
   list<TUserMetadata>(
     c: IObjectIndex.ListContext,
   ): MaybePromise<IObjectIndex.ListResult<TUserMetadata>>;
+
+  /**
+   * 削除フラグが立ったオブジェクトを一覧します。
+   *
+   * @param c 一覧する操作のコンテキストです。
+   *
+   * @returns 削除フラグが立ったオブジェクトの一覧を解決する Promise です。
+   */
+  listDeleted(c: IObjectIndex.ListDeletedContext): MaybePromise<IObjectIndex.DeletedObject[]>;
 
   /**
    * 埋め込みモデルが変わったオブジェクトに dirty フラグを立てます。

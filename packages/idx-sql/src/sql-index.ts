@@ -140,8 +140,12 @@ export abstract class SqlObjectIndex implements IObjectIndex {
    * オブジェクトを保存します。
    *
    * @param c 保存する操作のコンテキストです。
+   *
+   * @returns 削除フラグ付きレコードを置き換えた場合は、そのレコードの実体 ID です。
    */
-  public async upsert<TUserMetadata>(c: IObjectIndex.UpsertContext<TUserMetadata>): Promise<void> {
+  public async upsert<TUserMetadata>(
+    c: IObjectIndex.UpsertContext<TUserMetadata>,
+  ): Promise<string | undefined> {
     c.signal.throwIfAborted();
 
     using _lock = await asyncmux(this, c.signal);
@@ -176,10 +180,11 @@ export abstract class SqlObjectIndex implements IObjectIndex {
     const tags = [...new Set(object.tags)];
     const createdAt = normalizeTimestamp(object.createdAt, "upsert");
     const updatedAt = normalizeTimestamp(object.updatedAt, "upsert");
-    await kysely.transaction().execute(async (transaction) => {
+
+    return await kysely.transaction().execute(async (transaction) => {
       const existing = await transaction
         .selectFrom("journal")
-        .select(["key", "record_type"])
+        .select(["key", "entity_id", "record_type"])
         .where("key", "=", key)
         .executeTakeFirst();
       // S3 Metadata のジャーナルに合わせ、新規と削除済みからの復元は CREATE、既存の更新は UPDATE_METADATA とします。
@@ -242,6 +247,8 @@ export abstract class SqlObjectIndex implements IObjectIndex {
           )
           .execute();
       }
+
+      return existing?.record_type === "DELETE" ? existing.entity_id : undefined;
     });
   }
 
@@ -473,6 +480,30 @@ export abstract class SqlObjectIndex implements IObjectIndex {
   }
 
   /**
+   * 削除フラグが立ったレコードが存在するか確認します。
+   *
+   * @param c 確認する操作のコンテキストです。
+   *
+   * @returns 削除フラグ付きレコードが存在する場合は true です。
+   */
+  public async hasDeleted(c: IObjectIndex.HasDeletedContext): Promise<boolean> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux.readonly(this, c.signal);
+
+    const kysely = this.#requireOpen("hasDeleted");
+    const row = await kysely
+      .selectFrom("journal")
+      .select("key")
+      .where("key", "=", c.key.key)
+      .where("entity_id", "=", c.entityId)
+      .where("record_type", "=", "DELETE")
+      .executeTakeFirst();
+
+    return row !== undefined;
+  }
+
+  /**
    * オブジェクトに削除フラグを立てます。
    *
    * @param c 削除する操作のコンテキストです。
@@ -531,12 +562,17 @@ export abstract class SqlObjectIndex implements IObjectIndex {
     using _lock = await asyncmux(this, c.signal);
 
     const kysely = this.#requireOpen("purge");
-    const result = await kysely
+    let query = kysely
       .deleteFrom("journal")
       .where("key", "=", c.key.key)
       .where("entity_id", "=", c.entityId)
-      .where("record_type", "=", "DELETE")
-      .executeTakeFirst();
+      .where("record_type", "=", "DELETE");
+
+    if (c.before !== undefined) {
+      query = query.where("record_timestamp", "<=", normalizeTimestamp(c.before, "purge"));
+    }
+
+    const result = await query.executeTakeFirst();
     const deleted = result.numDeletedRows;
 
     return typeof deleted === "bigint" ? deleted > 0n : (deleted ?? 0) > 0;
@@ -578,6 +614,46 @@ export abstract class SqlObjectIndex implements IObjectIndex {
       .execute();
 
     return await this.#toListResult<TUserMetadata>(kysely, candidates, limit, offset);
+  }
+
+  /**
+   * 削除フラグが立ったオブジェクトを一覧します。
+   *
+   * @param c 一覧する操作のコンテキストです。
+   *
+   * @returns 削除フラグが立ったオブジェクトの一覧です。
+   */
+  public async listDeleted(
+    c: IObjectIndex.ListDeletedContext,
+  ): Promise<IObjectIndex.DeletedObject[]> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux.readonly(this, c.signal);
+
+    const kysely = this.#requireOpen("listDeleted");
+    const limit = c.limit ?? 100;
+
+    if (limit <= 0) {
+      return [];
+    }
+
+    let query = kysely
+      .selectFrom("journal")
+      .select(["key", "entity_id", "record_timestamp"])
+      .where("record_type", "=", "DELETE")
+      .where("record_timestamp", "<=", normalizeTimestamp(c.before, "listDeleted"));
+
+    if (c.afterKey !== undefined) {
+      query = query.where("key", ">", c.afterKey);
+    }
+
+    const rows = await query.orderBy("key").limit(limit).execute();
+
+    return rows.map((row) => ({
+      key: OmnioKey.parse(row.key),
+      entityId: row.entity_id,
+      recordTimestamp: row.record_timestamp,
+    }));
   }
 
   /**

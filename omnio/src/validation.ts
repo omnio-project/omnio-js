@@ -152,7 +152,9 @@ const IObjectIndexSchema = v.custom<IObjectIndex>((input) => {
       "get",
       "has",
       "delete",
+      "hasDeleted",
       "list",
+      "listDeleted",
       "search",
       "purge",
       "listDirty",
@@ -181,6 +183,9 @@ export const OmnioOptionsSchema = v.object({
   index: IObjectIndexSchema,
   entity: IOmnioEntityBuilderSchema,
   embedder: IEmbedderSchema,
+  purgeGracePeriodMs: v.optional(
+    v.pipe(v.number(), v.safeInteger(), v.minValue(0), v.maxValue(2_147_483_647)),
+  ),
 });
 
 /** メタデータの文字列に対する絞り込み条件を検証するスキーマです。 */

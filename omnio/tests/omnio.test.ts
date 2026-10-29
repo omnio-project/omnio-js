@@ -324,6 +324,7 @@ async function createTestOmnio(
     index,
     entity,
     embedder: new FakeEmbedder(),
+    purgeGracePeriodMs: 0,
   });
   await omnio.open(signal);
 
@@ -426,6 +427,24 @@ describe("コンストラクター", () => {
           index: {} as never,
           entity,
           embedder,
+        }),
+    ).toThrow(ValiError);
+    expect(
+      () =>
+        new Omnio({
+          index: new SqliteWasmIndex(),
+          entity,
+          embedder,
+          purgeGracePeriodMs: -1,
+        }),
+    ).toThrow(ValiError);
+    expect(
+      () =>
+        new Omnio({
+          index: new SqliteWasmIndex(),
+          entity,
+          embedder,
+          purgeGracePeriodMs: 2_147_483_648,
         }),
     ).toThrow(ValiError);
   });
@@ -2922,6 +2941,188 @@ describe("deleteObject", () => {
         entityId: stored.entityId,
       }),
     ).resolves.toBe(false);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("削除した実体は猶予期間が過ぎるまで物理削除しない", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = new Omnio({
+      index,
+      entity: builder,
+      embedder: new FakeEmbedder(),
+      purgeGracePeriodMs: 500,
+    });
+    await omnio.open(signal);
+
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    using _purge = vi.spyOn(index, "purge");
+
+    // 実行：
+    await omnio.deleteObject("k", signal);
+
+    // 検証：猶予期間中は物理削除しない。
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 100);
+    });
+    expect(_purge).not.toHaveBeenCalled();
+    expect(await getEntity().has(stored.entityId, { signal })).toBe(true);
+    await vi.waitFor(
+      async () => {
+        expect(await getEntity().has(stored.entityId, { signal })).toBe(false);
+      },
+      { timeout: 5000 },
+    );
+    expect(_purge).toHaveBeenCalled();
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("猶予期間中に閉じた削除は次の open で回収する", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex({
+      location: `/omnio-${crypto.randomUUID()}.sqlite3`,
+    });
+    const first = new Omnio({
+      index,
+      entity: builder,
+      embedder: new FakeEmbedder(),
+      purgeGracePeriodMs: 60_000,
+    });
+    await first.open(signal);
+
+    const stored = await first.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+
+    await first.deleteObject("k", signal);
+    expect(await getEntity().has(stored.entityId, { signal })).toBe(true);
+    await first.close(signal);
+
+    // 検証：猶予期間中に閉じても実体は残る。
+    const checker = new Omnio({
+      index,
+      entity: builder,
+      embedder: new FakeEmbedder(),
+      purgeGracePeriodMs: 60_000,
+    });
+    await checker.open(signal);
+
+    expect(await getEntity().has(stored.entityId, { signal })).toBe(true);
+    await checker.close(signal);
+
+    // 実行：猶予期間を過ぎた削除を、次の open で回収する。
+    const second = new Omnio({
+      index,
+      entity: builder,
+      embedder: new FakeEmbedder(),
+      purgeGracePeriodMs: 0,
+    });
+    await second.open(signal);
+
+    // 検証：
+    await vi.waitFor(
+      async () => {
+        expect(await getEntity().has(stored.entityId, { signal })).toBe(false);
+      },
+      { timeout: 5000 },
+    );
+
+    // 後始末：
+    await second.close(signal);
+  });
+
+  test("削除後に同じキーを再作成すると古い実体を削除する", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = new Omnio({
+      index,
+      entity: builder,
+      embedder: new FakeEmbedder(),
+      purgeGracePeriodMs: 60_000,
+    });
+    await omnio.open(signal);
+
+    const old = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+
+    await omnio.deleteObject("k", signal);
+
+    // 実行：
+    const current = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([2]),
+      contentType: "text/plain",
+    });
+
+    // 検証：
+    await vi.waitFor(
+      async () => {
+        expect(await getEntity().has(old.entityId, { signal })).toBe(false);
+      },
+      { timeout: 5000 },
+    );
+    expect(await getEntity().has(current.entityId, { signal })).toBe(true);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("削除後に複製先を再作成すると古い実体を削除する", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = new Omnio({
+      index,
+      entity: builder,
+      embedder: new FakeEmbedder(),
+      purgeGracePeriodMs: 60_000,
+    });
+    await omnio.open(signal);
+    await omnio.putObject({
+      key: "source",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+
+    const old = await omnio.putObject({
+      key: "dest",
+      data: new Uint8Array([2]),
+      contentType: "text/plain",
+    });
+
+    await omnio.deleteObject("dest", signal);
+
+    // 実行：
+    const copied = await omnio.copyObject("source", "dest", signal);
+
+    // 検証：
+    await vi.waitFor(
+      async () => {
+        expect(await getEntity().has(old.entityId, { signal })).toBe(false);
+      },
+      { timeout: 5000 },
+    );
+
+    expect(copied).not.toBeNull();
+
+    const current = copied as NonNullable<typeof copied>;
+    expect(await getEntity().has(current.entityId, { signal })).toBe(true);
 
     // 後始末：
     await omnio.close(signal);

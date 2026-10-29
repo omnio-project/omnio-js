@@ -113,6 +113,9 @@ describe("exports", () => {
     expectTypeOf<dbTypes.IGetContext>().toEqualTypeOf<core.IGetContext>();
     expectTypeOf<dbTypes.IHasContext>().toEqualTypeOf<core.IHasContext>();
     expectTypeOf<dbTypes.IDeleteContext>().toEqualTypeOf<core.IDeleteContext>();
+    expectTypeOf<dbTypes.IDeletedObject>().toEqualTypeOf<core.IDeletedObject>();
+    expectTypeOf<dbTypes.IHasDeletedContext>().toEqualTypeOf<core.IHasDeletedContext>();
+    expectTypeOf<dbTypes.IListDeletedContext>().toEqualTypeOf<core.IListDeletedContext>();
     expectTypeOf<dbTypes.IPurgeContext>().toEqualTypeOf<core.IPurgeContext>();
     expectTypeOf<dbTypes.IListContext>().toEqualTypeOf<core.IListContext>();
     expectTypeOf<dbTypes.IListDirtyContext>().toEqualTypeOf<core.IListDirtyContext>();

@@ -1102,6 +1102,78 @@ describe("delete", () => {
     });
   });
 
+  test("削除時刻を指定して物理削除を猶予する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const object = createObject("k1");
+    await index.upsert({
+      action: "upsert",
+      object,
+      signal,
+    });
+    await index.delete({
+      key: object.key,
+      action: "delete",
+      signal,
+    });
+
+    const now = new Date().toISOString();
+
+    // 実行：
+    const deleted = await index.listDeleted({
+      action: "listDeleted",
+      before: now,
+      signal,
+    });
+    const hasDeleted = await index.hasDeleted({
+      key: object.key,
+      action: "hasDeleted",
+      signal,
+      entityId: object.entityId,
+    });
+    const purgedTooEarly = await index.purge({
+      key: object.key,
+      action: "purge",
+      before: "2000-01-01T00:00:00.000Z",
+      signal,
+      entityId: object.entityId,
+    });
+    const stillDeleted = await index.hasDeleted({
+      key: object.key,
+      action: "hasDeleted",
+      signal,
+      entityId: object.entityId,
+    });
+    const purged = await index.purge({
+      key: object.key,
+      action: "purge",
+      before: new Date(Date.now() + 1000).toISOString(),
+      signal,
+      entityId: object.entityId,
+    });
+    const hasDeletedAfterPurge = await index.hasDeleted({
+      key: object.key,
+      action: "hasDeleted",
+      signal,
+      entityId: object.entityId,
+    });
+
+    // 検証：
+    expect(deleted.map((item) => item.key.key)).toStrictEqual(["k1"]);
+    expect(deleted[0]?.recordTimestamp).toBeTruthy();
+    expect(hasDeleted).toBe(true);
+    expect(purgedTooEarly).toBe(false);
+    expect(stillDeleted).toBe(true);
+    expect(purged).toBe(true);
+    expect(hasDeletedAfterPurge).toBe(false);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
   test("削除フラグ付きのキーを再保存すると復元する", async ({ expect, signal }) => {
     // 準備：
     const index = await createOpenedIndex(signal);
@@ -1123,7 +1195,7 @@ describe("delete", () => {
       entityId: crypto.randomUUID(),
       description: "復元した説明",
     };
-    await index.upsert({
+    const replacedDeletedEntityId = await index.upsert({
       action: "upsert",
       object: second,
       signal,
@@ -1142,6 +1214,7 @@ describe("delete", () => {
     });
 
     // 検証：
+    expect(replacedDeletedEntityId).toBe(first.entityId);
     expect(actual?.entityId).toBe(second.entityId);
     expect(actual?.description).toBe("復元した説明");
     expect(purgedOldEntity).toBe(false);
