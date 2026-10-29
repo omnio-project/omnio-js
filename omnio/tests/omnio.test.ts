@@ -3083,6 +3083,131 @@ describe("deleteObject", () => {
     await omnio.close(signal);
   });
 
+  test("索引更新前にクラッシュした実体も次の open で回収する", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex({
+      location: `/omnio-${crypto.randomUUID()}.sqlite3`,
+    });
+    const key = OmnioKey.parse("k");
+    const entityId = crypto.randomUUID();
+    await index.open({
+      action: "open",
+      signal,
+    });
+    await index.addPendingPurge({
+      key,
+      action: "addPendingPurge",
+      signal,
+      entityId,
+      createdAt: new Date().toISOString(),
+    });
+
+    const entity = builder.build();
+    await entity.open({ signal });
+    await entity.set(entityId, new Uint8Array([1]), { signal });
+    await entity.close({ signal });
+
+    await index.close({
+      action: "close",
+      signal,
+    });
+
+    // 実行：索引更新前にクラッシュした状態から開く。
+    const omnio = new Omnio({
+      index,
+      entity: builder,
+      embedder: new FakeEmbedder(),
+      purgeGracePeriodMs: 0,
+    });
+    await omnio.open(signal);
+
+    // 検証：
+    await vi.waitFor(
+      async () => {
+        expect(await getEntity().has(entityId, { signal })).toBe(false);
+      },
+      { timeout: 5000 },
+    );
+    expect(
+      await index.listPendingPurges({
+        action: "listPendingPurges",
+        signal,
+      }),
+    ).toStrictEqual([]);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("物理削除待ちの実体が rename で移動しても削除しない", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex({
+      location: `/omnio-${crypto.randomUUID()}.sqlite3`,
+    });
+    const first = new Omnio({
+      index,
+      entity: builder,
+      embedder: new FakeEmbedder(),
+      purgeGracePeriodMs: 0,
+    });
+    await first.open(signal);
+
+    const stored = await first.putObject({
+      key: "source",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+
+    await first.close(signal);
+    await index.open({
+      action: "open",
+      signal,
+    });
+    await index.addPendingPurge({
+      key: stored.key,
+      action: "addPendingPurge",
+      signal,
+      entityId: stored.entityId,
+      createdAt: new Date().toISOString(),
+    });
+    await index.rename({
+      action: "rename",
+      signal,
+      sourceKey: stored.key,
+      updatedAt: new Date().toISOString(),
+      destinationKey: OmnioKey.parse("dest"),
+    });
+    await index.close({
+      action: "close",
+      signal,
+    });
+
+    // 実行：
+    const second = new Omnio({
+      index,
+      entity: builder,
+      embedder: new FakeEmbedder(),
+      purgeGracePeriodMs: 0,
+    });
+    await second.open(signal);
+
+    // 検証：
+    expect(await second.getObject("dest", signal)).toStrictEqual(new Uint8Array([1]));
+
+    expect(await getEntity().has(stored.entityId, { signal })).toBe(true);
+    expect(
+      await index.listPendingPurges({
+        action: "listPendingPurges",
+        signal,
+      }),
+    ).toStrictEqual([]);
+
+    // 後始末：
+    await second.close(signal);
+  });
+
   test("削除後に複製先を再作成すると古い実体を削除する", async ({ expect, signal }) => {
     // 準備：
     const { builder, getEntity } = createInspectableTestEntity();

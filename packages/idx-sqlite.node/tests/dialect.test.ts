@@ -31,9 +31,10 @@ function requireMigration(name: string): Migration {
 describe("SqliteNodeDialect", () => {
   test("単一のマイグレーションで journal スキーマを作成する", async ({ expect }) => {
     // 準備：
-    expect(Object.keys(MIGRATIONS)).toStrictEqual([
+    expect(Object.keys(MIGRATIONS).toSorted()).toStrictEqual([
       "001_create_journal",
       "002_normalize_journal_timestamps",
+      "003_create_pending_purge",
     ]);
 
     const migration = requireMigration("001_create_journal");

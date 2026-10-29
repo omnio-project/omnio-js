@@ -2,6 +2,7 @@
  * 操作コンテキストの種別です。
  */
 export type ContextAction =
+  | "addPendingPurge"
   | "close"
   | "delete"
   | "embed"
@@ -10,10 +11,13 @@ export type ContextAction =
   | "get"
   | "has"
   | "hasDeleted"
+  | "hasEntity"
   | "list"
   | "listDeleted"
   | "listDirty"
+  | "listPendingPurges"
   | "markDirty"
+  | "removePendingPurge"
   | "open"
   | "purge"
   | "rename"

@@ -28,9 +28,10 @@ function requireMigration(name: string): Migration {
 describe("マイグレーション", () => {
   test("journal スキーマを作成し、タグを外部キーで連動させる", async ({ expect }) => {
     // 準備：
-    expect(Object.keys(MIGRATIONS)).toStrictEqual([
+    expect(Object.keys(MIGRATIONS).toSorted()).toStrictEqual([
       "001_create_journal",
       "002_normalize_journal_timestamps",
+      "003_create_pending_purge",
     ]);
 
     const migration = requireMigration("001_create_journal");

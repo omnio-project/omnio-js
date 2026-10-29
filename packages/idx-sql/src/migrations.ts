@@ -170,6 +170,34 @@ async function up002(db: Kysely<SqlIndexDatabase>): Promise<void> {
 }
 
 /**
+ * 物理削除を待つ実体の表を作成します。
+ *
+ * @param db kysely のインスタンスです。
+ */
+async function up003(db: Kysely<SqlIndexDatabase>): Promise<void> {
+  await db.schema
+    .createTable("pending_purge")
+    .addColumn("entity_id", "text", (column) => column.notNull().primaryKey())
+    .addColumn("key", "text", (column) => column.notNull())
+    .addColumn("created_at", "text", (column) => column.notNull())
+    .execute();
+  await db.schema
+    .createIndex("pending_purge_created_at_index")
+    .on("pending_purge")
+    .column("created_at")
+    .execute();
+}
+
+/**
+ * 物理削除を待つ実体の表を削除します。
+ *
+ * @param db kysely のインスタンスです。
+ */
+async function down003(db: Kysely<SqlIndexDatabase>): Promise<void> {
+  await db.schema.dropTable("pending_purge").execute();
+}
+
+/**
  * 適用するマイグレーションの一覧を構築します。キー名の辞書順で実行します。
  *
  * @param options 列の型の設定です。
@@ -181,6 +209,10 @@ export function createSqlMigrations(options: SqlMigrationOptions): Record<string
     "001_create_journal": {
       up: (db) => up001(db, options),
       down: down001,
+    },
+    "003_create_pending_purge": {
+      up: up003,
+      down: down003,
     },
     "002_normalize_journal_timestamps": {
       up: up002,

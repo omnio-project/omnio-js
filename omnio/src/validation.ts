@@ -144,6 +144,7 @@ const IOmnioEntityBuilderSchema = v.custom<IOmnioEntityBuilder>((input) =>
 const IObjectIndexSchema = v.custom<IObjectIndex>((input) => {
   if (
     !hasFunctions(input, [
+      "addPendingPurge",
       "open",
       "close",
       "upsert",
@@ -153,8 +154,11 @@ const IObjectIndexSchema = v.custom<IObjectIndex>((input) => {
       "has",
       "delete",
       "hasDeleted",
+      "hasEntity",
       "list",
       "listDeleted",
+      "listPendingPurges",
+      "removePendingPurge",
       "search",
       "purge",
       "listDirty",

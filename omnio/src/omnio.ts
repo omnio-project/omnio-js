@@ -39,6 +39,9 @@ const DEFAULT_PURGE_GRACE_PERIOD_MS = 60_000;
 /** 削除済みオブジェクトを一度に取得する最大件数です。 */
 const DELETED_BATCH_SIZE = 100;
 
+/** 物理削除待ちの実体を一度に処理する最大件数です。 */
+const PENDING_PURGE_BATCH_SIZE = 100;
+
 /** `setTimeout` に指定できる最大待ち時間です。ミリ秒単位で表します。 */
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
@@ -433,6 +436,8 @@ function checksumVars(
  *
  * 同じキーへの書き込み系の操作とバックグラウンドの削除は、キー単位の排他ロックで直列化します。
  * キーをまたぐ操作は、キーを並べ替えて取得することでデッドロックを防ぎます。
+ * 物理削除の予約はインデックスに永続化するため、単一プロセスのクラッシュからは復旧できます。
+ * 複数プロセスで同じインデックスを共有する場合は、データベース側の排他制御が別途必要です。
  *
  * `open` と `close` は、シグナルを省略した場合に 30 秒でタイムアウトします。指定した場合はそのシグナルに従います。
  * それ以外のメソッドは、呼び出し側のシグナルと `close` 時に中断されるライフサイクルシグナルを合成し、先に中断された方に従います。
@@ -566,6 +571,7 @@ export class Omnio {
 
     this.#opened = true;
     this.#deletions.schedule("purgeExpired", () => this.#schedulePendingPurges());
+    this.#deletions.schedule("pendingPurges", () => this.#drainPendingPurges());
     this.#reindex.schedule("reindex", () => this.#drainDirtyObjects());
   }
 
@@ -707,6 +713,14 @@ export class Omnio {
     const now = new Date().toISOString();
     // 実体は不変であるため、上書きでも既存の entityId を再利用しません。
     const entityId = crypto.randomUUID();
+    // 実体の書き込み前に物理削除の予約を永続化し、途中でクラッシュしても孤児を回収できるようにします。
+    await this.#index.addPendingPurge({
+      key,
+      action: "addPendingPurge",
+      signal: active,
+      entityId,
+      createdAt: now,
+    });
 
     try {
       const hash = await this.#setEntity(entityId, bytes, active);
@@ -727,23 +741,14 @@ export class Omnio {
         embeddingModel,
         embeddingSource,
       };
-      const replacedDeletedEntityId = await this.#index.upsert({
+      await this.#index.upsert({
         action: "upsert",
         object,
         signal: active,
       });
 
-      if (existing !== null && existing.entityId !== entityId) {
-        this.#enqueueDiscardedEntity(key, existing.entityId);
-      }
-
-      if (
-        replacedDeletedEntityId !== undefined &&
-        replacedDeletedEntityId !== entityId &&
-        replacedDeletedEntityId !== existing?.entityId
-      ) {
-        this.#enqueueDiscardedEntity(key, replacedDeletedEntityId);
-      }
+      await this.#removePendingPurgeBestEffort(entityId, active);
+      this.#schedulePendingPurgeDrain();
 
       return object;
     } catch (ex) {
@@ -752,6 +757,7 @@ export class Omnio {
         entityId,
         AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
       ).catch(() => undefined);
+      this.#schedulePendingPurgeDrain();
       throw ex;
     }
   }
@@ -807,6 +813,15 @@ export class Omnio {
     const now = new Date().toISOString();
     // 実体は不変であるため、上書きでも複製先の entityId を再利用しません。
     const entityId = crypto.randomUUID();
+    // 実体の書き込み前に物理削除の予約を永続化し、途中でクラッシュしても孤児を回収できるようにします。
+    await this.#index.addPendingPurge({
+      key: destinationObjectKey,
+      action: "addPendingPurge",
+      signal: active,
+      entityId,
+      createdAt: now,
+    });
+
     let copied = false;
 
     try {
@@ -830,27 +845,25 @@ export class Omnio {
         embeddingModel: source.embeddingModel,
         embeddingSource: source.embeddingSource,
       };
-      const replacedDeletedEntityId = await this.#index.upsert({
+      await this.#index.upsert({
         action: "upsert",
         object,
         signal: active,
       });
 
-      if (existing !== null && existing.entityId !== entityId) {
-        this.#enqueueDiscardedEntity(destinationObjectKey, existing.entityId);
-      }
-
-      if (
-        replacedDeletedEntityId !== undefined &&
-        replacedDeletedEntityId !== entityId &&
-        replacedDeletedEntityId !== existing?.entityId
-      ) {
-        this.#enqueueDiscardedEntity(destinationObjectKey, replacedDeletedEntityId);
-      }
+      await this.#removePendingPurgeBestEffort(entityId, active);
+      this.#schedulePendingPurgeDrain();
 
       return object;
     } catch (ex) {
       if (!copied && ex instanceof KeyNotFoundError) {
+        await this.#deleteUnreferencedEntity(
+          destinationObjectKey,
+          entityId,
+          AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
+        ).catch(() => undefined);
+        this.#schedulePendingPurgeDrain();
+
         return null;
       }
 
@@ -859,6 +872,7 @@ export class Omnio {
         entityId,
         AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
       ).catch(() => undefined);
+      this.#schedulePendingPurgeDrain();
       throw ex;
     }
   }
@@ -911,11 +925,7 @@ export class Omnio {
       return null;
     }
 
-    const replacedEntityId = renamed.replacedEntityId;
-
-    if (replacedEntityId !== undefined && replacedEntityId !== renamed.object.entityId) {
-      this.#enqueueDiscardedEntity(destinationObjectKey, replacedEntityId);
-    }
+    this.#schedulePendingPurgeDrain();
 
     return renamed.object;
   }
@@ -1696,31 +1706,140 @@ export class Omnio {
   }
 
   /**
-   * キー変更で置き換えられた実体の削除を予約します。
+   * 物理削除待ちの予約を、失敗しても処理を継続する形で削除します。
    *
-   * 置き換えられたレコードは索引から削除され、削除フラグ付きレコードを持ちません。
-   * そのため、同じキーが現在も同じ実体を参照していないことを確認してから実体だけを削除します。
-   *
-   * @param key 置き換えられたオブジェクトのキーです。
-   * @param entityId 削除する実体 ID です。
+   * @param entityId 予約を削除する実体 ID です。
+   * @param signal 処理を中断するための中断シグナルです。
    */
-  #enqueueDiscardedEntity(key: OmnioKey, entityId: string): void {
-    const timer = this.#purgeTimers.get(entityId);
+  async #removePendingPurgeBestEffort(entityId: string, signal: AbortSignal): Promise<void> {
+    await Promise.resolve()
+      .then(() =>
+        this.#index.removePendingPurge({
+          action: "removePendingPurge",
+          signal,
+          entityId,
+        }),
+      )
+      .catch(() => undefined);
+  }
 
-    if (timer !== undefined) {
-      clearTimeout(timer);
-      this.#purgeTimers.delete(entityId);
-    }
+  /**
+   * 物理削除待ちの実体の回収を予約します。
+   */
+  #schedulePendingPurgeDrain(): void {
+    this.#deletions.schedule("pendingPurges", () => this.#drainPendingPurges());
+  }
 
-    this.#deletions.schedule(entityId, async () => {
-      const signal = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+  /**
+   * 永続化された物理削除待ちの実体を処理します。
+   */
+  async #drainPendingPurges(): Promise<void> {
+    let afterEntityId: string | undefined;
+    const seenAnchors = new Set<string>();
+
+    for (;;) {
+      const signal = AbortSignal.any([
+        this.#lifecycle.signal,
+        AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
+      ]);
       using _lock = await asyncmux.readonly(this, signal);
 
       if (!this.#opened) {
         return;
       }
 
-      await this.#discardEntity(key, entityId, signal);
+      const pending = await this.#index.listPendingPurges({
+        limit: PENDING_PURGE_BATCH_SIZE,
+        action: "listPendingPurges",
+        signal,
+        afterEntityId,
+      });
+
+      if (pending.length === 0) {
+        return;
+      }
+
+      for (const item of pending) {
+        const itemSignal = AbortSignal.any([
+          this.#lifecycle.signal,
+          AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
+        ]);
+
+        try {
+          using _keyLock = await this.#lockKeys(itemSignal, [item.key]);
+
+          await this.#processPendingPurge(item.key, item.entityId, itemSignal);
+        } catch (ex) {
+          if (this.#lifecycle.signal.aborted) {
+            throw ex;
+          }
+
+          // 失敗した予約は次回の open 時の走査に任せます。
+        }
+      }
+
+      const nextAfterEntityId = pending.at(-1)?.entityId;
+
+      if (
+        nextAfterEntityId === undefined ||
+        seenAnchors.has(nextAfterEntityId) ||
+        pending.length < PENDING_PURGE_BATCH_SIZE
+      ) {
+        return;
+      }
+
+      seenAnchors.add(nextAfterEntityId);
+      afterEntityId = nextAfterEntityId;
+    }
+  }
+
+  /**
+   * 物理削除待ちの実体を 1 件処理します。
+   *
+   * 呼び出し側はキー付き排他ロックを保持してください。
+   *
+   * @param key 予約に保存されたキーです。
+   * @param entityId 削除する実体 ID です。
+   * @param signal 処理を中断するための中断シグナルです。
+   */
+  async #processPendingPurge(key: OmnioKey, entityId: string, signal: AbortSignal): Promise<void> {
+    const current = await this.#index.get<unknown>({
+      key,
+      action: "get",
+      signal,
+    });
+
+    if (current !== null && current.entityId === entityId) {
+      await this.#index.removePendingPurge({
+        action: "removePendingPurge",
+        signal,
+        entityId,
+      });
+
+      return;
+    }
+
+    const referencedElsewhere = await this.#index.hasEntity({
+      action: "hasEntity",
+      signal,
+      entityId,
+    });
+
+    if (referencedElsewhere) {
+      // 別のキーが参照している可能性があるため、予約は残して次の走査に任せます。
+      return;
+    }
+
+    const hasEntity = await this.#entity.has(entityId, { signal });
+
+    if (hasEntity) {
+      await this.#entity.delete(entityId, { signal });
+    }
+
+    await this.#index.removePendingPurge({
+      action: "removePendingPurge",
+      signal,
+      entityId,
     });
   }
 
@@ -1756,20 +1875,7 @@ export class Omnio {
   }
 
   /**
-   * キー変更で置き換えられた実体を削除します。
-   *
-   * @param key 実体を参照していたキーです。
-   * @param entityId 削除する実体 ID です。
-   * @param signal 処理を中断するための中断シグナルです。
-   */
-  async #discardEntity(key: OmnioKey, entityId: string, signal: AbortSignal): Promise<void> {
-    using _keyLock = await this.#lockKeys(signal, [key]);
-
-    await this.#deleteUnreferencedEntity(key, entityId, signal);
-  }
-
-  /**
-   * オブジェクトの実体を削除し、ObjectIndex の削除フラグ付きレコードを物理削除します。
+   * 削除フラグ付きレコードを物理削除待ちに移し、実体を削除します。
    *
    * @param key 削除するオブジェクトのキーです。
    * @param entityId 削除する実体 ID です。
@@ -1806,15 +1912,15 @@ export class Omnio {
         return;
       }
 
-      await this.#deleteUnreferencedEntity(key, entityId, signal);
+      this.#schedulePendingPurgeDrain();
 
       return;
     }
 
-    const hasEntity = await this.#entity.has(entityId, { signal });
-
-    if (hasEntity) {
-      await this.#entity.delete(entityId, { signal });
+    try {
+      await this.#processPendingPurge(key, entityId, signal);
+    } finally {
+      this.#schedulePendingPurgeDrain();
     }
   }
 

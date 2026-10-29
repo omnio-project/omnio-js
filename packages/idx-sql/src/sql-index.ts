@@ -141,7 +141,7 @@ export abstract class SqlObjectIndex implements IObjectIndex {
    *
    * @param c 保存する操作のコンテキストです。
    *
-   * @returns 削除フラグ付きレコードを置き換えた場合は、そのレコードの実体 ID です。
+   * @returns 既存レコードを置き換えた場合は、置き換え前の実体 ID です。
    */
   public async upsert<TUserMetadata>(
     c: IObjectIndex.UpsertContext<TUserMetadata>,
@@ -248,7 +248,21 @@ export abstract class SqlObjectIndex implements IObjectIndex {
           .execute();
       }
 
-      return existing?.record_type === "DELETE" ? existing.entity_id : undefined;
+      if (existing !== undefined && existing.entity_id !== object.entityId) {
+        await transaction
+          .insertInto("pending_purge")
+          .values({
+            key,
+            entity_id: existing.entity_id,
+            created_at: updatedAt,
+          })
+          .onConflict((conflict) => conflict.column("entity_id").doNothing())
+          .execute();
+      }
+
+      return existing !== undefined && existing.entity_id !== object.entityId
+        ? existing.entity_id
+        : undefined;
     });
   }
 
@@ -401,10 +415,27 @@ export abstract class SqlObjectIndex implements IObjectIndex {
 
       if (destinationRow !== undefined) {
         await transaction.deleteFrom("journal").where("key", "=", c.destinationKey.key).execute();
+
+        if (destinationRow.entity_id !== sourceRow.entity_id) {
+          await transaction
+            .insertInto("pending_purge")
+            .values({
+              key: c.destinationKey.key,
+              entity_id: destinationRow.entity_id,
+              created_at: updatedAt,
+            })
+            .onConflict((conflict) => conflict.column("entity_id").doNothing())
+            .execute();
+        }
       }
 
       await transaction.deleteFrom("journal").where("key", "=", c.sourceKey.key).execute();
       await transaction.insertInto("journal").values(renamedRow).execute();
+      await transaction
+        .updateTable("pending_purge")
+        .set({ key: c.destinationKey.key })
+        .where("entity_id", "=", sourceRow.entity_id)
+        .execute();
 
       if (tags.length > 0) {
         await transaction
@@ -504,6 +535,28 @@ export abstract class SqlObjectIndex implements IObjectIndex {
   }
 
   /**
+   * 実体 ID が索引から参照されているか確認します。
+   *
+   * @param c 確認する操作のコンテキストです。
+   *
+   * @returns 参照されている場合は true です。
+   */
+  public async hasEntity(c: IObjectIndex.HasEntityContext): Promise<boolean> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux.readonly(this, c.signal);
+
+    const kysely = this.#requireOpen("hasEntity");
+    const row = await kysely
+      .selectFrom("journal")
+      .select("key")
+      .where("entity_id", "=", c.entityId)
+      .executeTakeFirst();
+
+    return row !== undefined;
+  }
+
+  /**
    * オブジェクトに削除フラグを立てます。
    *
    * @param c 削除する操作のコンテキストです。
@@ -562,20 +615,51 @@ export abstract class SqlObjectIndex implements IObjectIndex {
     using _lock = await asyncmux(this, c.signal);
 
     const kysely = this.#requireOpen("purge");
-    let query = kysely
-      .deleteFrom("journal")
-      .where("key", "=", c.key.key)
-      .where("entity_id", "=", c.entityId)
-      .where("record_type", "=", "DELETE");
+    const before = c.before === undefined ? undefined : normalizeTimestamp(c.before, "purge");
+    const createdAt = normalizeTimestamp(new Date(), "purge");
 
-    if (c.before !== undefined) {
-      query = query.where("record_timestamp", "<=", normalizeTimestamp(c.before, "purge"));
-    }
+    return await kysely.transaction().execute(async (transaction) => {
+      let query = transaction
+        .selectFrom("journal")
+        .select(["key", "entity_id"])
+        .where("key", "=", c.key.key)
+        .where("entity_id", "=", c.entityId)
+        .where("record_type", "=", "DELETE");
 
-    const result = await query.executeTakeFirst();
-    const deleted = result.numDeletedRows;
+      if (before !== undefined) {
+        query = query.where("record_timestamp", "<=", before);
+      }
 
-    return typeof deleted === "bigint" ? deleted > 0n : (deleted ?? 0) > 0;
+      const row = await query.executeTakeFirst();
+
+      if (row === undefined) {
+        return false;
+      }
+
+      const deleted = await transaction
+        .deleteFrom("journal")
+        .where("key", "=", row.key)
+        .where("entity_id", "=", row.entity_id)
+        .where("record_type", "=", "DELETE")
+        .executeTakeFirst();
+      const deletedCount = deleted.numDeletedRows;
+
+      if (!(typeof deletedCount === "bigint" ? deletedCount > 0n : (deletedCount ?? 0) > 0)) {
+        return false;
+      }
+
+      await transaction
+        .insertInto("pending_purge")
+        .values({
+          key: row.key,
+          entity_id: row.entity_id,
+          created_at: createdAt,
+        })
+        .onConflict((conflict) => conflict.column("entity_id").doNothing())
+        .execute();
+
+      return true;
+    });
   }
 
   /**
@@ -654,6 +738,86 @@ export abstract class SqlObjectIndex implements IObjectIndex {
       entityId: row.entity_id,
       recordTimestamp: row.record_timestamp,
     }));
+  }
+
+  /**
+   * 物理削除を待つ実体の予約を追加します。
+   *
+   * @param c 予約を追加する操作のコンテキストです。
+   */
+  public async addPendingPurge(c: IObjectIndex.AddPendingPurgeContext): Promise<void> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux(this, c.signal);
+
+    const kysely = this.#requireOpen("addPendingPurge");
+    await kysely
+      .insertInto("pending_purge")
+      .values({
+        key: c.key.key,
+        entity_id: c.entityId,
+        created_at: normalizeTimestamp(c.createdAt, "addPendingPurge"),
+      })
+      .onConflict((conflict) => conflict.column("entity_id").doNothing())
+      .execute();
+  }
+
+  /**
+   * 物理削除を待つ実体を一覧します。
+   *
+   * @param c 一覧する操作のコンテキストです。
+   *
+   * @returns 物理削除を待つ実体の一覧です。
+   */
+  public async listPendingPurges(
+    c: IObjectIndex.ListPendingPurgesContext,
+  ): Promise<IObjectIndex.PendingPurge[]> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux.readonly(this, c.signal);
+
+    const kysely = this.#requireOpen("listPendingPurges");
+    const limit = c.limit ?? 100;
+
+    if (limit <= 0) {
+      return [];
+    }
+
+    let query = kysely.selectFrom("pending_purge").select(["entity_id", "key", "created_at"]);
+
+    if (c.afterEntityId !== undefined) {
+      query = query.where("entity_id", ">", c.afterEntityId);
+    }
+
+    const rows = await query.orderBy("entity_id").limit(limit).execute();
+
+    return rows.map((row) => ({
+      key: OmnioKey.parse(row.key),
+      entityId: row.entity_id,
+      createdAt: row.created_at,
+    }));
+  }
+
+  /**
+   * 物理削除を待つ実体の予約を削除します。
+   *
+   * @param c 予約を削除する操作のコンテキストです。
+   *
+   * @returns 予約を削除した場合は true です。
+   */
+  public async removePendingPurge(c: IObjectIndex.RemovePendingPurgeContext): Promise<boolean> {
+    c.signal.throwIfAborted();
+
+    using _lock = await asyncmux(this, c.signal);
+
+    const kysely = this.#requireOpen("removePendingPurge");
+    const result = await kysely
+      .deleteFrom("pending_purge")
+      .where("entity_id", "=", c.entityId)
+      .executeTakeFirst();
+    const deleted = result.numDeletedRows;
+
+    return typeof deleted === "bigint" ? deleted > 0n : (deleted ?? 0) > 0;
   }
 
   /**

@@ -1226,6 +1226,147 @@ describe("delete", () => {
     });
   });
 
+  test("置き換えた実体を物理削除待ちとして永続化する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const first = createObject("k");
+    await index.upsert({
+      action: "upsert",
+      object: first,
+      signal,
+    });
+
+    const second = {
+      ...createObject("k"),
+      entityId: crypto.randomUUID(),
+    };
+
+    // 実行：
+    const replaced = await index.upsert({
+      action: "upsert",
+      object: second,
+      signal,
+    });
+    const pending = await index.listPendingPurges({
+      limit: 10,
+      action: "listPendingPurges",
+      signal,
+    });
+    const removed = await index.removePendingPurge({
+      action: "removePendingPurge",
+      signal,
+      entityId: first.entityId,
+    });
+    const remaining = await index.listPendingPurges({
+      action: "listPendingPurges",
+      signal,
+    });
+
+    // 検証：
+    expect(replaced).toBe(first.entityId);
+    expect(pending.map((item) => item.entityId)).toStrictEqual([first.entityId]);
+    expect(pending[0]?.key.key).toBe("k");
+    expect(removed).toBe(true);
+    expect(remaining).toStrictEqual([]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("実体 ID の参照を削除済みも含めて確認する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const object = createObject("k");
+    await index.upsert({
+      action: "upsert",
+      object,
+      signal,
+    });
+
+    const live = await index.hasEntity({
+      action: "hasEntity",
+      signal,
+      entityId: object.entityId,
+    });
+
+    await index.delete({
+      key: object.key,
+      action: "delete",
+      signal,
+    });
+    const deleted = await index.hasEntity({
+      action: "hasEntity",
+      signal,
+      entityId: object.entityId,
+    });
+
+    await index.purge({
+      key: object.key,
+      action: "purge",
+      before: new Date(Date.now() + 1000).toISOString(),
+      signal,
+      entityId: object.entityId,
+    });
+    const missing = await index.hasEntity({
+      action: "hasEntity",
+      signal,
+      entityId: object.entityId,
+    });
+
+    // 検証：
+    expect(live).toBe(true);
+    expect(deleted).toBe(true);
+    expect(missing).toBe(false);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("purge した実体を物理削除待ちとして永続化する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    const object = createObject("k");
+    await index.upsert({
+      action: "upsert",
+      object,
+      signal,
+    });
+    await index.delete({
+      key: object.key,
+      action: "delete",
+      signal,
+    });
+
+    // 実行：
+    const purged = await index.purge({
+      key: object.key,
+      action: "purge",
+      before: new Date(Date.now() + 1000).toISOString(),
+      signal,
+      entityId: object.entityId,
+    });
+    const pending = await index.listPendingPurges({
+      action: "listPendingPurges",
+      signal,
+    });
+
+    // 検証：
+    expect(purged).toBe(true);
+    expect(pending.map((item) => item.entityId)).toStrictEqual([object.entityId]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
   test("存在しないキーの削除は false である", async ({ expect, signal }) => {
     // 準備：
     const index = await createOpenedIndex(signal);

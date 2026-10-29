@@ -185,6 +185,73 @@ export interface IHasDeletedContext extends IActionContext {
 }
 
 /**
+ * 実体 ID が索引から参照されているか確認する操作のコンテキストです。
+ */
+export interface IHasEntityContext extends IActionContext {
+  /** 操作の種別です。 */
+  readonly action: "hasEntity";
+
+  /** 確認する実体 ID です。 */
+  readonly entityId: string;
+}
+
+/**
+ * 物理削除を待つ実体の参照情報です。
+ */
+export type IPendingPurge = {
+  /** 物理削除する実体 ID です。 */
+  readonly entityId: string;
+
+  /** 予約に保存されたオブジェクトのキーです。実体が移動した場合は更新されます。 */
+  readonly key: OmnioKey;
+
+  /** 物理削除の予約時刻です。ISO 8601 文字列で表します。 */
+  readonly createdAt: string;
+};
+
+/**
+ * 物理削除を待つ実体の予約を追加する操作のコンテキストです。
+ */
+export interface IAddPendingPurgeContext extends IActionContext {
+  /** 操作の種別です。 */
+  readonly action: "addPendingPurge";
+
+  /** 予約時刻です。ISO 8601 文字列で表します。 */
+  readonly createdAt: string;
+
+  /** 物理削除する実体 ID です。 */
+  readonly entityId: string;
+
+  /** 実体を参照する予定のオブジェクトのキーです。 */
+  readonly key: OmnioKey;
+}
+
+/**
+ * 物理削除を待つ実体を一覧する操作のコンテキストです。
+ */
+export interface IListPendingPurgesContext extends IActionContext {
+  /** 操作の種別です。 */
+  readonly action: "listPendingPurges";
+
+  /** この実体 ID より後ろの予約だけを取得します。 */
+  readonly afterEntityId?: string | undefined;
+
+  /** 取得する最大件数です。 */
+  readonly limit?: number | undefined;
+}
+
+/**
+ * 物理削除を待つ実体の予約を削除する操作のコンテキストです。
+ */
+export interface IRemovePendingPurgeContext extends IActionContext {
+  /** 操作の種別です。 */
+  readonly action: "removePendingPurge";
+
+  /** 削除する予約の実体 ID です。 */
+  readonly entityId: string;
+}
+
+/**
  * 再インデックスが必要なオブジェクトに dirty フラグを立てる操作のコンテキストです。
  */
 export interface IMarkDirtyContext extends IActionContext {
@@ -252,6 +319,11 @@ export interface ISearchContext extends IActionContext {
  */
 export namespace IObjectIndex {
   /**
+   * 物理削除を待つ実体の予約を追加する操作のコンテキストです。
+   */
+  export type AddPendingPurgeContext = IAddPendingPurgeContext;
+
+  /**
    * 閉じる操作のコンテキストです。
    */
   export type CloseContext = ICloseContext;
@@ -282,6 +354,11 @@ export namespace IObjectIndex {
   export type HasDeletedContext = IHasDeletedContext;
 
   /**
+   * 実体 ID が索引から参照されているか確認する操作のコンテキストです。
+   */
+  export type HasEntityContext = IHasEntityContext;
+
+  /**
    * 一覧する操作のコンテキストです。
    */
   export type ListContext = IListContext;
@@ -290,6 +367,21 @@ export namespace IObjectIndex {
    * 削除フラグが立ったオブジェクトを一覧する操作のコンテキストです。
    */
   export type ListDeletedContext = IListDeletedContext;
+
+  /**
+   * 物理削除を待つ実体を一覧する操作のコンテキストです。
+   */
+  export type ListPendingPurgesContext = IListPendingPurgesContext;
+
+  /**
+   * 物理削除を待つ実体の参照情報です。
+   */
+  export type PendingPurge = IPendingPurge;
+
+  /**
+   * 物理削除を待つ実体の予約を削除する操作のコンテキストです。
+   */
+  export type RemovePendingPurgeContext = IRemovePendingPurgeContext;
 
   /**
    * オブジェクトの一覧結果です。
@@ -395,7 +487,7 @@ export interface IObjectIndex {
    *
    * @param c 保存する操作のコンテキストです。
    *
-   * @returns 削除フラグ付きレコードを置き換えた場合は、そのレコードの実体 ID を解決する Promise です。
+   * @returns 既存レコードを置き換えた場合は、置き換え前の実体 ID を解決する Promise です。
    */
   upsert<TUserMetadata>(
     c: IObjectIndex.UpsertContext<TUserMetadata>,
@@ -462,14 +554,14 @@ export interface IObjectIndex {
   delete(c: IObjectIndex.DeleteContext): MaybePromise<boolean>;
 
   /**
-   * 削除フラグが立ったオブジェクトを物理削除します。
+   * 削除フラグが立ったレコードを物理削除の対象にします。
    *
-   * `entityId` とキーが一致する削除フラグ付きレコードだけを削除します。
+   * `entityId` とキーが一致する削除フラグ付きレコードを削除し、同じトランザクションで実体の物理削除予約を記録します。
    * `before` が指定された場合は、その時刻以前に削除されたレコードだけを対象にします。
    *
    * @param c 物理削除する操作のコンテキストです。
    *
-   * @returns 物理削除した場合は true、対象が存在しなかった場合は false を解決する Promise です。
+   * @returns 物理削除の予約を作成した場合は true、対象が存在しなかった場合は false を解決する Promise です。
    */
   purge(c: IObjectIndex.PurgeContext): MaybePromise<boolean>;
 
@@ -483,6 +575,17 @@ export interface IObjectIndex {
    * @returns 削除フラグ付きレコードが存在する場合は true を解決する Promise です。
    */
   hasDeleted(c: IObjectIndex.HasDeletedContext): MaybePromise<boolean>;
+
+  /**
+   * 実体 ID が索引から参照されているか確認します。
+   *
+   * 削除フラグ付きレコードも参照として扱います。
+   *
+   * @param c 確認する操作のコンテキストです。
+   *
+   * @returns 参照されている場合は true を解決する Promise です。
+   */
+  hasEntity(c: IObjectIndex.HasEntityContext): MaybePromise<boolean>;
 
   /**
    * オブジェクトを一覧します。
@@ -503,6 +606,37 @@ export interface IObjectIndex {
    * @returns 削除フラグが立ったオブジェクトの一覧を解決する Promise です。
    */
   listDeleted(c: IObjectIndex.ListDeletedContext): MaybePromise<IObjectIndex.DeletedObject[]>;
+
+  /**
+   * 物理削除を待つ実体の予約を追加します。
+   *
+   * 実体の書き込み前に予約しておくことで、書き込み途中のクラッシュでも孤児を回収できます。
+   *
+   * @param c 予約を追加する操作のコンテキストです。
+   */
+  addPendingPurge(c: IObjectIndex.AddPendingPurgeContext): MaybePromise<void>;
+
+  /**
+   * 物理削除を待つ実体を一覧します。
+   *
+   * @param c 一覧する操作のコンテキストです。
+   *
+   * @returns 物理削除を待つ実体の一覧を解決する Promise です。
+   */
+  listPendingPurges(
+    c: IObjectIndex.ListPendingPurgesContext,
+  ): MaybePromise<IObjectIndex.PendingPurge[]>;
+
+  /**
+   * 物理削除を待つ実体の予約を削除します。
+   *
+   * 実体を削除した後、または書き込み前の予約が不要になったときに呼び出します。
+   *
+   * @param c 予約を削除する操作のコンテキストです。
+   *
+   * @returns 予約を削除した場合は true を解決する Promise です。
+   */
+  removePendingPurge(c: IObjectIndex.RemovePendingPurgeContext): MaybePromise<boolean>;
 
   /**
    * 埋め込みモデルが変わったオブジェクトに dirty フラグを立てます。

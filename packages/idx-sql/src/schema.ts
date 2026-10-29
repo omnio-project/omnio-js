@@ -76,6 +76,20 @@ export type SqlObjectTagRow = {
 };
 
 /**
+ * 物理削除を待つ実体の表の行です。
+ */
+export type SqlPendingPurgeRow = {
+  /** 物理削除を待つ実体 ID です。 */
+  readonly entity_id: string;
+
+  /** 予約に保存されたオブジェクトのキーです。実体が移動した場合は更新されます。 */
+  readonly key: string;
+
+  /** 予約時刻です。ISO 8601 文字列で表します。 */
+  readonly created_at: string;
+};
+
+/**
  * SQL インデックスが扱うデータベースの表定義です。
  */
 export type SqlIndexDatabase = {
@@ -84,4 +98,7 @@ export type SqlIndexDatabase = {
 
   /** タグの表です。 */
   readonly object_tag: SqlObjectTagRow;
+
+  /** 物理削除を待つ実体の表です。 */
+  readonly pending_purge: SqlPendingPurgeRow;
 };
