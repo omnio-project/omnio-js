@@ -4,9 +4,11 @@
  *
  * Runtime dependencies only (`dependencies` + `peerDependencies` + `optionalDependencies`). `devDependencies` are ignored because they would needlessly push leaf packages such as `@unikvs/testing` to the front.
  *
+ * Glob patterns are not supported. Every `workspaces` entry must be an explicit directory.
+ *
  * Usage: node scripts/sort-workspaces.mjs [--fix] [--root <dir>]
  *
- * - Without flags: check only. Exit 1 (without writing) when the order would change.
+ * - Without flags: check only. Exit 1 (without writing) when the order would change or a glob is present.
  *   This is what `mise run test:check` relies on.
  * - `--fix`: rewrite `package.json` in place when the order changes.
  *   This is what `mise run check` relies on.
@@ -27,7 +29,11 @@ Options:
   --fix         Rewrite package.json when the order changes.
                 Without this flag the script only checks and exits 1 on mismatch.
   --root <dir>  Repository root holding package.json (default: cwd).
-  -h, --help    Show this help.`);
+  -h, --help    Show this help.
+
+Notes:
+  Glob patterns are not supported.
+  Every workspaces entry must be an explicit directory such as "packages/core".`);
 }
 
 function compareNames(a, b) {
@@ -77,62 +83,6 @@ function parseArgs(argv) {
   return args;
 }
 
-/**
- * @param {string} root
- * @param {string} pattern
- *
- * @returns {Promise<string[]>}
- */
-async function expandPattern(root, pattern) {
-  if (!pattern.includes("*")) {
-    return [pattern];
-  }
-
-  // Support `*` within a single path segment (e.g. `packages/*`).
-  const segments = pattern.split("/");
-  const starIndex = segments.findIndex((s) => s.includes("*"));
-  const baseDir = path.join(root, ...segments.slice(0, starIndex));
-  const rest = segments.slice(starIndex);
-  const entries = await fs.readdir(baseDir, { withFileTypes: true });
-  const results = [];
-  const regex = new RegExp(
-    `^${rest[0].replaceAll(/[.+^${}()|[\]\\]/gu, "\\$&").replaceAll("*", "[^/]*")}$`,
-    "u",
-  );
-
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !regex.test(entry.name)) {
-      continue;
-    }
-
-    if (rest.length === 1) {
-      results.push(path.relative(root, path.join(baseDir, entry.name)));
-    } else {
-      const subPattern = [entry.name, ...rest.slice(1)].join("/");
-      const baseRel = path.relative(root, baseDir);
-      const prefix = baseRel === "" ? "" : `${baseRel}/`;
-
-      for (const sub of await expandPattern(root, `${prefix}${subPattern}`)) {
-        results.push(sub);
-      }
-    }
-  }
-
-  // Confirm each match actually holds a package.json.
-  const confirmed = [];
-
-  for (const dir of results) {
-    try {
-      await fs.access(path.join(root, dir, "package.json"));
-      confirmed.push(dir);
-    } catch {
-      // Not a package directory; skip.
-    }
-  }
-
-  return confirmed;
-}
-
 async function main() {
   const { fix, root } = parseArgs(process.argv.slice(2));
   const rootPkgPath = path.join(root, "package.json");
@@ -143,25 +93,28 @@ async function main() {
   }
 
   const original = [...rootPkg.workspaces];
+  const nonStringIndex = original.findIndex((entry) => typeof entry !== "string");
 
-  // Resolve workspace directories (supporting globs) while remembering the literal entries so formatting of the array stays intact.
-  const dirs = [];
+  if (nonStringIndex !== -1) {
+    throw new TypeError(
+      `Root package.json workspaces[${nonStringIndex}] must be a string directory, got ${JSON.stringify(original[nonStringIndex])}.`,
+    );
+  }
 
-  for (const pattern of original) {
-    const expanded = await expandPattern(root, pattern);
+  const globEntry = original.find((entry) => /[*?[\]{}!]/u.test(entry));
 
-    if (expanded.length === 0) {
-      console.warn(`warning: workspace "${pattern}" matched nothing, kept as-is`);
-      dirs.push(pattern);
-    } else {
-      dirs.push(...expanded);
-    }
+  // Fail before any package.json is written, including in --fix mode.
+  if (globEntry !== undefined) {
+    console.error(`error: unsupported glob workspace entry: ${JSON.stringify(globEntry)}`);
+    console.error("Glob patterns are not supported by this sorter.");
+    console.error("List every workspace directory explicitly and run again. Nothing was written.");
+    process.exit(1);
   }
 
   const nameByDir = new Map();
   const depsByDir = new Map();
 
-  for (const dir of new Set(dirs)) {
+  for (const dir of new Set(original)) {
     let pkg;
 
     try {
@@ -248,12 +201,13 @@ async function main() {
     throw new Error(`Circular workspace dependency detected involving: ${remaining.join(", ")}`);
   }
 
-  // Directories we could not read (missing package.json, etc.) keep their relative position: append any original entries not covered by the sort.
+  // Explicit entries we could not read are appended in deterministic name order.
   const sortedSet = new Set(sorted);
-  const passthrough = original.filter((dir) => !sortedSet.has(dir));
-  const next = [...sorted, ...passthrough];
+  const unsortedDirs = [...new Set(original)]
+    .filter((dir) => !sortedSet.has(dir))
+    .sort(compareNames);
+  const next = [...sorted, ...unsortedDirs];
 
-  // `original` holds literal patterns; `next` holds concrete dirs. When no globs are used they are the same domain and directly comparable.
   const changed = next.length !== original.length || next.some((dir, i) => dir !== original[i]);
 
   if (!changed) {

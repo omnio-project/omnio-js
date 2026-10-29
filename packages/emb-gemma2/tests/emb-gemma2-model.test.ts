@@ -112,10 +112,10 @@ describe("Gemma2Embedder のモデル連携", () => {
     expect(actual).toStrictEqual(new Float32Array([0.6, 0.8]));
   });
 
-  test("dims 以下のベクトルはそのまま返す", async ({ expect, signal }) => {
+  test("dims と同じ長さのベクトルは L2 正規化して返す", async ({ expect, signal }) => {
     // 準備：
-    mocks.pipeline.mockResolvedValue(extractorFor([1, 2]));
-    const embedder = new Gemma2Embedder({ dims: 4 });
+    mocks.pipeline.mockResolvedValue(extractorFor([3, 4]));
+    const embedder = new Gemma2Embedder({ dims: 2 });
 
     // 実行：
     const actual = await embedder.embedText({
@@ -125,13 +125,37 @@ describe("Gemma2Embedder のモデル連携", () => {
     });
 
     // 検証：
-    expect(actual).toStrictEqual(new Float32Array([1, 2]));
+    expect(actual).toStrictEqual(new Float32Array([0.6, 0.8]));
+    expect(actual).toHaveLength(embedder.info.dims);
+  });
+
+  test("dims より短いベクトルは EmbedFailedError を投げる", async ({ expect, signal }) => {
+    // 準備：
+    mocks.pipeline.mockResolvedValue(extractorFor([1, 2]));
+    const embedder = new Gemma2Embedder({ dims: 4 });
+
+    // 実行と検証：
+    await expect(
+      embedder.embedText({
+        text: "hello",
+        action: "embedText",
+        signal,
+      }),
+    ).rejects.toMatchObject({
+      meta: { kind: "text" },
+      cause: expect.objectContaining({
+        message: expect.stringContaining("smaller than the requested dims 4"),
+      }),
+    });
   });
 
   test("device を指定するとモデル読み込み設定に含める", async ({ expect, signal }) => {
     // 準備：
     mocks.pipeline.mockResolvedValue(extractorFor([1]));
-    const embedder = new Gemma2Embedder({ device: "cpu" });
+    const embedder = new Gemma2Embedder({
+      dims: 1,
+      device: "cpu",
+    });
 
     // 実行：
     await embedder.embedText({
@@ -156,7 +180,7 @@ describe("Gemma2Embedder のモデル連携", () => {
     mocks.pipeline
       .mockRejectedValueOnce(new Error("load failed"))
       .mockResolvedValueOnce(extractorFor([1]));
-    const embedder = new Gemma2Embedder();
+    const embedder = new Gemma2Embedder({ dims: 1 });
 
     // 実行と検証：
     await expect(
@@ -180,7 +204,7 @@ describe("Gemma2Embedder のモデル連携", () => {
   test("読み込み済みの推論器を再利用する", async ({ expect, signal }) => {
     // 準備：
     mocks.pipeline.mockResolvedValue(extractorFor([1]));
-    const embedder = new Gemma2Embedder();
+    const embedder = new Gemma2Embedder({ dims: 1 });
 
     // 実行：
     await embedder.embedText({
@@ -213,6 +237,35 @@ describe("Gemma2Embedder のモデル連携", () => {
         signal,
       }),
     ).rejects.toBeInstanceOf(EmbedFailedError);
+  });
+
+  test("テキスト推論中の中断は中断理由で失敗する", async ({ expect }) => {
+    // 準備：
+    const controller = new AbortController();
+    const inference = Promise.withResolvers<TensorLike>();
+    const started = Promise.withResolvers<void>();
+    mocks.pipeline.mockResolvedValue(async () => {
+      started.resolve();
+
+      return inference.promise;
+    });
+
+    const embedder = new Gemma2Embedder();
+    const reason = new Error("aborted during text inference");
+
+    // 実行：
+    const pending = embedder.embedText({
+      text: "hello",
+      action: "embedText",
+      signal: controller.signal,
+    });
+
+    await started.promise;
+    controller.abort(reason);
+    inference.resolve(tensor([1], [1]));
+
+    // 検証：
+    await expect(pending).rejects.toBe(reason);
   });
 
   test("出力の次元が空なら EmbedFailedError を投げる", async ({ expect, signal }) => {
@@ -250,8 +303,8 @@ describe("Gemma2Embedder のモデル連携", () => {
 
   test("画像を埋め込む", async ({ expect, signal }) => {
     // 準備：
-    const { processor } = mockImageBackend(tensor([1, 2], [1, 2]));
-    const embedder = new Gemma2Embedder();
+    const { processor } = mockImageBackend(tensor([1, 2], [3, 4]));
+    const embedder = new Gemma2Embedder({ dims: 2 });
 
     // 実行：
     const actual = await embedder.embed({
@@ -265,14 +318,14 @@ describe("Gemma2Embedder のモデル連携", () => {
     });
 
     // 検証：
-    expect(actual).toStrictEqual(new Float32Array([1, 2]));
+    expect(actual).toStrictEqual(new Float32Array([0.6, 0.8]));
     expect(processor).toHaveBeenCalledWith(null, { image: true });
   });
 
   test("Blob の画像と MIME タイプなしを処理する", async ({ expect, signal }) => {
     // 準備：
     mockImageBackend(tensor([1, 1], [1]));
-    const embedder = new Gemma2Embedder();
+    const embedder = new Gemma2Embedder({ dims: 1 });
     const image = new Blob([new Uint8Array([1, 2, 3])]);
 
     // 実行：
@@ -292,7 +345,7 @@ describe("Gemma2Embedder のモデル連携", () => {
   test("複数画像を一括で埋め込む", async ({ expect, signal }) => {
     // 準備：
     const { processor } = mockImageBackend(tensor([2, 2], [1, 0, 0, 1]));
-    const embedder = new Gemma2Embedder();
+    const embedder = new Gemma2Embedder({ dims: 2 });
 
     // 実行：
     const actual = await embedder.embedMany({
@@ -319,7 +372,7 @@ describe("Gemma2Embedder のモデル連携", () => {
     // 準備：
     mocks.pipeline.mockResolvedValue(extractorFor([1, 0]));
     mockImageBackend(tensor([1, 2], [0, 1]));
-    const embedder = new Gemma2Embedder();
+    const embedder = new Gemma2Embedder({ dims: 2 });
 
     // 実行：
     const actual = await embedder.embedMany({
@@ -379,5 +432,41 @@ describe("Gemma2Embedder のモデル連携", () => {
         signal,
       }),
     ).rejects.toBeInstanceOf(EmbedFailedError);
+  });
+
+  test("画像推論中の中断は中断理由で失敗する", async ({ expect }) => {
+    // 準備：
+    const controller = new AbortController();
+    const inference = Promise.withResolvers<{ sentence_embedding: TensorLike }>();
+    const started = Promise.withResolvers<void>();
+    const processor = vi.fn<(image: null, input: unknown) => Promise<unknown>>(async () => ({}));
+    const model = vi.fn<(inputs: unknown) => Promise<{ sentence_embedding: unknown }>>(async () => {
+      started.resolve();
+
+      return inference.promise;
+    });
+    mocks.fromPretrainedProcessor.mockResolvedValue(processor);
+    mocks.fromPretrainedModel.mockResolvedValue(model);
+
+    mocks.readImage.mockResolvedValue({ image: true });
+    const embedder = new Gemma2Embedder();
+    const reason = new Error("aborted during image inference");
+
+    // 実行：
+    const pending = embedder.embed({
+      input: {
+        data: new Uint8Array([1]),
+        kind: "image",
+      },
+      action: "embed",
+      signal: controller.signal,
+    });
+
+    await started.promise;
+    controller.abort(reason);
+    inference.resolve({ sentence_embedding: tensor([1, 1], [1]) });
+
+    // 検証：
+    await expect(pending).rejects.toBe(reason);
   });
 });

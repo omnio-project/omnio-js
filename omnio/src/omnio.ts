@@ -11,7 +11,7 @@ import {
   OperationAbortedError,
 } from "@omniojs/core";
 import { type Checksum, type ChecksumOnHash, ChecksumSha256 } from "@unikvs/checksum";
-import { asyncmux } from "asyncmux";
+import { type AsyncmuxLock, Asyncmux, asyncmux } from "asyncmux";
 import { type IValueStream, KeyNotFoundError } from "unikvs";
 import * as v from "valibot";
 
@@ -32,6 +32,24 @@ import {
 /** `open` と `close` の既定タイムアウトです。ミリ秒単位で表します。 */
 const DEFAULT_LIFECYCLE_TIMEOUT_MS = 30_000;
 
+/** dirty 再インデックスの 1 回の走査で処理する最大件数です。 */
+const DIRTY_BATCH_SIZE = 10;
+
+/** 進捗のない dirty 走査を、古いスナップショットだけを理由に再試行する回数です。 */
+const DIRTY_STALE_RETRY_LIMIT = 1;
+
+/**
+ * キー付き排他ロックの解放をまとめたハンドルです。
+ */
+type KeyLockHandle = {
+  [Symbol.dispose](): void;
+};
+
+/**
+ * dirty オブジェクト 1 件の再インデックス結果です。
+ */
+type ReindexOutcome = "applied" | "stale" | "failed";
+
 /**
  * 実体ストレージーの保存時に使うハッシュアルゴリズムの識別子です。
  *
@@ -48,6 +66,32 @@ const ENTITY_HASH_ALGORITHM = "sha256";
  */
 function withLifecycleTimeout(signal: AbortSignal | undefined): AbortSignal {
   return signal ?? AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+}
+
+/**
+ * Promise の完了を中断シグナルと競争させて待ちます。
+ *
+ * @param task 待つ処理です。
+ * @param signal 処理を中断するための中断シグナルです。
+ */
+async function waitForAbortable(task: Promise<void>, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+
+  const aborted = Promise.withResolvers<never>();
+  const onAbort = (): void => {
+    aborted.reject(signal.reason);
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+
+  try {
+    if (signal.aborted) {
+      aborted.reject(signal.reason);
+    }
+
+    await Promise.race([task, aborted.promise]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 }
 
 /**
@@ -255,27 +299,50 @@ function copiedBytes(data: Uint8Array): Uint8Array<ArrayBuffer> {
  * 入力データをバイト列に変換します。
  *
  * @param data 変換するデータです。
+ * @param signal 処理を中断するための中断シグナルです。
  *
  * @returns ArrayBuffer に裏打ちされたバイト列の複製です。
  */
 async function toBytes(
   data: Uint8Array | Blob | ReadableStream<Uint8Array>,
+  signal: AbortSignal,
 ): Promise<Uint8Array<ArrayBuffer>> {
+  signal.throwIfAborted();
+
   if (data instanceof Uint8Array) {
     return new Uint8Array(data);
   }
 
   if (data instanceof Blob) {
-    return new Uint8Array(await data.arrayBuffer());
+    const bytes = new Uint8Array(await data.arrayBuffer());
+
+    signal.throwIfAborted();
+
+    return bytes;
   }
 
   const chunks: Uint8Array[] = [];
   let length = 0;
   const reader = data.getReader();
+  const cancelReader = async (): Promise<void> => {
+    try {
+      await reader.cancel(signal.reason);
+    } catch {
+      // 中断後のキャンセル失敗は無視します。
+    }
+  };
+  const onAbort = (): void => {
+    void cancelReader();
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
 
   try {
     for (;;) {
+      signal.throwIfAborted();
+
       const { done, value } = await reader.read();
+
+      signal.throwIfAborted();
 
       if (done) {
         break;
@@ -287,6 +354,7 @@ async function toBytes(
       }
     }
   } finally {
+    signal.removeEventListener("abort", onAbort);
     reader.releaseLock();
   }
 
@@ -329,6 +397,9 @@ async function nullIfKeyNotFound<T>(load: () => Promise<T>): Promise<T | null> {
  * データの整合性のためではなく、`open` や `close` などのライフサイクルと操作が同時実行されないためです。
  * その他の操作同士は共有ロックのため並行して実行できます。
  *
+ * 同じキーへの書き込み系の操作とバックグラウンドの削除は、キー単位の排他ロックで直列化します。
+ * キーをまたぐ操作は、キーを並べ替えて取得することでデッドロックを防ぎます。
+ *
  * `open` と `close` は、シグナルを省略した場合に 30 秒でタイムアウトします。指定した場合はそのシグナルに従います。
  * それ以外のメソッドは、呼び出し側のシグナルと `close` 時に中断されるライフサイクルシグナルを合成し、先に中断された方に従います。
  * シグナルを省略した場合はライフサイクルシグナルを使います。
@@ -344,7 +415,15 @@ export class Omnio {
 
   readonly #embedder: IEmbedder;
 
+  readonly #keyLocks = new Asyncmux({ preventReentrancy: true });
+
   readonly #deletions = new BackgroundTaskManager();
+
+  #closingCount = 0;
+
+  #entityOpen: boolean;
+
+  #indexOpen: boolean;
 
   #lifecycle: AbortController;
 
@@ -369,6 +448,8 @@ export class Omnio {
     this.#embedder = parsed.embedder;
 
     this.#lifecycle = new AbortController();
+    this.#entityOpen = false;
+    this.#indexOpen = false;
     this.#opened = false;
   }
 
@@ -394,28 +475,53 @@ export class Omnio {
       return;
     }
 
-    await this.#entity.open({ signal: active });
-
     try {
-      await this.#index.open({
-        action: "open",
-        signal: active,
-      });
-      await this.#index.markDirty({
-        action: "markDirty",
-        signal: active,
-        embeddingModel: this.#embedder.info.name,
-      });
+      if (!this.#entityOpen) {
+        await this.#entity.open({ signal: active });
+        this.#entityOpen = true;
+      }
+
+      if (!this.#indexOpen || !this.#index.isOpen) {
+        await this.#index.open({
+          action: "open",
+          signal: active,
+        });
+        this.#indexOpen = true;
+        await this.#index.markDirty({
+          action: "markDirty",
+          signal: active,
+          embeddingDims: this.#embedder.info.dims,
+          embeddingModel: this.#embedder.info.name,
+        });
+      }
     } catch (ex) {
-      await Promise.resolve(
-        this.#index.close({
-          action: "close",
-          signal: AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
-        }),
-      ).catch(() => undefined);
-      await this.#entity
-        .close({ signal: AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS) })
-        .catch(() => undefined);
+      if (this.#indexOpen) {
+        try {
+          await Promise.resolve().then(() =>
+            this.#index.close({
+              action: "close",
+              signal: AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
+            }),
+          );
+          this.#indexOpen = this.#index.isOpen;
+        } catch {
+          this.#indexOpen = true;
+        }
+      }
+
+      if (this.#entityOpen) {
+        try {
+          await Promise.resolve().then(() =>
+            this.#entity.close({ signal: AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS) }),
+          );
+          this.#entityOpen = false;
+        } catch {
+          this.#entityOpen = true;
+        }
+      }
+
+      this.#opened = false;
+
       throw ex;
     }
 
@@ -432,33 +538,81 @@ export class Omnio {
     const active = withLifecycleTimeout(v.parse(OptionalAbortSignalSchema, signal));
     active.throwIfAborted();
 
-    if (this.#deletions.isRunning) {
-      await this.#deletions.wait();
-      active.throwIfAborted();
-    }
+    this.#closingCount++;
 
-    if (this.#opened) {
-      this.#lifecycle.abort(new OperationAbortedError());
+    try {
+      if (this.#indexOpen || this.#entityOpen) {
+        this.#lifecycle.abort(new OperationAbortedError());
+      }
 
       if (this.#reindex.isRunning) {
-        await this.#reindex.wait();
+        await waitForAbortable(this.#reindex.wait(), active);
+      }
+
+      for (;;) {
+        while (this.#deletions.isRunning) {
+          await waitForAbortable(this.#deletions.wait(), active);
+        }
+
+        using _lock = await asyncmux(this, active);
+
+        if (this.#deletions.isRunning) {
+          continue;
+        }
+
+        if (!this.#indexOpen && !this.#entityOpen) {
+          return;
+        }
+
         active.throwIfAborted();
+
+        let failed = false;
+        let firstError: unknown;
+
+        if (this.#indexOpen) {
+          try {
+            await this.#index.close({
+              action: "close",
+              signal: active,
+            });
+            this.#indexOpen = false;
+          } catch (ex) {
+            failed = true;
+            firstError = ex;
+            this.#indexOpen = this.#index.isOpen;
+          }
+        }
+
+        if (this.#entityOpen) {
+          try {
+            await this.#entity.close({ signal: active });
+            this.#entityOpen = false;
+          } catch (ex) {
+            if (!failed) {
+              failed = true;
+              firstError = ex;
+            }
+          }
+        }
+
+        this.#opened = this.#indexOpen && this.#entityOpen;
+
+        if (failed) {
+          throw firstError;
+        }
+
+        return;
+      }
+    } finally {
+      this.#closingCount--;
+
+      if (
+        this.#closingCount === 0 &&
+        (this.#indexOpen || this.#entityOpen || this.#lifecycle.signal.aborted)
+      ) {
+        this.#lifecycle = new AbortController();
       }
     }
-
-    using _lock = await asyncmux(this, active);
-
-    if (!this.#opened) {
-      return;
-    }
-
-    await this.#index.close({
-      action: "close",
-      signal: active,
-    });
-    await this.#entity.close({ signal: active });
-    this.#opened = false;
-    this.#lifecycle = new AbortController();
   }
 
   /**
@@ -480,21 +634,12 @@ export class Omnio {
     using _lock = await asyncmux.readonly(this, active);
 
     const key = toOmnioKey(parsed.key);
-    const bytes = await toBytes(parsed.data);
-
-    active.throwIfAborted();
-
-    const existing = await this.#index.get<TUserMetadata>({
-      key,
-      action: "get",
-      signal: active,
-    });
-    const now = new Date().toISOString();
-    const entityId =
-      existing === null || existing.entityId === "" ? crypto.randomUUID() : existing.entityId;
+    const bytes = await toBytes(parsed.data, active);
     let embedding: Float32Array | undefined;
     let embeddingModel: string | undefined;
     let embeddingSource: EmbedSource | undefined;
+
+    active.throwIfAborted();
 
     if (parsed.embedding !== undefined) {
       embedding = parsed.embedding;
@@ -505,6 +650,16 @@ export class Omnio {
       embeddingSource = embedded.embeddingSource;
     }
 
+    using _keyLock = await this.#lockKeys(active, [key]);
+
+    const existing = await this.#index.get<TUserMetadata>({
+      key,
+      action: "get",
+      signal: active,
+    });
+    const now = new Date().toISOString();
+    const entityId =
+      existing === null || existing.entityId === "" ? crypto.randomUUID() : existing.entityId;
     const previousBytes =
       existing === null
         ? undefined
@@ -568,6 +723,7 @@ export class Omnio {
     active.throwIfAborted();
 
     using _lock = await asyncmux.readonly(this, active);
+    using _keys = await this.#lockKeys(active, [sourceObjectKey, destinationObjectKey]);
 
     const source = await this.#index.get<TUserMetadata>({
       key: sourceObjectKey,
@@ -662,6 +818,7 @@ export class Omnio {
     active.throwIfAborted();
 
     using _lock = await asyncmux.readonly(this, active);
+    using _keys = await this.#lockKeys(active, [sourceObjectKey, destinationObjectKey]);
 
     if (sourceObjectKey.key === destinationObjectKey.key) {
       return await this.#index.get<TUserMetadata>({
@@ -686,7 +843,7 @@ export class Omnio {
     const replacedEntityId = renamed.replacedEntityId;
 
     if (replacedEntityId !== undefined && replacedEntityId !== renamed.object.entityId) {
-      this.#enqueueDeletion(destinationObjectKey, replacedEntityId);
+      this.#enqueueDiscardedEntity(destinationObjectKey, replacedEntityId);
     }
 
     return renamed.object;
@@ -714,6 +871,9 @@ export class Omnio {
     using _lock = await asyncmux.readonly(this, active);
 
     const key = toOmnioKey(parsed.key);
+
+    using _keyLock = await this.#lockKeys(active, [key]);
+
     const updatedAt = new Date().toISOString();
 
     return await this.#index.updateMetadata<TUserMetadata>({
@@ -900,6 +1060,7 @@ export class Omnio {
     active.throwIfAborted();
 
     using _lock = await asyncmux.readonly(this, active);
+    using _keyLock = await this.#lockKeys(active, [objectKey]);
 
     const object = await this.#index.get<unknown>({
       key: objectKey,
@@ -1042,6 +1203,7 @@ export class Omnio {
     active.throwIfAborted();
 
     using _lock = await asyncmux.readonly(this, active);
+    using _keyLock = await this.#lockKeys(active, [objectKey]);
 
     const object = await this.#index.get<TUserMetadata>({
       key: objectKey,
@@ -1059,6 +1221,7 @@ export class Omnio {
   /**
    * 保存済みオブジェクトの埋め込みを作り直します。
    *
+   * 呼び出し側はキー付き排他ロックを保持し、最新のオブジェクトを渡してください。
    * 説明文がない場合は何も変更せず、そのまま返します。
    *
    * @param object 埋め込みを作り直すオブジェクトです。
@@ -1075,6 +1238,9 @@ export class Omnio {
     }
 
     const embedded = await this.#embedDescription(object.description, signal);
+
+    signal.throwIfAborted();
+
     const reindexed: OmnioObject<TUserMetadata> = {
       ...object,
       embedding: embedded.embedding,
@@ -1125,34 +1291,168 @@ export class Omnio {
   }
 
   /**
-   * dirty フラグが立ったオブジェクトを 1 件ずつ再インデックスします。
+   * dirty フラグが立ったオブジェクトをキー順に少数ずつ再インデックスします。
    *
-   * 1 件ごとにロックを解放し、他の操作を妨げないようにします。
+   * ページ内に失敗があっても次のページへ進み、後ろのキーが永久に取り残されないようにします。
+   * 失敗した行は dirty のまま残し、次の走査や次の open で再試行します。
+   * 古いスナップショットだけの走査は、上限付きで 1 回だけ先頭から追加の走査をします。
    */
   async #drainDirtyObjects(): Promise<void> {
-    for (;;) {
-      const signal = AbortSignal.any([
-        this.#lifecycle.signal,
-        AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
-      ]);
-      using _lock = await asyncmux.readonly(this, signal);
+    let staleRetries = 0;
 
-      if (!this.#opened) {
+    for (;;) {
+      let applied = 0;
+      let afterKey: string | undefined;
+      let scanned = false;
+      const seenAnchors = new Set<string>();
+      let stale = 0;
+
+      for (;;) {
+        const signal = AbortSignal.any([
+          this.#lifecycle.signal,
+          AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
+        ]);
+        using _lock = await asyncmux.readonly(this, signal);
+
+        if (!this.#opened) {
+          return;
+        }
+
+        const dirty = await this.#index.listDirty<unknown>({
+          limit: DIRTY_BATCH_SIZE,
+          action: "listDirty",
+          signal,
+          afterKey,
+        });
+
+        if (dirty.length === 0) {
+          break;
+        }
+
+        const nextAfterKey = dirty.at(-1)?.key.key;
+
+        // インデックスが afterKey を無視した場合に同じページを繰り返さないようにします。
+        // キーの順序はデータベースの照合順序に依存するため、JS の大小比較は使いません。
+        if (nextAfterKey === undefined || seenAnchors.has(nextAfterKey)) {
+          break;
+        }
+
+        seenAnchors.add(nextAfterKey);
+        scanned = true;
+        afterKey = nextAfterKey;
+
+        for (const snapshot of dirty) {
+          const itemSignal = AbortSignal.any([
+            this.#lifecycle.signal,
+            AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS),
+          ]);
+
+          try {
+            const outcome = await this.#reindexDirtyObject(snapshot, itemSignal);
+
+            if (outcome === "applied") {
+              applied++;
+            } else if (outcome === "stale") {
+              stale++;
+            }
+          } catch (ex) {
+            if (this.#lifecycle.signal.aborted) {
+              throw ex;
+            }
+
+            // 失敗した行は dirty のまま残し、後続のオブジェクトの処理を続けます。
+            // 1 件のタイムアウトでは走査全体を止めません。
+          }
+        }
+
+        if (dirty.length < DIRTY_BATCH_SIZE) {
+          break;
+        }
+      }
+
+      if (!scanned) {
         return;
       }
 
-      const dirty = await this.#index.listDirty<unknown>({
-        limit: 1,
-        action: "listDirty",
+      if (applied > 0) {
+        staleRetries = 0;
+
+        continue;
+      }
+
+      if (stale > 0 && staleRetries < DIRTY_STALE_RETRY_LIMIT) {
+        staleRetries++;
+
+        continue;
+      }
+
+      return;
+    }
+  }
+
+  /**
+   * dirty のスナップショットから埋め込みを作り、現在のオブジェクトにだけ反映します。
+   *
+   * 埋め込みの計算中にオブジェクトが更新または削除された場合は、古いスナップショットを書き戻さずに諦めます。
+   * 説明文が変わっていなければ、更新時刻だけが変わったメタデータ更新には追随します。
+   * 明示的な埋め込みや埋め込みなしへ変更された場合も、作り直しで上書きしません。
+   *
+   * @param snapshot 走査時に取得したオブジェクトです。
+   * @param signal 処理を中断するための中断シグナルです。
+   *
+   * @returns 反映した場合は `applied`、古いスナップショットだった場合は `stale`、失敗した場合は `failed` です。
+   */
+  async #reindexDirtyObject<TUserMetadata>(
+    snapshot: OmnioObject<TUserMetadata>,
+    signal: AbortSignal,
+  ): Promise<ReindexOutcome> {
+    if (snapshot.description === undefined) {
+      return "stale";
+    }
+
+    try {
+      const embedded = await this.#embedDescription(snapshot.description, signal);
+
+      signal.throwIfAborted();
+
+      using _keyLock = await this.#lockKeys(signal, [snapshot.key]);
+
+      const current = await this.#index.get<TUserMetadata>({
+        key: snapshot.key,
+        action: "get",
         signal,
       });
-      const object = dirty[0];
 
-      if (object === undefined || object.description === undefined) {
-        return;
+      if (
+        current === null ||
+        current.entityId !== snapshot.entityId ||
+        current.description !== snapshot.description ||
+        current.embeddingModel !== snapshot.embeddingModel
+      ) {
+        return "stale";
       }
 
-      await this.#reindexStoredObject(object, signal);
+      const reindexed: OmnioObject<TUserMetadata> = {
+        ...current,
+        embedding: embedded.embedding,
+        embeddingDims: embedded.embedding.length,
+        embeddingModel: embedded.embeddingModel,
+        embeddingSource: embedded.embeddingSource,
+        updatedAt: new Date().toISOString(),
+      };
+      await this.#index.upsert({
+        action: "upsert",
+        object: reindexed,
+        signal,
+      });
+
+      return "applied";
+    } catch (ex) {
+      if (this.#lifecycle.signal.aborted) {
+        throw ex;
+      }
+
+      return "failed";
     }
   }
 
@@ -1167,6 +1467,45 @@ export class Omnio {
     return signal === undefined
       ? this.#lifecycle.signal
       : AbortSignal.any([signal, this.#lifecycle.signal]);
+  }
+
+  /**
+   * 指定したキーの排他ロックを取得します。
+   *
+   * キーは重複を除いて昇順に並べ、複数キーの操作でもデッドロックしないようにします。
+   *
+   * @param signal 処理を中断するための中断シグナルです。
+   * @param keys 取得するキーです。
+   *
+   * @returns 解放用のハンドルです。`using` でスコープを抜けると解放されます。
+   */
+  async #lockKeys(signal: AbortSignal, keys: readonly OmnioKey[]): Promise<KeyLockHandle> {
+    const names = [...new Set(keys.map((key) => key.key))].sort();
+    const locks: AsyncmuxLock[] = [];
+
+    try {
+      for (const key of names) {
+        const lock = await this.#keyLocks.lock({
+          key,
+          signal,
+        });
+        locks.push(lock);
+      }
+    } catch (ex) {
+      for (let index = locks.length - 1; index >= 0; index--) {
+        locks[index]?.release();
+      }
+
+      throw ex;
+    }
+
+    return {
+      [Symbol.dispose](): void {
+        for (let index = locks.length - 1; index >= 0; index--) {
+          locks[index]?.release();
+        }
+      },
+    };
   }
 
   /**
@@ -1189,6 +1528,72 @@ export class Omnio {
   }
 
   /**
+   * キー変更で置き換えられた実体の削除を予約します。
+   *
+   * 置き換えられたレコードは索引から削除され、削除フラグ付きレコードを持ちません。
+   * そのため、同じキーが現在も同じ実体を参照していないことを確認してから実体だけを削除します。
+   *
+   * @param key 置き換えられたオブジェクトのキーです。
+   * @param entityId 削除する実体 ID です。
+   */
+  #enqueueDiscardedEntity(key: OmnioKey, entityId: string): void {
+    this.#deletions.schedule(entityId, async () => {
+      const signal = AbortSignal.timeout(DEFAULT_LIFECYCLE_TIMEOUT_MS);
+      using _lock = await asyncmux.readonly(this, signal);
+
+      if (!this.#opened) {
+        return;
+      }
+
+      await this.#discardEntity(key, entityId, signal);
+    });
+  }
+
+  /**
+   * 索引から参照されなくなった実体を削除します。
+   *
+   * 呼び出し側はキー付き排他ロックを保持してください。
+   *
+   * @param key 実体を参照していたキーです。
+   * @param entityId 削除する実体 ID です。
+   * @param signal 処理を中断するための中断シグナルです。
+   */
+  async #deleteUnreferencedEntity(
+    key: OmnioKey,
+    entityId: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const current = await this.#index.get<unknown>({
+      key,
+      action: "get",
+      signal,
+    });
+
+    if (current !== null && current.entityId === entityId) {
+      return;
+    }
+
+    const hasEntity = await this.#entity.has(entityId, { signal });
+
+    if (hasEntity) {
+      await this.#entity.delete(entityId, { signal });
+    }
+  }
+
+  /**
+   * キー変更で置き換えられた実体を削除します。
+   *
+   * @param key 実体を参照していたキーです。
+   * @param entityId 削除する実体 ID です。
+   * @param signal 処理を中断するための中断シグナルです。
+   */
+  async #discardEntity(key: OmnioKey, entityId: string, signal: AbortSignal): Promise<void> {
+    using _keyLock = await this.#lockKeys(signal, [key]);
+
+    await this.#deleteUnreferencedEntity(key, entityId, signal);
+  }
+
+  /**
    * オブジェクトの実体を削除し、ObjectIndex の削除フラグ付きレコードを物理削除します。
    *
    * @param key 削除するオブジェクトのキーです。
@@ -1196,18 +1601,26 @@ export class Omnio {
    * @param signal 処理を中断するための中断シグナルです。
    */
   async #purgeEntity(key: OmnioKey, entityId: string, signal: AbortSignal): Promise<void> {
-    const hasEntity = await this.#entity.has(entityId, { signal });
+    using _keyLock = await this.#lockKeys(signal, [key]);
 
-    if (hasEntity) {
-      await this.#entity.delete(entityId, { signal });
-    }
-
-    await this.#index.purge({
+    const purged = await this.#index.purge({
       key,
       action: "purge",
       signal,
       entityId,
     });
+
+    if (!purged) {
+      await this.#deleteUnreferencedEntity(key, entityId, signal);
+
+      return;
+    }
+
+    const hasEntity = await this.#entity.has(entityId, { signal });
+
+    if (hasEntity) {
+      await this.#entity.delete(entityId, { signal });
+    }
   }
 
   /**

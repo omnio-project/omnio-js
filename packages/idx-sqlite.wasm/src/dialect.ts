@@ -24,12 +24,39 @@ import type { SqliteWasmDatabase } from "./schema.js";
 export type SqliteWasmHandle = InstanceType<Sqlite3Static["oo1"]["DB"]>;
 
 /**
+ * 初期化済みの sqlite-wasm モジュールを保持します。
+ *
+ * WASM モジュールを共有しないと、ファイルシステムも初期化のたびに作り直されます。
+ */
+let sqlite3InitPromise: Promise<Sqlite3Static> | undefined;
+
+/**
  * sqlite-wasm モジュールを初期化し、静的 API を返します。
+ *
+ * 初期化はモジュール全体で一度だけ行い、失敗した場合だけ次の呼び出しで再試行します。
  *
  * @returns sqlite-wasm の静的 API を解決する Promise です。
  */
 export function initSqliteWasm(): Promise<Sqlite3Static> {
-  return sqlite3InitModule();
+  sqlite3InitPromise ??= initSqliteWasmModule();
+
+  return sqlite3InitPromise;
+}
+
+/**
+ * sqlite-wasm モジュールを初期化します。
+ *
+ * 失敗時は保持している Promise を破棄し、次の呼び出しで再試行できるようにします。
+ *
+ * @returns sqlite-wasm の静的 API を解決する Promise です。
+ */
+async function initSqliteWasmModule(): Promise<Sqlite3Static> {
+  try {
+    return await sqlite3InitModule();
+  } catch (ex) {
+    sqlite3InitPromise = undefined;
+    throw ex;
+  }
 }
 
 /**
@@ -55,6 +82,14 @@ function toBindableList(
       value instanceof Uint8Array
     ) {
       return value;
+    }
+
+    if (value instanceof ArrayBuffer) {
+      return new Uint8Array(value);
+    }
+
+    if (ArrayBuffer.isView(value)) {
+      return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
     }
 
     throw new DbQueryError({

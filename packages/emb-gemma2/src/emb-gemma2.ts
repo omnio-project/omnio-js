@@ -44,7 +44,7 @@ export type Gemma2EmbedderOptions = {
   /** モデルファイルのサブフォルダーです。 */
   readonly subfolder?: string | undefined;
 
-  /** 出力ベクトルの次元数です。先頭から切り詰めて L2 正規化します。 */
+  /** 出力ベクトルの次元数です。モデル出力より小さい場合は先頭から切り詰めて L2 正規化し、大きい場合は埋め込みエラーになります。 */
   readonly dims?: number | undefined;
 
   /** 推論デバイスです。 */
@@ -393,6 +393,8 @@ export class Gemma2Embedder implements IEmbedder {
       return [];
     }
 
+    signal.throwIfAborted();
+
     const extractor = await this.#getExtractor();
 
     signal.throwIfAborted();
@@ -405,11 +407,14 @@ export class Gemma2Embedder implements IEmbedder {
         normalize: true,
       });
     } catch (ex) {
+      signal.throwIfAborted();
       throw new EmbedFailedError({
         kind: "text",
         cause: ex,
       });
     }
+
+    signal.throwIfAborted();
 
     return this.#decodeEmbeddings(output, texts.length, "text");
   }
@@ -461,6 +466,8 @@ export class Gemma2Embedder implements IEmbedder {
       return [];
     }
 
+    signal.throwIfAborted();
+
     const backend = await this.#getImageBackend();
 
     signal.throwIfAborted();
@@ -478,11 +485,14 @@ export class Gemma2Embedder implements IEmbedder {
       const { sentence_embedding }: { sentence_embedding: Tensor } = await backend.model(inputs);
       output = sentence_embedding;
     } catch (ex) {
+      signal.throwIfAborted();
       throw new EmbedFailedError({
         kind: "image",
         cause: ex,
       });
     }
+
+    signal.throwIfAborted();
 
     return this.#decodeEmbeddings(output, rawImages.length, "image");
   }
@@ -514,7 +524,7 @@ export class Gemma2Embedder implements IEmbedder {
     if (data instanceof Float32Array) {
       for (let index = 0; index < count; index += 1) {
         const offset = index * features;
-        vectors.push(this.#finalizeVector(data.subarray(offset, offset + features)));
+        vectors.push(this.#finalizeVector(data.subarray(offset, offset + features), kind));
       }
 
       return vectors;
@@ -528,7 +538,7 @@ export class Gemma2Embedder implements IEmbedder {
         native[position] = Number(data[offset + position]);
       }
 
-      vectors.push(this.#finalizeVector(native));
+      vectors.push(this.#finalizeVector(native, kind));
     }
 
     return vectors;
@@ -556,30 +566,38 @@ export class Gemma2Embedder implements IEmbedder {
   /**
    * ベクトルを指定した次元数に切り詰め、必要に応じて L2 正規化します。
    *
+   * モデル出力が指定した次元数より短い場合は埋め込みエラーにします。
+   *
    * @param native モデルが出力したベクトルです。
+   * @param kind 埋め込んだ入力の種類です。
    *
    * @returns 指定した次元数のベクトルです。
    */
-  #finalizeVector(native: Float32Array): Float32Array {
-    if (native.length <= this.#dims) {
-      return native.slice();
+  #finalizeVector(native: Float32Array, kind: string): Float32Array {
+    if (native.length < this.#dims) {
+      throw new EmbedFailedError({
+        kind,
+        cause: new Error(
+          `Model output dimension ${native.length} is smaller than the requested dims ${this.#dims}`,
+        ),
+      });
     }
 
-    const truncated = native.slice(0, this.#dims);
+    const vector = native.length === this.#dims ? native.slice() : native.slice(0, this.#dims);
     let norm = 0;
 
-    for (const value of truncated) {
+    for (const value of vector) {
       norm += value * value;
     }
 
     norm = Math.sqrt(norm);
 
     if (norm > 0) {
-      for (let index = 0; index < truncated.length; index += 1) {
-        truncated[index] = (truncated[index] ?? 0) / norm;
+      for (let index = 0; index < vector.length; index += 1) {
+        vector[index] = (vector[index] ?? 0) / norm;
       }
     }
 
-    return truncated;
+    return vector;
   }
 }

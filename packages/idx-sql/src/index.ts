@@ -1,6 +1,8 @@
 export type { FullTextOperator } from "./filter.js";
 export { withMetadataFilter } from "./filter.js";
 
+export { normalizeTimestamp } from "./timestamp.js";
+
 export type { SqlMigrationOptions } from "./migrations.js";
 export { createSqlMigrations, SqlMigrationProvider } from "./migrations.js";
 

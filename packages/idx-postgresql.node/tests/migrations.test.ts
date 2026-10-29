@@ -31,7 +31,10 @@ describe("マイグレーション", () => {
 
   test("journal スキーマを作成し、タグを外部キーで連動させる", async ({ expect }) => {
     // 準備：
-    expect(Object.keys(MIGRATIONS)).toStrictEqual(["001_create_journal"]);
+    expect(Object.keys(MIGRATIONS)).toStrictEqual([
+      "001_create_journal",
+      "002_normalize_journal_timestamps",
+    ]);
 
     const migration = requireMigration("001_create_journal");
     const pool = new Pool({
@@ -60,13 +63,13 @@ describe("マイグレーション", () => {
           'k1',
           '00000000-0000-4000-8000-000000000001',
           'CREATE',
-          '2026-01-01T00:00:00Z',
+          '2026-01-01T00:00:00.000Z',
           'text/plain',
           3,
           'sha256',
           '{}',
-          '2026-01-01T00:00:00Z',
-          '2026-01-01T00:00:00Z'
+          '2026-01-01T00:00:00.000Z',
+          '2026-01-01T00:00:00.000Z'
         )
       `.execute(db);
       await sql`
@@ -95,7 +98,7 @@ describe("マイグレーション", () => {
       expect(journal).toHaveLength(1);
       expect(journal[0]?.entity_id).toBe("00000000-0000-4000-8000-000000000001");
       expect(journal[0]?.record_type).toBe("CREATE");
-      expect(journal[0]?.record_timestamp).toBe("2026-01-01T00:00:00Z");
+      expect(journal[0]?.record_timestamp).toBe("2026-01-01T00:00:00.000Z");
       expect(journal[0]?.dirty).toBe(0);
       expect(journal[0]?.hash_algorithm).toBe("sha256");
       expect(tags).toStrictEqual([

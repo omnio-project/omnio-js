@@ -44,7 +44,10 @@ async function createDatabase(): Promise<Kysely<SqliteWasmDatabase>> {
 describe("SqliteWasmDialect", () => {
   test("単一のマイグレーションで journal スキーマを作成する", async ({ expect }) => {
     // 準備：
-    expect(Object.keys(MIGRATIONS)).toStrictEqual(["001_create_journal"]);
+    expect(Object.keys(MIGRATIONS)).toStrictEqual([
+      "001_create_journal",
+      "002_normalize_journal_timestamps",
+    ]);
 
     const migration = requireMigration("001_create_journal");
     const sqlite3 = await initSqliteWasm();
@@ -193,6 +196,7 @@ describe("SqliteWasmDialect", () => {
   test("ブール値とバイナリ値をバインドできる", async ({ expect }) => {
     // 準備：
     const db = await createDatabase();
+    const view = new Uint16Array([0x01_02]);
 
     try {
       // 実行：
@@ -200,10 +204,20 @@ describe("SqliteWasmDialect", () => {
       const buffers = await sql<{ value: Uint8Array }>`
         select ${new Uint8Array([1, 2])} as value
       `.execute(db);
+      const arrayBuffers = await sql<{ value: Uint8Array }>`
+        select ${new ArrayBuffer(2)} as value
+      `.execute(db);
+      const views = await sql<{ value: Uint8Array }>`
+        select ${view} as value
+      `.execute(db);
 
       // 検証：
       expect(booleans.rows[0]?.value).toBe(1);
       expect(buffers.rows[0]?.value).toStrictEqual(new Uint8Array([1, 2]));
+      expect(arrayBuffers.rows[0]?.value).toStrictEqual(new Uint8Array(2));
+      expect(views.rows[0]?.value).toStrictEqual(
+        new Uint8Array(view.buffer, view.byteOffset, view.byteLength),
+      );
     } finally {
       await db.destroy();
     }

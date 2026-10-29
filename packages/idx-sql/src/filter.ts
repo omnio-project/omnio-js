@@ -2,6 +2,7 @@ import type { RecordType, MetadataFilter } from "@omniojs/core";
 import { type SelectQueryBuilder, sql } from "kysely";
 
 import type { SqlIndexDatabase } from "./schema.js";
+import { normalizeTimestamp } from "./timestamp.js";
 
 /**
  * 全文検索で使う比較演算子です。
@@ -47,6 +48,7 @@ function toLikePattern(value: string, position: "contains" | "endsWith" | "start
  * @param query 絞り込む前のクエリーです。
  * @param column 文字列を保存する列です。
  * @param condition 文字列の条件です。
+ * @param fullTextOperator 部分一致で使う比較演算子です。
  *
  * @returns 絞り込んだクエリーです。
  */
@@ -54,6 +56,7 @@ function withStringFilter<T>(
   query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
   column: "content_type" | "hash",
   condition: string | MetadataFilter.Condition,
+  fullTextOperator: FullTextOperator,
 ): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
   if (typeof condition === "string") {
     return query.where(`journal.${column}`, "=", condition);
@@ -63,20 +66,27 @@ function withStringFilter<T>(
 
   if (condition.contains !== undefined) {
     const pattern = toLikePattern(condition.contains, "contains");
-    filtered = filtered.where(sql<boolean>`${sql.ref(column)} LIKE ${pattern} ESCAPE '\\'`);
+    filtered = filtered.where(
+      sql<boolean>`${sql.ref(column)} ${sql.raw(fullTextOperator)} ${pattern} ESCAPE '\\'`,
+    );
   }
 
   if (condition.endsWith !== undefined) {
     const pattern = toLikePattern(condition.endsWith, "endsWith");
-    filtered = filtered.where(sql<boolean>`${sql.ref(column)} LIKE ${pattern} ESCAPE '\\'`);
+    filtered = filtered.where(
+      sql<boolean>`${sql.ref(column)} ${sql.raw(fullTextOperator)} ${pattern} ESCAPE '\\'`,
+    );
   }
 
   if (condition.equals !== undefined) {
     filtered = filtered.where(`journal.${column}`, "=", condition.equals);
   }
 
-  if (condition.in !== undefined && condition.in.length > 0) {
-    filtered = filtered.where(`journal.${column}`, "in", [...condition.in]);
+  if (condition.in !== undefined) {
+    filtered =
+      condition.in.length === 0
+        ? filtered.where(sql<boolean>`1 = 0`)
+        : filtered.where(`journal.${column}`, "in", [...condition.in]);
   }
 
   if (condition.not !== undefined) {
@@ -89,7 +99,9 @@ function withStringFilter<T>(
 
   if (condition.startsWith !== undefined) {
     const pattern = toLikePattern(condition.startsWith, "startsWith");
-    filtered = filtered.where(sql<boolean>`${sql.ref(column)} LIKE ${pattern} ESCAPE '\\'`);
+    filtered = filtered.where(
+      sql<boolean>`${sql.ref(column)} ${sql.raw(fullTextOperator)} ${pattern} ESCAPE '\\'`,
+    );
   }
 
   return filtered;
@@ -126,10 +138,10 @@ function withRecordTypeFilter<T>(
 
   if (condition.in !== undefined) {
     const values = toRecordTypes(condition.in);
-
-    if (values.length > 0) {
-      filtered = filtered.where("journal.record_type", "in", [...values]);
-    }
+    filtered =
+      values.length === 0
+        ? filtered.where(sql<boolean>`1 = 0`)
+        : filtered.where("journal.record_type", "in", [...values]);
   }
 
   if (condition.not !== undefined) {
@@ -151,7 +163,7 @@ function withRecordTypeFilter<T>(
  * @returns ISO 8601 文字列です。
  */
 function toTimestamp(value: string | Date): string {
-  return value instanceof Date ? value.toISOString() : value;
+  return normalizeTimestamp(value, "filter");
 }
 
 /**
@@ -183,49 +195,51 @@ function withDateFilter<T>(
   column: "created_at" | "record_timestamp" | "updated_at",
   condition: NonNullable<MetadataFilter["createdAt"]>,
 ): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
+  const reference = `journal.${column}` as const;
+
   if (typeof condition === "string" || condition instanceof Date) {
-    return query.where(`journal.${column}`, "=", toTimestamp(condition));
+    return query.where(reference, "=", toTimestamp(condition));
   }
 
   let filtered = query;
 
   if (condition.equals !== undefined) {
-    filtered = filtered.where(`journal.${column}`, "=", toTimestamp(condition.equals));
+    filtered = filtered.where(reference, "=", toTimestamp(condition.equals));
   }
 
   if (condition.gt !== undefined) {
-    filtered = filtered.where(`journal.${column}`, ">", toTimestamp(condition.gt));
+    filtered = filtered.where(reference, ">", toTimestamp(condition.gt));
   }
 
   if (condition.gte !== undefined) {
-    filtered = filtered.where(`journal.${column}`, ">=", toTimestamp(condition.gte));
+    filtered = filtered.where(reference, ">=", toTimestamp(condition.gte));
   }
 
   if (condition.in !== undefined) {
     const values = toTimestamps(condition.in);
-
-    if (values.length > 0) {
-      filtered = filtered.where(`journal.${column}`, "in", values);
-    }
+    filtered =
+      values.length === 0
+        ? filtered.where(sql<boolean>`1 = 0`)
+        : filtered.where(reference, "in", values);
   }
 
   if (condition.lt !== undefined) {
-    filtered = filtered.where(`journal.${column}`, "<", toTimestamp(condition.lt));
+    filtered = filtered.where(reference, "<", toTimestamp(condition.lt));
   }
 
   if (condition.lte !== undefined) {
-    filtered = filtered.where(`journal.${column}`, "<=", toTimestamp(condition.lte));
+    filtered = filtered.where(reference, "<=", toTimestamp(condition.lte));
   }
 
   if (condition.not !== undefined) {
-    filtered = filtered.where(`journal.${column}`, "!=", toTimestamp(condition.not));
+    filtered = filtered.where(reference, "!=", toTimestamp(condition.not));
   }
 
   if (condition.notIn !== undefined) {
     const values = toTimestamps(condition.notIn);
 
     if (values.length > 0) {
-      filtered = filtered.where(`journal.${column}`, "not in", values);
+      filtered = filtered.where(reference, "not in", values);
     }
   }
 
@@ -290,10 +304,10 @@ function withSizeFilter<T>(
 
   if (condition.in !== undefined) {
     const values = toSizeValues(condition.in);
-
-    if (values.length > 0) {
-      filtered = filtered.where("journal.size", "in", values);
-    }
+    filtered =
+      values.length === 0
+        ? filtered.where(sql<boolean>`1 = 0`)
+        : filtered.where("journal.size", "in", values);
   }
 
   if (condition.lt !== undefined) {
@@ -479,12 +493,12 @@ export function parseCursor(cursor: string | null | undefined): number {
 export function withMetadataFilter<T>(
   query: SelectQueryBuilder<SqlIndexDatabase, "journal", T>,
   filter: MetadataFilter | undefined,
-  fullTextOperator: FullTextOperator,
+  fullTextOperator: FullTextOperator = "LIKE",
 ): SelectQueryBuilder<SqlIndexDatabase, "journal", T> {
   let filtered = query.where("journal.record_type", "!=", "DELETE");
 
   if (filter?.contentType !== undefined) {
-    filtered = withStringFilter(filtered, "content_type", filter.contentType);
+    filtered = withStringFilter(filtered, "content_type", filter.contentType, fullTextOperator);
   }
 
   if (filter?.createdAt !== undefined) {
@@ -499,7 +513,7 @@ export function withMetadataFilter<T>(
   }
 
   if (filter?.hash !== undefined) {
-    filtered = withStringFilter(filtered, "hash", filter.hash);
+    filtered = withStringFilter(filtered, "hash", filter.hash, fullTextOperator);
   }
 
   if (filter?.recordTimestamp !== undefined) {

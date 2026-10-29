@@ -57,9 +57,9 @@ function createObject(key: string, tags: readonly string[] = []): OmnioObject {
     size: 3,
     tags: [...tags],
     entityId: crypto.randomUUID(),
-    createdAt: "2026-01-01T00:00:00Z",
+    createdAt: "2026-01-01T00:00:00.000Z",
     embedding: new Float32Array([1, 0, 0]),
-    updatedAt: "2026-01-02T00:00:00Z",
+    updatedAt: "2026-01-02T00:00:00.000Z",
     contentType: "text/plain",
     description: `${key} の説明文`,
     userMetadata: { genre: "test" },
@@ -110,8 +110,8 @@ async function seedThree(index: SqliteWasmIndex, signal: AbortSignal): Promise<v
       ...createObject("k1", ["red", "round"]),
       description: "赤い丸",
       hash: HASH_K1,
-      createdAt: "2026-01-01T00:00:00Z",
-      updatedAt: "2026-01-05T00:00:00Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-05T00:00:00.000Z",
       userMetadata: { color: "red" },
     },
     {
@@ -119,18 +119,18 @@ async function seedThree(index: SqliteWasmIndex, signal: AbortSignal): Promise<v
       description: "青い丸",
       hash: HASH_K2,
       contentType: "image/png",
-      createdAt: "2026-02-01T00:00:00Z",
+      createdAt: "2026-02-01T00:00:00.000Z",
       size: 8,
-      updatedAt: "2026-02-05T00:00:00Z",
+      updatedAt: "2026-02-05T00:00:00.000Z",
       userMetadata: { color: "blue" },
     },
     {
       ...createObject("k3", ["red", "square"]),
       description: "赤い四角",
       hash: HASH_K3,
-      createdAt: "2026-03-01T00:00:00Z",
+      createdAt: "2026-03-01T00:00:00.000Z",
       size: 5,
-      updatedAt: "2026-03-05T00:00:00Z",
+      updatedAt: "2026-03-05T00:00:00.000Z",
       userMetadata: { color: "red" },
     },
   ];
@@ -233,6 +233,50 @@ describe("lifecycle", () => {
       }),
     ).resolves.toBeUndefined();
     expect(index.isOpen).toBe(false);
+  });
+
+  test("location を指定したデータベースは開き直しても保持される", async ({ expect, signal }) => {
+    // 準備：
+    const location = `/omnio-${crypto.randomUUID()}.sqlite3`;
+    const first = new SqliteWasmIndex({ location });
+    const object = createObject("persisted");
+    await first.open({
+      action: "open",
+      signal,
+    });
+    await first.upsert({
+      action: "upsert",
+      object,
+      signal,
+    });
+    await first.close({
+      action: "close",
+      signal,
+    });
+
+    // 実行：
+    const second = new SqliteWasmIndex({ location });
+    await second.open({
+      action: "open",
+      signal,
+    });
+
+    try {
+      const actual = await second.get({
+        key: object.key,
+        action: "get",
+        signal,
+      });
+
+      // 検証：
+      expect(actual).toStrictEqual(object);
+    } finally {
+      // 後始末：
+      await second.close({
+        action: "close",
+        signal,
+      });
+    }
   });
 
   test("閉じた状態での get は DbNotOpenError を投げる", async ({ expect, signal }) => {
@@ -559,7 +603,7 @@ describe("updateMetadata", () => {
       signal,
       metadata: {
         tags: [],
-        updatedAt: "2026-02-01T00:00:00Z",
+        updatedAt: "2026-02-01T00:00:00.000Z",
         contentType: "application/json",
         description: "新しい説明",
         userMetadata: { genre: "updated" },
@@ -572,7 +616,7 @@ describe("updateMetadata", () => {
     expect(updated?.hash).toBe(object.hash);
     expect(updated?.hashAlgorithm).toBe(object.hashAlgorithm);
     expect(updated?.createdAt).toBe(object.createdAt);
-    expect(updated?.updatedAt).toBe("2026-02-01T00:00:00Z");
+    expect(updated?.updatedAt).toBe("2026-02-01T00:00:00.000Z");
     expect(updated?.contentType).toBe("application/json");
     expect(updated?.description).toBe("新しい説明");
     expect(updated?.tags).toStrictEqual([]);
@@ -596,7 +640,7 @@ describe("updateMetadata", () => {
         action: "updateMetadata",
         signal,
         metadata: {
-          updatedAt: "2026-02-01T00:00:00Z",
+          updatedAt: "2026-02-01T00:00:00.000Z",
           userMetadata: { genre: "updated" },
         },
       }),
@@ -629,7 +673,7 @@ describe("updateMetadata", () => {
       action: "updateMetadata",
       signal,
       metadata: {
-        updatedAt: "2026-02-01T00:00:00Z",
+        updatedAt: "2026-02-01T00:00:00.000Z",
         userMetadata: { genre: "updated" },
       },
     });
@@ -666,7 +710,7 @@ describe("rename", () => {
       action: "rename",
       signal,
       sourceKey: OmnioKey.parse("old"),
-      updatedAt: "2026-02-01T00:00:00Z",
+      updatedAt: "2026-02-01T00:00:00.000Z",
       destinationKey: OmnioKey.parse("new"),
     });
     const actual = await index.get({
@@ -682,7 +726,7 @@ describe("rename", () => {
     expect(result?.object.hash).toBe(object.hash);
     expect(result?.object.hashAlgorithm).toBe(object.hashAlgorithm);
     expect(result?.object.createdAt).toBe(object.createdAt);
-    expect(result?.object.updatedAt).toBe("2026-02-01T00:00:00Z");
+    expect(result?.object.updatedAt).toBe("2026-02-01T00:00:00.000Z");
     expect(result?.object.tags).toStrictEqual(["a", "b"]);
     expect(actual).toStrictEqual(result?.object);
 
@@ -722,7 +766,7 @@ describe("rename", () => {
       action: "rename",
       signal,
       sourceKey: OmnioKey.parse("source"),
-      updatedAt: "2026-02-01T00:00:00Z",
+      updatedAt: "2026-02-01T00:00:00.000Z",
       destinationKey: OmnioKey.parse("dest"),
     });
     const bySourceTag = await index.list({
@@ -759,7 +803,7 @@ describe("rename", () => {
         action: "rename",
         signal,
         sourceKey: OmnioKey.parse("missing"),
-        updatedAt: "2026-02-01T00:00:00Z",
+        updatedAt: "2026-02-01T00:00:00.000Z",
         destinationKey: OmnioKey.parse("dest"),
       }),
     ).toBeNull();
@@ -1145,22 +1189,22 @@ describe("list", () => {
     });
     const after = await index.list({
       action: "list",
-      filter: { createdAt: { gte: "2026-02-01T00:00:00Z" } },
+      filter: { createdAt: { gte: "2026-02-01T00:00:00.000Z" } },
       signal,
     });
     const before = await index.list({
       action: "list",
-      filter: { createdAt: { lte: "2026-01-15T00:00:00Z" } },
+      filter: { createdAt: { lte: "2026-01-15T00:00:00.000Z" } },
       signal,
     });
     const byUpdatedAt = await index.list({
       action: "list",
-      filter: { updatedAt: { gte: "2026-02-05T00:00:00Z" } },
+      filter: { updatedAt: { gte: "2026-02-05T00:00:00.000Z" } },
       signal,
     });
     const byRecordTimestamp = await index.list({
       action: "list",
-      filter: { recordTimestamp: { gte: "2026-02-05T00:00:00Z" } },
+      filter: { recordTimestamp: { gte: "2026-02-05T00:00:00.000Z" } },
       signal,
     });
 
@@ -1275,7 +1319,7 @@ describe("list", () => {
       key: OmnioKey.parse("k2"),
       action: "updateMetadata",
       signal,
-      metadata: { updatedAt: "2026-02-06T00:00:00Z" },
+      metadata: { updatedAt: "2026-02-06T00:00:00.000Z" },
     });
 
     const cases = [
@@ -1698,7 +1742,7 @@ describe("境界条件", () => {
       action: "rename",
       signal,
       sourceKey: object.key,
-      updatedAt: "2026-02-01T00:00:00Z",
+      updatedAt: "2026-02-01T00:00:00.000Z",
       destinationKey: object.key,
     });
 

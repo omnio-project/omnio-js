@@ -68,6 +68,13 @@ export class PostgresqlIndex extends PgVectorObjectIndex {
       max: this.#maxConnections,
       connectionString: this.#connectionString,
     });
+
+    // 待機中のクライアントで発生したエラーはクエリーの Promise に紐付かないため、リスナーがないと未処理の error イベントでプロセスが終了します。
+    // クエリー実行中のエラーは引き続き Promise の reject として呼び出し元に伝わります。
+    pool.on("error", () => {
+      // プールは影響を受けたクライアントを破棄するため、ここでは何もしません。
+    });
+
     const kysely = new Kysely<PostgresqlDatabase>({
       dialect: new PostgresDialect({ pool }),
     });

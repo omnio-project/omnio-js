@@ -2,6 +2,7 @@ import { type Kysely, sql } from "kysely";
 import type { Migration, MigrationProvider } from "kysely/migration";
 
 import type { SqlIndexDatabase } from "./schema.js";
+import { normalizeTimestamp } from "./timestamp.js";
 
 /**
  * SQL インデックスのマイグレーションを構築する設定です。
@@ -90,6 +91,85 @@ async function down001(db: Kysely<SqlIndexDatabase>): Promise<void> {
 }
 
 /**
+ * 解釈できない値をそのまま保持して日時を正規化します。
+ *
+ * @param value 変換する日時の文字列です。
+ *
+ * @returns 正規化した日時の文字列、解釈できない場合は元の文字列です。
+ */
+function normalizeOrKeep(value: string): string {
+  try {
+    return normalizeTimestamp(value, "migrate");
+  } catch {
+    // 壊れた旧データで開けなくならないよう、解釈できない値はそのまま保持します。
+    return value;
+  }
+}
+
+/**
+ * null を保持したまま日時を正規化します。
+ *
+ * @param value 変換する日時の文字列です。
+ *
+ * @returns 正規化した日時の文字列、null、または解釈できない場合は元の文字列です。
+ */
+function normalizeNullableOrKeep(value: string | null): string | null {
+  return value === null ? null : normalizeOrKeep(value);
+}
+
+/**
+ * `journal` 表に保存された日時をミリ秒付きの UTC 表記に揃えます。
+ *
+ * @param db kysely のインスタンスです。
+ */
+async function normalizeJournalTimestamps(db: Kysely<SqlIndexDatabase>): Promise<void> {
+  const rows = await db
+    .selectFrom("journal")
+    .select(["key", "created_at", "updated_at", "record_timestamp"])
+    .execute();
+
+  for (const row of rows) {
+    const createdAt = normalizeNullableOrKeep(row.created_at);
+    const updatedAt = normalizeNullableOrKeep(row.updated_at);
+    const recordTimestamp = normalizeOrKeep(row.record_timestamp);
+
+    if (
+      createdAt === row.created_at &&
+      updatedAt === row.updated_at &&
+      recordTimestamp === row.record_timestamp
+    ) {
+      continue;
+    }
+
+    await db
+      .updateTable("journal")
+      .set({
+        created_at: createdAt,
+        updated_at: updatedAt,
+        record_timestamp: recordTimestamp,
+      })
+      .where("key", "=", row.key)
+      .execute();
+  }
+}
+
+/**
+ * `journal` 表に保存された日時をミリ秒付きの UTC 表記に揃えます。
+ *
+ * @param db kysely のインスタンスです。
+ */
+async function up002(db: Kysely<SqlIndexDatabase>): Promise<void> {
+  // Kysely のマイグレーターは対応するデータベースではトランザクションを開始済みです。
+  if (db.isTransaction) {
+    await normalizeJournalTimestamps(db);
+
+    return;
+  }
+
+  await db.transaction().execute((trx) => normalizeJournalTimestamps(trx));
+}
+
+/**
  * 適用するマイグレーションの一覧を構築します。キー名の辞書順で実行します。
  *
  * @param options 列の型の設定です。
@@ -101,6 +181,12 @@ export function createSqlMigrations(options: SqlMigrationOptions): Record<string
     "001_create_journal": {
       up: (db) => up001(db, options),
       down: down001,
+    },
+    "002_normalize_journal_timestamps": {
+      up: up002,
+      down: async () => {
+        // 日時の正規化は元に戻せないため、ダウングレードでは何もしません。
+      },
     },
   };
 }

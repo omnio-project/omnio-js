@@ -16,6 +16,7 @@ import { type MigrationProvider, Migrator } from "kysely/migration";
 import { type FullTextOperator, parseCursor, withMetadataFilter } from "./filter.js";
 import { parseJson, stringifyJson } from "./json.js";
 import type { SqlObjectRow, SqlIndexDatabase } from "./schema.js";
+import { normalizeTimestamp } from "./timestamp.js";
 import {
   parseVector,
   scoreVector,
@@ -125,10 +126,9 @@ export abstract class SqlObjectIndex implements IObjectIndex {
 
     const kysely = this.#kysely;
 
-    this.#kysely = undefined;
-
     if (kysely !== undefined) {
       await kysely.destroy();
+      this.#kysely = undefined;
     }
   }
 
@@ -170,6 +170,8 @@ export abstract class SqlObjectIndex implements IObjectIndex {
 
     const key = object.key.key;
     const tags = [...new Set(object.tags)];
+    const createdAt = normalizeTimestamp(object.createdAt, "upsert");
+    const updatedAt = normalizeTimestamp(object.updatedAt, "upsert");
     await kysely.transaction().execute(async (transaction) => {
       const existing = await transaction
         .selectFrom("journal")
@@ -186,8 +188,8 @@ export abstract class SqlObjectIndex implements IObjectIndex {
         dirty: 0,
         embedding,
         entity_id: object.entityId,
-        created_at: object.createdAt,
-        updated_at: object.updatedAt,
+        created_at: createdAt,
+        updated_at: updatedAt,
         description: object.description ?? null,
         record_type: recordType,
         content_type: object.contentType,
@@ -196,7 +198,7 @@ export abstract class SqlObjectIndex implements IObjectIndex {
         hash_algorithm: object.hashAlgorithm ?? null,
         embedding_model: embeddingModel,
         embedding_source: embeddingSource,
-        record_timestamp: object.updatedAt,
+        record_timestamp: updatedAt,
       };
       await transaction
         .insertInto("journal")
@@ -254,6 +256,7 @@ export abstract class SqlObjectIndex implements IObjectIndex {
     using _lock = await asyncmux(this, c.signal);
 
     const kysely = this.#requireOpen("updateMetadata");
+    const updatedAt = normalizeTimestamp(c.metadata.updatedAt, "updateMetadata");
     const updated = await kysely.transaction().execute(async (transaction) => {
       const existing = await transaction
         .selectFrom("journal")
@@ -275,12 +278,12 @@ export abstract class SqlObjectIndex implements IObjectIndex {
       await transaction
         .updateTable("journal")
         .set({
-          updated_at: c.metadata.updatedAt,
+          updated_at: updatedAt,
           description,
           record_type: "UPDATE_METADATA",
           content_type: contentType,
           user_metadata: userMetadata,
-          record_timestamp: c.metadata.updatedAt,
+          record_timestamp: updatedAt,
         })
         .where("key", "=", c.key.key)
         .where("record_type", "!=", "DELETE")
@@ -374,12 +377,15 @@ export abstract class SqlObjectIndex implements IObjectIndex {
         .select(["key", "entity_id"])
         .where("key", "=", c.destinationKey.key)
         .executeTakeFirst();
+      const updatedAt = normalizeTimestamp(c.updatedAt, "rename");
       const renamedRow: SqlObjectRow = {
         ...sourceRow,
         key: c.destinationKey.key,
+        created_at:
+          sourceRow.created_at === null ? null : normalizeTimestamp(sourceRow.created_at, "rename"),
         record_type: "UPDATE_METADATA",
-        record_timestamp: c.updatedAt,
-        updated_at: c.updatedAt,
+        record_timestamp: updatedAt,
+        updated_at: updatedAt,
       };
 
       if (destinationRow !== undefined) {
@@ -475,7 +481,7 @@ export abstract class SqlObjectIndex implements IObjectIndex {
     using _lock = await asyncmux(this, c.signal);
 
     const kysely = this.#requireOpen("delete");
-    const recordTimestamp = new Date().toISOString();
+    const recordTimestamp = normalizeTimestamp(new Date(), "delete");
     const updated = await kysely.transaction().execute(async (transaction) => {
       const result = await transaction
         .updateTable("journal")
@@ -583,14 +589,28 @@ export abstract class SqlObjectIndex implements IObjectIndex {
     using _lock = await asyncmux(this, c.signal);
 
     const kysely = this.#requireOpen("markDirty");
-    const result = await kysely
+    let query = kysely
       .updateTable("journal")
       .set({ dirty: 1 })
       .where("record_type", "!=", "DELETE")
       .where("description", "is not", null)
-      .where("embedding_model", "is not", null)
-      .where("embedding_model", "!=", c.embeddingModel)
-      .executeTakeFirst();
+      .where("embedding_model", "is not", null);
+
+    const embeddingDims = c.embeddingDims;
+
+    if (embeddingDims === undefined) {
+      query = query.where("embedding_model", "!=", c.embeddingModel);
+    } else {
+      query = query.where((eb) =>
+        eb.or([
+          eb("embedding_model", "!=", c.embeddingModel),
+          eb("embedding_dims", "is", null),
+          eb("embedding_dims", "!=", embeddingDims),
+        ]),
+      );
+    }
+
+    const result = await query.executeTakeFirst();
     const updated = result.numUpdatedRows;
 
     return typeof updated === "bigint" ? Number(updated) : updated;
@@ -617,15 +637,18 @@ export abstract class SqlObjectIndex implements IObjectIndex {
       return [];
     }
 
-    const rows = await kysely
+    let query = kysely
       .selectFrom("journal")
       .selectAll()
       .where("dirty", "=", 1)
       .where("record_type", "!=", "DELETE")
-      .where("description", "is not", null)
-      .orderBy("key")
-      .limit(limit)
-      .execute();
+      .where("description", "is not", null);
+
+    if (c.afterKey !== undefined) {
+      query = query.where("key", ">", c.afterKey);
+    }
+
+    const rows = await query.orderBy("key").limit(limit).execute();
     const tags = await this.#loadTags(
       kysely,
       rows.map((row) => row.key),

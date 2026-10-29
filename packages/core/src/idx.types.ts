@@ -143,6 +143,9 @@ export interface IMarkDirtyContext extends IActionContext {
   /** 操作の種別です。 */
   readonly action: "markDirty";
 
+  /** 現在使っている埋め込みベクトルの次元数です。省略時はモデル名だけで判定します。 */
+  readonly embeddingDims?: number | undefined;
+
   /** 現在使っている埋め込みモデル名です。 */
   readonly embeddingModel: string;
 }
@@ -153,6 +156,9 @@ export interface IMarkDirtyContext extends IActionContext {
 export interface IListDirtyContext extends IActionContext {
   /** 操作の種別です。 */
   readonly action: "listDirty";
+
+  /** このキーより後ろのオブジェクトだけを取得します。 */
+  readonly afterKey?: string | undefined;
 
   /** 取得する最大件数です。 */
   readonly limit?: number | undefined;

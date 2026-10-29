@@ -1,5 +1,7 @@
 import {
   type IEmbedder,
+  type OmnioObject,
+  type IObjectIndex,
   type IndexedObject,
   OmnioKey,
   DbNotOpenError,
@@ -23,13 +25,13 @@ import { Omnio } from "../src/omnio.js";
  * 画像はすべて [1, 0] にします。外部への問い合わせはしないため、決定的に動作します。
  */
 class FakeEmbedder implements IEmbedder {
-  public readonly info = {
+  public readonly info: IEmbedder["info"] = {
     dims: 2,
     name: "fake-model",
     modalities: ["text", "image"],
     normalized: true,
     multilingual: false,
-  } as const;
+  };
 
   public supports(c: IEmbedder.SupportsContext): boolean {
     return c.modality === "text" || c.modality === "image";
@@ -94,6 +96,76 @@ class FakeEmbedder implements IEmbedder {
     }
 
     return new Float32Array([Math.SQRT1_2, Math.SQRT1_2]);
+  }
+}
+
+/**
+ * 埋め込みの開始と再開をテストから制御できる埋め込み器です。
+ */
+class GatedEmbedder extends FakeEmbedder {
+  public readonly started = Promise.withResolvers<string>();
+
+  public readonly release = Promise.withResolvers<void>();
+
+  public override async embedText(c: IEmbedder.EmbedTextContext): Promise<Float32Array> {
+    this.started.resolve(c.text);
+    await this.release.promise;
+
+    return super.embedText(c);
+  }
+}
+
+/**
+ * "fail" を含む説明文の埋め込みだけを失敗させる埋め込み器です。
+ */
+class FailingEmbedder extends FakeEmbedder {
+  public override async embedText(c: IEmbedder.EmbedTextContext): Promise<Float32Array> {
+    if (c.text.includes("fail")) {
+      throw new Error("embed failed");
+    }
+
+    return super.embedText(c);
+  }
+}
+
+/**
+ * モデル名は同じで次元数だけが異なる埋め込み器です。
+ */
+class ThreeDimEmbedder extends FakeEmbedder {
+  public override readonly info: IEmbedder["info"] = {
+    dims: 3,
+    name: "fake-model",
+    modalities: ["text", "image"],
+    normalized: true,
+    multilingual: false,
+  };
+
+  public override async embedText(_c: IEmbedder.EmbedTextContext): Promise<Float32Array> {
+    return new Float32Array([1, 0, 0]);
+  }
+}
+
+/**
+ * `afterKey` を無視して同じページを返し続ける索引です。
+ *
+ * 無限ループする実装でもテストが停止できるよう、6 回目以降は空のページを返します。
+ */
+class AfterKeyIgnoringIndex extends SqliteWasmIndex {
+  public listCalls = 0;
+
+  public override async listDirty<TUserMetadata>(
+    c: IObjectIndex.ListDirtyContext,
+  ): Promise<OmnioObject<TUserMetadata>[]> {
+    this.listCalls++;
+
+    if (this.listCalls > 5) {
+      return [];
+    }
+
+    return super.listDirty<TUserMetadata>({
+      ...c,
+      afterKey: undefined,
+    });
   }
 }
 
@@ -464,6 +536,339 @@ describe("open と close", () => {
     // 後始末：
     await omnio.close(signal);
   });
+
+  test("索引の終了に失敗しても実体を閉じて状態を戻す", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, builder);
+    const failure = new Error("close failed");
+    const entity = getEntity();
+    using _indexClose = vi.spyOn(index, "close").mockRejectedValueOnce(failure);
+    using _entityClose = vi.spyOn(entity, "close");
+
+    // 実行と検証：
+    await expect(omnio.close(signal)).rejects.toBe(failure);
+    expect(_entityClose).toHaveBeenCalledOnce();
+    expect(omnio.isOpen).toBe(false);
+
+    // 後始末：
+    await omnio.open(signal);
+
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    expect(stored.key.key).toBe("k");
+
+    await omnio.close(signal);
+  });
+
+  test("索引の close に失敗した場合は次の close で再試行する", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, builder);
+    const failure = new Error("close failed");
+    const entity = getEntity();
+    using _indexClose = vi.spyOn(index, "close").mockRejectedValueOnce(failure);
+    using _entityClose = vi.spyOn(entity, "close");
+
+    // 実行と検証：
+    await expect(omnio.close(signal)).rejects.toBe(failure);
+    expect(_indexClose).toHaveBeenCalledOnce();
+    expect(_entityClose).toHaveBeenCalledOnce();
+    expect(omnio.isOpen).toBe(false);
+
+    // 後始末：
+    await omnio.close(signal);
+    expect(_indexClose).toHaveBeenCalledTimes(2);
+    expect(_entityClose).toHaveBeenCalledOnce();
+    expect(index.isOpen).toBe(false);
+    expect(omnio.isOpen).toBe(false);
+  });
+
+  test("実体の close に失敗した場合は次の close で再試行する", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, builder);
+    const failure = new Error("close failed");
+    const entity = getEntity();
+    using _indexClose = vi.spyOn(index, "close");
+    using _entityClose = vi.spyOn(entity, "close").mockRejectedValueOnce(failure);
+
+    // 実行と検証：
+    await expect(omnio.close(signal)).rejects.toBe(failure);
+    expect(_indexClose).toHaveBeenCalledOnce();
+    expect(_entityClose).toHaveBeenCalledOnce();
+    expect(index.isOpen).toBe(false);
+    expect(omnio.isOpen).toBe(false);
+
+    // 後始末：
+    await omnio.close(signal);
+    expect(_indexClose).toHaveBeenCalledOnce();
+    expect(_entityClose).toHaveBeenCalledTimes(2);
+    expect(omnio.isOpen).toBe(false);
+  });
+
+  test("実体の close に失敗した後の open は不足している索引だけを開く", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, builder);
+    const failure = new Error("close failed");
+    const entity = getEntity();
+    using _entityClose = vi.spyOn(entity, "close").mockRejectedValueOnce(failure);
+    await expect(omnio.close(signal)).rejects.toBe(failure);
+
+    using _indexOpen = vi.spyOn(index, "open");
+    using _entityOpen = vi.spyOn(entity, "open");
+
+    // 実行：
+    await omnio.open(signal);
+
+    // 検証：
+    expect(_indexOpen).toHaveBeenCalledOnce();
+    expect(_entityOpen).not.toHaveBeenCalled();
+    expect(omnio.isOpen).toBe(true);
+
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    expect(stored.key.key).toBe("k");
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("索引の close が実体を閉じた後に失敗したら open で開き直す", async ({ expect, signal }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index);
+    const failure = new Error("close failed");
+    const originalClose = index.close.bind(index);
+    using _indexClose = vi.spyOn(index, "close").mockImplementationOnce(async (c) => {
+      await originalClose(c);
+
+      throw failure;
+    });
+
+    // 実行と検証：
+    await expect(omnio.close(signal)).rejects.toBe(failure);
+    expect(omnio.isOpen).toBe(false);
+    expect(index.isOpen).toBe(false);
+
+    using _indexOpen = vi.spyOn(index, "open");
+
+    await omnio.open(signal);
+    expect(_indexOpen).toHaveBeenCalledOnce();
+    expect(omnio.isOpen).toBe(true);
+
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    expect(stored.key.key).toBe("k");
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("open の巻き戻しで close に失敗しても次の open で回復する", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, builder);
+    await omnio.close(signal);
+
+    const entity = getEntity();
+    const openFailure = new Error("open failed");
+    const closeFailure = new Error("close failed");
+    using _indexClose = vi.spyOn(index, "close");
+    using _entityClose = vi.spyOn(entity, "close").mockRejectedValueOnce(closeFailure);
+    using _indexOpen = vi.spyOn(index, "open").mockRejectedValueOnce(openFailure);
+    using _entityOpen = vi.spyOn(entity, "open");
+
+    // 実行と検証：
+    await expect(omnio.open(signal)).rejects.toBe(openFailure);
+    expect(_entityClose).toHaveBeenCalledOnce();
+    expect(_indexClose).not.toHaveBeenCalled();
+
+    expect(omnio.isOpen).toBe(false);
+
+    // 後始末：
+    await omnio.open(signal);
+    expect(_indexOpen).toHaveBeenCalledTimes(2);
+    expect(_entityOpen).toHaveBeenCalledOnce();
+    expect(omnio.isOpen).toBe(true);
+
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    expect(stored.key.key).toBe("k");
+
+    await omnio.close(signal);
+  });
+
+  test("実体を閉じる前に中断された close は開いたままライフサイクルを戻す", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index);
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    using _get = vi.spyOn(index, "get").mockImplementation(async () => {
+      started.resolve();
+      await release.promise;
+
+      return null;
+    });
+    const loading = omnio.headObject("k", signal);
+    await started.promise;
+
+    const controller = new AbortController();
+    const reason = new OperationAbortedError();
+
+    // 実行：
+    const closing = omnio.close(controller.signal);
+    controller.abort(reason);
+
+    // 検証：
+    await expect(closing).rejects.toBe(reason);
+
+    expect(omnio.isOpen).toBe(true);
+
+    release.resolve();
+    await loading;
+
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    expect(stored.key.key).toBe("k");
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("バックグラウンド削除の待機中でも close の中断シグナルを守る", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, createTestEntityBuilder());
+    await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+
+    const purgeStarted = Promise.withResolvers<void>();
+    const allowPurge = Promise.withResolvers<void>();
+    const purgeFinished = Promise.withResolvers<void>();
+    const originalPurge = index.purge.bind(index);
+    using _purge = vi.spyOn(index, "purge").mockImplementation(async (c) => {
+      purgeStarted.resolve();
+      await allowPurge.promise;
+
+      const result = await originalPurge(c);
+
+      purgeFinished.resolve();
+
+      return result;
+    });
+
+    // 実行：
+    await omnio.deleteObject("k", signal);
+    await purgeStarted.promise;
+
+    const controller = new AbortController();
+    const reason = new OperationAbortedError();
+    const closing = omnio.close(controller.signal);
+    controller.abort(reason);
+
+    // 検証：
+    await expect(closing).rejects.toBe(reason);
+
+    expect(omnio.isOpen).toBe(true);
+
+    allowPurge.resolve();
+    await purgeFinished.promise;
+
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([2]),
+      contentType: "text/plain",
+    });
+    expect(stored.key.key).toBe("k");
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("close の初回確認後に予約された削除も完了してから閉じる", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, builder);
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    const originalDelete = index.delete.bind(index);
+    const deleteMarked = Promise.withResolvers<void>();
+    const allowDeleteReturn = Promise.withResolvers<void>();
+    using _delete = vi.spyOn(index, "delete").mockImplementationOnce(async (c) => {
+      const result = await originalDelete(c);
+
+      deleteMarked.resolve();
+      await allowDeleteReturn.promise;
+
+      return result;
+    });
+    let purged = 0;
+    const originalPurge = index.purge.bind(index);
+    using _purge = vi.spyOn(index, "purge").mockImplementation(async (c) => {
+      purged++;
+
+      return originalPurge(c);
+    });
+
+    // 実行：
+    const deleting = omnio.deleteObject("k", signal);
+    await deleteMarked.promise;
+
+    // close はこの時点で削除予約をまだ認識していない。
+    const closing = omnio.close(signal);
+
+    allowDeleteReturn.resolve();
+    await deleting;
+    await closing;
+
+    // 検証：
+    expect(purged).toBe(1);
+    expect(omnio.isOpen).toBe(false);
+
+    // 後始末：
+    await omnio.open(signal);
+    expect(await getEntity().has(stored.entityId)).toBe(false);
+    await omnio.close(signal);
+  });
 });
 
 describe("排他制御", () => {
@@ -498,6 +903,67 @@ describe("排他制御", () => {
     expect(get).toHaveBeenCalledTimes(2);
     expect(first).toBeNull();
     expect(second).toBeNull();
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("同じキーへの書き込みは索引保存の完了まで直列化する", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, builder);
+    const entity = getEntity();
+    const firstUpsertStarted = Promise.withResolvers<void>();
+    const releaseFirstUpsert = Promise.withResolvers<void>();
+    const originalUpsert = index.upsert.bind(index);
+    using _upsert = vi.spyOn(index, "upsert").mockImplementationOnce(async (c) => {
+      firstUpsertStarted.resolve();
+      await releaseFirstUpsert.promise;
+
+      return originalUpsert(c);
+    });
+    const originalSet = entity.set.bind(entity);
+    let entityWrites = 0;
+    using _set = vi.spyOn(entity, "set").mockImplementation(async (key, value, options) => {
+      entityWrites++;
+
+      return originalSet(key, value, options);
+    });
+
+    // 実行：
+    const first = omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+      userMetadata: { version: 1 },
+    });
+    await firstUpsertStarted.promise;
+
+    const second = omnio.putObject({
+      key: "k",
+      data: new Uint8Array([2]),
+      contentType: "text/plain",
+      userMetadata: { version: 2 },
+    });
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    // 検証：1 件目の索引保存が終わるまで 2 件目は実体を書かない。
+    expect(entityWrites).toBe(1);
+
+    releaseFirstUpsert.resolve();
+    const [firstObject, secondObject] = await Promise.all([first, second]);
+
+    // 検証：
+    expect(entityWrites).toBe(2);
+    expect(secondObject.entityId).toBe(firstObject.entityId);
+    expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([2]));
+
+    const head = await omnio.headObject("k", signal);
+    expect(head?.userMetadata).toStrictEqual({ version: 2 });
 
     // 後始末：
     await omnio.close(signal);
@@ -589,6 +1055,577 @@ describe("dirty 再インデックス", () => {
       kind: "description",
       model: "fake-model",
     });
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("埋め込み中に更新されたオブジェクトを古いスナップショットで上書きしない", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    await index.open({
+      action: "open",
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: {
+        key: OmnioKey.parse("k"),
+        size: 3,
+        tags: ["old"],
+        entityId: crypto.randomUUID(),
+        createdAt: "2026-01-01T00:00:00Z",
+        embedding: new Float32Array([0, 1]),
+        updatedAt: "2026-01-01T00:00:00Z",
+        contentType: "text/plain",
+        description: "cat old",
+        userMetadata: { version: 1 },
+        embeddingDims: 2,
+        embeddingModel: "old-model",
+        embeddingSource: {
+          kind: "description",
+          model: "old-model",
+        },
+      },
+      signal,
+    });
+
+    const embedder = new GatedEmbedder();
+    const omnio = new Omnio({
+      index,
+      entity: createTestEntityBuilder(),
+      embedder,
+    });
+
+    // 実行：
+    await omnio.open(signal);
+    await embedder.started.promise;
+
+    const newer = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([9]),
+      tags: ["new"],
+      embed: false,
+      contentType: "application/json",
+      description: "dog new",
+      userMetadata: { version: 2 },
+    });
+
+    const originalGet = index.get.bind(index);
+    let reads = 0;
+    using _get = vi.spyOn(index, "get").mockImplementation(async (c) => {
+      const result = await originalGet(c);
+
+      reads++;
+
+      return result;
+    });
+
+    embedder.release.resolve();
+    await vi.waitFor(() => {
+      expect(reads).toBeGreaterThanOrEqual(1);
+    });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    // 検証：
+    const head = await omnio.headObject("k", signal);
+    expect(head?.description).toBe("dog new");
+    expect(head?.tags).toStrictEqual(["new"]);
+    expect(head?.userMetadata).toStrictEqual({ version: 2 });
+    expect(head?.updatedAt).toBe(newer.updatedAt);
+    expect(head?.embedding).toBeUndefined();
+
+    expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([9]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("埋め込み中に明示的な埋め込みへ変更されたら古い再インデックスで上書きしない", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    await index.open({
+      action: "open",
+      signal,
+    });
+
+    for (const key of ["a", "b"]) {
+      await index.upsert({
+        action: "upsert",
+        object: {
+          key: OmnioKey.parse(key),
+          size: 1,
+          tags: [],
+          entityId: crypto.randomUUID(),
+          createdAt: "2026-01-01T00:00:00Z",
+          embedding: new Float32Array([0, 1]),
+          updatedAt: "2026-01-01T00:00:00Z",
+          contentType: "text/plain",
+          description: "cat old",
+          userMetadata: { version: 1 },
+          embeddingDims: 2,
+          embeddingModel: "old-model",
+          embeddingSource: {
+            kind: "description",
+            model: "old-model",
+          },
+        },
+        signal,
+      });
+    }
+
+    const embedder = new GatedEmbedder();
+    const omnio = new Omnio({
+      index,
+      entity: createTestEntityBuilder(),
+      embedder,
+    });
+
+    // 実行：
+    await omnio.open(signal);
+    await embedder.started.promise;
+    await omnio.putObject({
+      key: "a",
+      data: new Uint8Array([1]),
+      embed: false,
+      contentType: "text/plain",
+      description: "cat old",
+      userMetadata: { version: 2 },
+    });
+
+    const explicitEmbedding = new Float32Array([0.25, 0.75]);
+    await omnio.putObject({
+      key: "b",
+      data: new Uint8Array([2]),
+      embedding: explicitEmbedding,
+      contentType: "text/plain",
+      description: "cat old",
+      userMetadata: { version: 3 },
+    });
+
+    const originalGet = index.get.bind(index);
+    let reads = 0;
+    using _get = vi.spyOn(index, "get").mockImplementation(async (c) => {
+      const result = await originalGet(c);
+
+      reads++;
+
+      return result;
+    });
+
+    embedder.release.resolve();
+    await vi.waitFor(() => {
+      expect(reads).toBeGreaterThanOrEqual(2);
+    });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    // 検証：
+    const disabled = await omnio.headObject("a", signal);
+    expect(disabled?.description).toBe("cat old");
+    expect(disabled?.embedding).toBeUndefined();
+    expect(disabled?.embeddingModel).toBeUndefined();
+    expect(disabled?.userMetadata).toStrictEqual({ version: 2 });
+
+    const explicit = await omnio.headObject("b", signal);
+    expect(explicit?.description).toBe("cat old");
+    expect(explicit?.embedding).toStrictEqual(explicitEmbedding);
+    expect(explicit?.embeddingModel).toBeUndefined();
+    expect(explicit?.userMetadata).toStrictEqual({ version: 3 });
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("埋め込み中にメタデータだけが更新されても再インデックスを反映する", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    await index.open({
+      action: "open",
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: {
+        key: OmnioKey.parse("k"),
+        size: 3,
+        tags: ["old"],
+        entityId: crypto.randomUUID(),
+        createdAt: "2026-01-01T00:00:00Z",
+        embedding: new Float32Array([0, 1]),
+        updatedAt: "2026-01-01T00:00:00Z",
+        contentType: "text/plain",
+        description: "cat old",
+        userMetadata: { version: 1 },
+        embeddingDims: 2,
+        embeddingModel: "old-model",
+        embeddingSource: {
+          kind: "description",
+          model: "old-model",
+        },
+      },
+      signal,
+    });
+
+    const embedder = new GatedEmbedder();
+    const omnio = new Omnio({
+      index,
+      entity: createTestEntityBuilder(),
+      embedder,
+    });
+
+    // 実行：
+    await omnio.open(signal);
+    await embedder.started.promise;
+    await omnio.updateObjectMetadata({
+      key: "k",
+      tags: ["new"],
+      signal,
+      userMetadata: { version: 2 },
+    });
+    embedder.release.resolve();
+
+    // 検証：
+    await vi.waitFor(
+      async () => {
+        const head = await omnio.headObject("k", signal);
+        expect(head?.embedding).toStrictEqual(new Float32Array([1, 0]));
+        expect(head?.embeddingModel).toBe("fake-model");
+        expect(head?.tags).toStrictEqual(["new"]);
+        expect(head?.userMetadata).toStrictEqual({ version: 2 });
+      },
+      { timeout: 2000 },
+    );
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("埋め込み中に説明文が変わった dirty オブジェクトを追加の走査で作り直す", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    await index.open({
+      action: "open",
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: {
+        key: OmnioKey.parse("k"),
+        size: 3,
+        tags: [],
+        entityId: crypto.randomUUID(),
+        createdAt: "2026-01-01T00:00:00Z",
+        embedding: new Float32Array([0, 1]),
+        updatedAt: "2026-01-01T00:00:00Z",
+        contentType: "text/plain",
+        description: "cat old",
+        userMetadata: {},
+        embeddingDims: 2,
+        embeddingModel: "old-model",
+        embeddingSource: {
+          kind: "description",
+          model: "old-model",
+        },
+      },
+      signal,
+    });
+
+    const embedder = new GatedEmbedder();
+    const omnio = new Omnio({
+      index,
+      entity: createTestEntityBuilder(),
+      embedder,
+    });
+
+    // 実行：
+    await omnio.open(signal);
+    await embedder.started.promise;
+    await omnio.updateObjectMetadata({
+      key: "k",
+      signal,
+      description: "dog new",
+    });
+    embedder.release.resolve();
+
+    // 検証：
+    await vi.waitFor(
+      async () => {
+        const head = await omnio.headObject("k", signal);
+        expect(head?.description).toBe("dog new");
+        expect(head?.embedding).toStrictEqual(new Float32Array([0, 1]));
+        expect(head?.embeddingModel).toBe("fake-model");
+      },
+      { timeout: 2000 },
+    );
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("失敗する dirty オブジェクトがあっても後続の再インデックスを続ける", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    await index.open({
+      action: "open",
+      signal,
+    });
+
+    for (const [key, description] of [
+      ["a", "fail embedding"],
+      ["b", "cat on the mat"],
+    ] as const) {
+      await index.upsert({
+        action: "upsert",
+        object: {
+          key: OmnioKey.parse(key),
+          size: 1,
+          tags: [],
+          entityId: crypto.randomUUID(),
+          createdAt: "2026-01-01T00:00:00Z",
+          embedding: new Float32Array([0, 1]),
+          updatedAt: "2026-01-01T00:00:00Z",
+          contentType: "text/plain",
+          description,
+          userMetadata: {},
+          embeddingDims: 2,
+          embeddingModel: "old-model",
+          embeddingSource: {
+            kind: "description",
+            model: "old-model",
+          },
+        },
+        signal,
+      });
+    }
+
+    const embedder = new FailingEmbedder();
+    const omnio = new Omnio({
+      index,
+      entity: createTestEntityBuilder(),
+      embedder,
+    });
+
+    // 実行：
+    await omnio.open(signal);
+
+    // 検証：
+    await vi.waitFor(
+      async () => {
+        const dirty = await index.listDirty<unknown>({
+          limit: 10,
+          action: "listDirty",
+          signal,
+        });
+        expect(dirty.map((object) => object.key.key)).toStrictEqual(["a"]);
+      },
+      { timeout: 2000 },
+    );
+    const head = await omnio.headObject("b", signal);
+    expect(head?.embedding).toStrictEqual(new Float32Array([1, 0]));
+    expect(head?.embeddingModel).toBe("fake-model");
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("先頭ページがすべて失敗しても後ろの dirty キーを走査する", async ({ expect, signal }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    await index.open({
+      action: "open",
+      signal,
+    });
+
+    const failingKeys = Array.from({ length: 10 }, (_, position) => `a${position}`);
+    const cases = [
+      ...failingKeys.map((key, position) => [key, `fail ${position}`] as const),
+      ["z", "cat good"] as const,
+    ];
+
+    for (const [key, description] of cases) {
+      await index.upsert({
+        action: "upsert",
+        object: {
+          key: OmnioKey.parse(key),
+          size: 1,
+          tags: [],
+          entityId: crypto.randomUUID(),
+          createdAt: "2026-01-01T00:00:00Z",
+          embedding: new Float32Array([0, 1]),
+          updatedAt: "2026-01-01T00:00:00Z",
+          contentType: "text/plain",
+          description,
+          userMetadata: {},
+          embeddingDims: 2,
+          embeddingModel: "old-model",
+          embeddingSource: {
+            kind: "description",
+            model: "old-model",
+          },
+        },
+        signal,
+      });
+    }
+
+    const omnio = new Omnio({
+      index,
+      entity: createTestEntityBuilder(),
+      embedder: new FailingEmbedder(),
+    });
+
+    // 実行：
+    await omnio.open(signal);
+
+    // 検証：
+    await vi.waitFor(
+      async () => {
+        const head = await omnio.headObject("z", signal);
+        expect(head?.embedding).toStrictEqual(new Float32Array([1, 0]));
+        expect(head?.embeddingModel).toBe("fake-model");
+      },
+      { timeout: 3000 },
+    );
+
+    const dirty = await index.listDirty<unknown>({
+      limit: 20,
+      action: "listDirty",
+      signal,
+    });
+    expect(dirty.map((object) => object.key.key)).toStrictEqual(failingKeys);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("afterKey を無視する索引でも dirty 走査を停止する", async ({ expect, signal }) => {
+    // 準備：
+    const index = new AfterKeyIgnoringIndex();
+    await index.open({
+      action: "open",
+      signal,
+    });
+
+    for (let position = 0; position < 10; position++) {
+      await index.upsert({
+        action: "upsert",
+        object: {
+          key: OmnioKey.parse(`a${position}`),
+          size: 1,
+          tags: [],
+          entityId: crypto.randomUUID(),
+          createdAt: "2026-01-01T00:00:00Z",
+          embedding: new Float32Array([0, 1]),
+          updatedAt: "2026-01-01T00:00:00Z",
+          contentType: "text/plain",
+          description: `fail ${position}`,
+          userMetadata: {},
+          embeddingDims: 2,
+          embeddingModel: "old-model",
+          embeddingSource: {
+            kind: "description",
+            model: "old-model",
+          },
+        },
+        signal,
+      });
+    }
+
+    const omnio = new Omnio({
+      index,
+      entity: createTestEntityBuilder(),
+      embedder: new FailingEmbedder(),
+    });
+
+    // 実行：
+    await omnio.open(signal);
+
+    // 検証：
+    await vi.waitFor(
+      () => {
+        expect(index.listCalls).toBeGreaterThanOrEqual(2);
+      },
+      { timeout: 1000 },
+    );
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(index.listCalls).toBe(2);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("同じモデル名でも次元数が変わると dirty にして再インデックスする", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    await index.open({
+      action: "open",
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: {
+        key: OmnioKey.parse("k"),
+        size: 1,
+        tags: [],
+        entityId: crypto.randomUUID(),
+        createdAt: "2026-01-01T00:00:00Z",
+        embedding: new Float32Array([1, 0]),
+        updatedAt: "2026-01-01T00:00:00Z",
+        contentType: "text/plain",
+        description: "cat on the mat",
+        userMetadata: {},
+        embeddingDims: 2,
+        embeddingModel: "fake-model",
+        embeddingSource: {
+          kind: "description",
+          model: "fake-model",
+        },
+      },
+      signal,
+    });
+
+    const omnio = new Omnio({
+      index,
+      entity: createTestEntityBuilder(),
+      embedder: new ThreeDimEmbedder(),
+    });
+
+    // 実行：
+    await omnio.open(signal);
+
+    // 検証：
+    await vi.waitFor(
+      async () => {
+        const head = await omnio.headObject("k", signal);
+        expect(head?.embedding).toStrictEqual(new Float32Array([1, 0, 0]));
+        expect(head?.embeddingDims).toBe(3);
+        expect(head?.embeddingModel).toBe("fake-model");
+      },
+      { timeout: 2000 },
+    );
 
     // 後始末：
     await omnio.close(signal);
@@ -719,6 +1756,61 @@ describe("putObject と getObject", () => {
     // 検証：
     expect(stream).not.toBeInstanceOf(ReadableStream);
     expect(await omnio.getObject("s", signal)).toStrictEqual(new Uint8Array([9, 10]));
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("ストリームの読み取り中に中断すると即座に失敗してキャンセルする", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const omnio = await createTestOmnio(signal);
+    const started = Promise.withResolvers<void>();
+    const cancelled = Promise.withResolvers<void>();
+    const stream = new ReadableStream<Uint8Array>({
+      pull(): Promise<void> {
+        started.resolve();
+
+        return new Promise<void>(() => {});
+      },
+      cancel(): void {
+        cancelled.resolve();
+      },
+    });
+    const controller = new AbortController();
+    const reason = new OperationAbortedError();
+
+    // 実行：
+    const putting = omnio.putObject({
+      key: "k",
+      data: stream,
+      signal: controller.signal,
+      contentType: "application/octet-stream",
+    });
+    await started.promise;
+    controller.abort(reason);
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      putting.then(
+        () => undefined,
+        (error: unknown) => error,
+      ),
+      new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => {
+          resolve("timeout");
+        }, 1000);
+      }),
+    ]);
+    clearTimeout(timer);
+
+    // 検証：
+    expect(outcome).toBe(reason);
+
+    await cancelled.promise;
+    expect(await omnio.hasObject("k", signal)).toBe(false);
 
     // 後始末：
     await omnio.close(signal);
@@ -1577,7 +2669,9 @@ describe("deleteObject", () => {
     expect(deleted).toBe(true);
     expect(await omnio.getObject("k", signal)).toBeNull();
     await purged.promise;
-    expect(await getEntity().has(stored.entityId)).toBe(false);
+    await vi.waitFor(async () => {
+      expect(await getEntity().has(stored.entityId)).toBe(false);
+    });
     await expect(
       index.purge({
         key: stored.key,
@@ -1586,6 +2680,154 @@ describe("deleteObject", () => {
         entityId: stored.entityId,
       }),
     ).resolves.toBe(false);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("索引の削除に成功しなければ再作成された実体を消さない", async ({ expect, signal }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, builder);
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    const entity = getEntity();
+    const purgeStarted = Promise.withResolvers<void>();
+    const allowPurge = Promise.withResolvers<void>();
+    const purgeFinished = Promise.withResolvers<void>();
+    const originalPurge = index.purge.bind(index);
+    using _purge = vi.spyOn(index, "purge").mockImplementation(async (c) => {
+      purgeStarted.resolve();
+      await allowPurge.promise;
+
+      const result = await originalPurge(c);
+
+      purgeFinished.resolve();
+
+      return result;
+    });
+    const originalHas = entity.has.bind(entity);
+    using _has = vi.spyOn(entity, "has").mockImplementation(async (id, options) => {
+      purgeStarted.resolve();
+      await allowPurge.promise;
+
+      return originalHas(id, options);
+    });
+
+    // 実行：
+    expect(await omnio.deleteObject("k", signal)).toBe(true);
+    await purgeStarted.promise;
+
+    // バックグラウンドの削除が判断する前に、同じキーが再作成された状態を再現します。
+    const newer = {
+      ...stored,
+      size: 1,
+      tags: [],
+      updatedAt: new Date().toISOString(),
+      contentType: "application/json",
+      description: "newer",
+      userMetadata: { version: 2 },
+      embedding: undefined,
+      embeddingDims: undefined,
+      embeddingModel: undefined,
+      embeddingSource: undefined,
+    };
+    await index.upsert({
+      action: "upsert",
+      object: newer,
+      signal,
+    });
+
+    await entity.set(stored.entityId, new Uint8Array([9]), { signal });
+    allowPurge.resolve();
+    await purgeFinished.promise;
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    // 検証：
+    const head = await omnio.headObject("k", signal);
+
+    expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([9]));
+    expect(head?.userMetadata).toStrictEqual({ version: 2 });
+    expect(await entity.has(stored.entityId)).toBe(true);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("索引の削除に失敗した古い実体は、参照されていなければ削除する", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, builder);
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    const entity = getEntity();
+    const purgeStarted = Promise.withResolvers<void>();
+    const allowPurge = Promise.withResolvers<void>();
+    const purgeFinished = Promise.withResolvers<void>();
+    const originalPurge = index.purge.bind(index);
+    using _purge = vi.spyOn(index, "purge").mockImplementation(async (c) => {
+      purgeStarted.resolve();
+      await allowPurge.promise;
+
+      const result = await originalPurge(c);
+
+      purgeFinished.resolve();
+
+      return result;
+    });
+    const newerEntityId = crypto.randomUUID();
+
+    // 実行：
+    expect(await omnio.deleteObject("k", signal)).toBe(true);
+    await purgeStarted.promise;
+
+    const newer = {
+      ...stored,
+      entityId: newerEntityId,
+      size: 1,
+      tags: [],
+      updatedAt: new Date().toISOString(),
+      contentType: "application/json",
+      description: "newer",
+      userMetadata: { version: 2 },
+      embedding: undefined,
+      embeddingDims: undefined,
+      embeddingModel: undefined,
+      embeddingSource: undefined,
+    };
+    await index.upsert({
+      action: "upsert",
+      object: newer,
+      signal,
+    });
+
+    await entity.set(newerEntityId, new Uint8Array([9]), { signal });
+    allowPurge.resolve();
+    await purgeFinished.promise;
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    // 検証：
+    const head = await omnio.headObject("k", signal);
+
+    expect(await entity.has(stored.entityId)).toBe(false);
+    expect(await entity.has(newerEntityId)).toBe(true);
+    expect(head?.entityId).toBe(newerEntityId);
+    expect(await omnio.getObject("k", signal)).toStrictEqual(new Uint8Array([9]));
 
     // 後始末：
     await omnio.close(signal);

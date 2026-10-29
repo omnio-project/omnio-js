@@ -1,5 +1,6 @@
 import {
   type OmnioObject,
+  type MetadataFilter,
   OmnioKey,
   DbQueryError,
   DbNotOpenError,
@@ -57,9 +58,9 @@ function createObject(key: string, tags: readonly string[] = []): OmnioObject {
     size: 3,
     tags: [...tags],
     entityId: crypto.randomUUID(),
-    createdAt: "2026-01-01T00:00:00Z",
+    createdAt: "2026-01-01T00:00:00.000Z",
     embedding: new Float32Array([1, 0, 0]),
-    updatedAt: "2026-01-02T00:00:00Z",
+    updatedAt: "2026-01-02T00:00:00.000Z",
     contentType: "text/plain",
     description: `${key} の説明文`,
     userMetadata: { genre: "test" },
@@ -572,7 +573,7 @@ describe("updateMetadata", () => {
     expect(updated?.hash).toBe(object.hash);
     expect(updated?.hashAlgorithm).toBe(object.hashAlgorithm);
     expect(updated?.createdAt).toBe(object.createdAt);
-    expect(updated?.updatedAt).toBe("2026-02-01T00:00:00Z");
+    expect(updated?.updatedAt).toBe("2026-02-01T00:00:00.000Z");
     expect(updated?.contentType).toBe("application/json");
     expect(updated?.description).toBe("新しい説明");
     expect(updated?.tags).toStrictEqual([]);
@@ -682,7 +683,7 @@ describe("rename", () => {
     expect(result?.object.hash).toBe(object.hash);
     expect(result?.object.hashAlgorithm).toBe(object.hashAlgorithm);
     expect(result?.object.createdAt).toBe(object.createdAt);
-    expect(result?.object.updatedAt).toBe("2026-02-01T00:00:00Z");
+    expect(result?.object.updatedAt).toBe("2026-02-01T00:00:00.000Z");
     expect(result?.object.tags).toStrictEqual(["a", "b"]);
     expect(actual).toStrictEqual(result?.object);
 
@@ -1024,6 +1025,85 @@ describe("dirty", () => {
       signal,
     });
   });
+  test("モデル名が同じでも次元数が異なる場合は dirty にする", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: createObject("same"),
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: createVectorObject("different", new Float32Array([1, 0, 0, 0])),
+      signal,
+    });
+
+    // 実行：
+    const marked = await index.markDirty({
+      action: "markDirty",
+      signal,
+      embeddingDims: 3,
+      embeddingModel: "test-model",
+    });
+    const dirty = await index.listDirty({
+      action: "listDirty",
+      signal,
+    });
+
+    // 検証：
+    expect(marked).toBe(1);
+    expect(keysOf(dirty)).toStrictEqual(["different"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("afterKey で続きの dirty を取得する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+
+    for (const key of ["a", "b", "c"]) {
+      await index.upsert({
+        action: "upsert",
+        object: createObject(key),
+        signal,
+      });
+    }
+
+    const marked = await index.markDirty({
+      action: "markDirty",
+      signal,
+      embeddingModel: "next-model",
+    });
+
+    // 実行：
+    const first = await index.listDirty({
+      limit: 2,
+      action: "listDirty",
+      signal,
+    });
+    const second = await index.listDirty({
+      limit: 2,
+      action: "listDirty",
+      signal,
+      afterKey: "b",
+    });
+
+    // 検証：
+    expect(marked).toBe(3);
+    expect(keysOf(first)).toStrictEqual(["a", "b"]);
+    expect(keysOf(second)).toStrictEqual(["c"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
 });
 
 describe("list", () => {
@@ -1198,6 +1278,184 @@ describe("list", () => {
 
       // 検証：
       expect(keysOf(actual.items)).toStrictEqual(expected);
+    }
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("大文字の部分一致で小文字のコンテンツタイプに一致する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: {
+        ...createObject("json"),
+        contentType: "application/json",
+      },
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: createObject("text"),
+      signal,
+    });
+
+    const cases = [
+      [{ endsWith: "JSON" }, ["json"]],
+      [{ startsWith: "APPLICATION/" }, ["json"]],
+      [{ contains: "SON" }, ["json"]],
+    ] as const;
+
+    for (const [contentType, expected] of cases) {
+      // 実行：
+      const actual = await index.list({
+        action: "list",
+        filter: { contentType },
+        signal,
+      });
+
+      // 検証：
+      expect(keysOf(actual.items)).toStrictEqual(expected);
+    }
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("数値オフセット付きの日時条件で同じ瞬間に一致する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    const cases = [
+      [{ equals: "2026-01-01T09:00:00+09:00" }, ["k1"]],
+      [{ equals: "2026-01-01T09:00:00+0900" }, ["k1"]],
+      [{ equals: "2026-01-01T09:00:00+09" }, ["k1"]],
+      [{ gte: "2026-02-01T09:00:00+0900" }, ["k2", "k3"]],
+      [{ gte: "2026-02-01T09:00:00+09" }, ["k2", "k3"]],
+      [
+        {
+          in: ["2026-01-01T09:00:00+0900", "2026-03-01T09:00:00+09"],
+        },
+        ["k1", "k3"],
+      ],
+    ] as const;
+
+    for (const [createdAt, expected] of cases) {
+      // 実行：
+      const actual = await index.list({
+        action: "list",
+        filter: { createdAt },
+        signal,
+      });
+
+      // 検証：
+      expect(keysOf(actual.items)).toStrictEqual(expected);
+    }
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("数値オフセット付きの日時をミリ秒付き UTC で保存する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+
+    // 実行：
+    await index.upsert({
+      action: "upsert",
+      object: {
+        ...createObject("compact"),
+        createdAt: "2026-01-01T09:00:00+0900",
+        updatedAt: "2026-01-02T09:00:00+09",
+      },
+      signal,
+    });
+
+    const actual = await index.get({
+      key: OmnioKey.parse("compact"),
+      action: "get",
+      signal,
+    });
+    const byRecordTimestamp = await index.list({
+      action: "list",
+      filter: { recordTimestamp: { equals: "2026-01-02T09:00:00+09" } },
+      signal,
+    });
+
+    // 検証：
+    expect(actual?.createdAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(actual?.updatedAt).toBe("2026-01-02T00:00:00.000Z");
+    expect(keysOf(byRecordTimestamp.items)).toStrictEqual(["compact"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("Date の完全一致でミリ秒なしの保存値に一致する", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    // 実行：
+    const direct = await index.list({
+      action: "list",
+      filter: { createdAt: new Date("2026-01-01T00:00:00Z") },
+      signal,
+    });
+    const equals = await index.list({
+      action: "list",
+      filter: { createdAt: { equals: new Date("2026-02-01T00:00:00Z") } },
+      signal,
+    });
+
+    // 検証：
+    expect(keysOf(direct.items)).toStrictEqual(["k1"]);
+    expect(keysOf(equals.items)).toStrictEqual(["k2"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("空の in 条件は何にも一致しない", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await seedThree(index, signal);
+
+    const filters: MetadataFilter[] = [
+      { contentType: { in: [] } },
+      { hash: { in: [] } },
+      { size: { in: [] } },
+      { createdAt: { in: [] } },
+      { recordType: { in: [] } },
+    ];
+
+    for (const filter of filters) {
+      // 実行：
+      const actual = await index.list({
+        action: "list",
+        filter,
+        signal,
+      });
+
+      // 検証：
+      expect(actual.items).toStrictEqual([]);
     }
 
     // 後始末：
@@ -1584,6 +1842,47 @@ describe("search", () => {
       signal,
       vector: new Float32Array([1, 0]),
       minScore: 0.5,
+    });
+
+    // 検証：
+    expect(keysOf(actual)).toStrictEqual(["a"]);
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
+  });
+
+  test("数値オフセットの日時条件でベクトル検索を絞り込む", async ({ expect, signal }) => {
+    // 準備：
+    const index = await createOpenedIndex(signal);
+    await index.upsert({
+      action: "upsert",
+      object: {
+        ...createVectorObject("a", new Float32Array([1, 0])),
+        createdAt: "2026-01-01T09:00:00+0900",
+        updatedAt: "2026-01-02T09:00:00+09",
+      },
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: {
+        ...createVectorObject("b", new Float32Array([1, 0])),
+        createdAt: "2026-02-01T09:00:00+09",
+        updatedAt: "2026-02-02T09:00:00+0900",
+      },
+      signal,
+    });
+
+    // 実行：
+    const actual = await index.search({
+      topK: 10,
+      action: "search",
+      filter: { createdAt: { equals: "2026-01-01T09:00:00+09" } },
+      signal,
+      vector: new Float32Array([1, 0]),
     });
 
     // 検証：

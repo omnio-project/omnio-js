@@ -4,9 +4,9 @@
   "private": true,
   "workspaces": [
     "packages/core",
-    "packages/idx-sql",
     "omnio",
     "packages/emb-gemma2",
+    "packages/idx-sql",
     "packages/idx-pglite",
     "packages/idx-postgresql.node",
     "packages/idx-sqlite.node",
