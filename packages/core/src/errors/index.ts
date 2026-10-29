@@ -34,12 +34,15 @@ export {
 export type {
   ErrorMeta,
   ErrorOptions,
+  EntityMissingErrorArgs,
+  EntityMissingErrorMeta,
   InvalidOmnioKeyErrorArgs,
   InvalidOmnioKeyErrorMeta,
 } from "./errors.js";
 export {
   ErrorBase,
   setErrorMessage,
+  EntityMissingError,
   UnexpectedErrorBase,
   InvalidOmnioKeyError,
   InvalidUsageErrorBase,

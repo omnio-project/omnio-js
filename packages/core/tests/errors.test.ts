@@ -9,6 +9,7 @@ import {
   DbNotOpenError,
   ModelLoadError,
   EmbedFailedError,
+  EntityMissingError,
   InvalidOmnioKeyError,
   OperationAbortedError,
   UnsupportedModalityError,
@@ -425,6 +426,49 @@ describe("InvalidOmnioKeyError", () => {
 
     // 検証：
     expect(error.message).toBe("無効なオブジェクトキーです");
+  });
+});
+describe("EntityMissingError", () => {
+  test("UnexpectedErrorBase を継承し name は OmnioEntityMissingError である", ({ expect }) => {
+    // 実行：
+    const error = new EntityMissingError({
+      key: "foo/bar",
+      entityId: "entity",
+    });
+
+    // 検証：
+    expect(error).toBeInstanceOf(ErrorBase);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe("OmnioEntityMissingError");
+    expect(error.meta).toStrictEqual({
+      key: "foo/bar",
+      entityId: "entity",
+    });
+  });
+
+  test("既定のメッセージは英語である", ({ expect }) => {
+    // 実行：
+    const error = new EntityMissingError({
+      key: "foo/bar",
+      entityId: "entity",
+    });
+
+    // 検証：
+    expect(error.message).toBe("Entity data is missing: foo/bar (entity)");
+  });
+
+  test("ja では日本語のメッセージを返す", ({ expect, setLang }) => {
+    // 準備：
+    setLang("ja");
+
+    // 実行：
+    const error = new EntityMissingError({
+      key: "foo/bar",
+      entityId: "entity",
+    });
+
+    // 検証：
+    expect(error.message).toBe("実体データが見つかりません: foo/bar (entity)");
   });
 });
 describe("OperationAbortedError", () => {

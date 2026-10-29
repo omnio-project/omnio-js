@@ -26,6 +26,7 @@ describe("exports", () => {
       "EmbeddingDimsSchema",
       "EmbeddingModelMismatchError",
       "EmbeddingModelSchema",
+      "EntityMissingError",
       "ErrorBase",
       "HashSchema",
       "InvalidOmnioKeyError",
@@ -68,6 +69,7 @@ describe("exports", () => {
     expect(core.UnsupportedModalityError).toBe(embErrors.UnsupportedModalityError);
     expect(core.EmbedFailedError).toBe(embErrors.EmbedFailedError);
     expect(core.ModelLoadError).toBe(embErrors.ModelLoadError);
+    expect(core.EntityMissingError).toBe(errors.EntityMissingError);
     expect(core.InvalidOmnioKeyError).toBe(errors.InvalidOmnioKeyError);
     expect(core.OperationAbortedError).toBe(errors.OperationAbortedError);
     expect(core.ObjectKeySchema).toBe(schemas.ObjectKeySchema);
@@ -177,6 +179,8 @@ describe("exports", () => {
     expectTypeOf<core.DbNotOpenErrorMeta>().toEqualTypeOf<dbErrors.DbNotOpenErrorMeta>();
     expectTypeOf<core.UnsupportedModalityErrorArgs>().toEqualTypeOf<embErrors.UnsupportedModalityErrorArgs>();
     expectTypeOf<core.UnsupportedModalityErrorMeta>().toEqualTypeOf<embErrors.UnsupportedModalityErrorMeta>();
+    expectTypeOf<core.EntityMissingErrorArgs>().toEqualTypeOf<errors.EntityMissingErrorArgs>();
+    expectTypeOf<core.EntityMissingErrorMeta>().toEqualTypeOf<errors.EntityMissingErrorMeta>();
     expectTypeOf<core.InvalidOmnioKeyErrorArgs>().toEqualTypeOf<errors.InvalidOmnioKeyErrorArgs>();
     expectTypeOf<core.InvalidOmnioKeyErrorMeta>().toEqualTypeOf<errors.InvalidOmnioKeyErrorMeta>();
   });

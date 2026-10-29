@@ -8,6 +8,7 @@ import {
   type MetadataFilter,
   OmnioKey,
   DbNotOpenError,
+  EntityMissingError,
   OperationAbortedError,
 } from "@omniojs/core";
 import { type Checksum, type ChecksumOnHash, ChecksumSha256 } from "@unikvs/checksum";
@@ -396,25 +397,6 @@ function checksumVars(
     : {
         [OmnioChecksum.CHECKSUM_VAR_NAME]: hash,
       };
-}
-
-/**
- * キーが見つからない例外を null に変換します。
- *
- * @param load 実行する取得処理です。
- *
- * @returns 取得した値、キーが存在しない場合は null です。
- */
-async function nullIfKeyNotFound<T>(load: () => Promise<T>): Promise<T | null> {
-  try {
-    return await load();
-  } catch (ex) {
-    if (ex instanceof KeyNotFoundError) {
-      return null;
-    }
-
-    throw ex;
-  }
 }
 
 /**
@@ -944,7 +926,7 @@ export class Omnio {
    * @param key 取得するキーです。
    * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
    *
-   * @returns バイト列、存在しない場合は null です。
+   * @returns バイト列、削除済みの場合は null です。索引に存在するのに実体がない場合は `EntityMissingError` を投げます。
    */
   public async getObject(key: OmnioKey | string, signal?: AbortSignal): Promise<Uint8Array | null> {
     this.#requireOpen("getObject");
@@ -955,17 +937,7 @@ export class Omnio {
 
     using _lock = await asyncmux.readonly(this, active);
 
-    const object = await this.#index.get<unknown>({
-      key: objectKey,
-      action: "get",
-      signal: active,
-    });
-
-    if (object === null) {
-      return null;
-    }
-
-    return await this.#readEntityBytes(object.entityId, active, object.hash, object.hashAlgorithm);
+    return await this.#readObjectBytes(objectKey, active);
   }
 
   /**
@@ -981,7 +953,7 @@ export class Omnio {
    * @param key 取得するキーです。
    * @param signal 処理を中断するための中断シグナルです。close 時に中断されるシグナルと合成され、先に中断された方に従います。
    *
-   * @returns バイト列のストリーム、存在しない場合は null です。
+   * @returns バイト列のストリーム、削除済みの場合は null です。索引に存在するのに実体がない場合は `EntityMissingError` を投げます。
    */
   public async streamObject(
     key: OmnioKey | string,
@@ -995,22 +967,7 @@ export class Omnio {
 
     using _lock = await asyncmux.readonly(this, active);
 
-    const object = await this.#index.get<unknown>({
-      key: objectKey,
-      action: "get",
-      signal: active,
-    });
-
-    if (object === null) {
-      return null;
-    }
-
-    return await nullIfKeyNotFound(() =>
-      this.#entity.stream(object.entityId, {
-        vars: checksumVars(object.hash, object.hashAlgorithm),
-        signal: active,
-      }),
-    );
+    return await this.#openObjectStream(objectKey, active);
   }
 
   /**
@@ -1684,27 +1641,130 @@ export class Omnio {
   /**
    * 実体のバイト列を取得します。
    *
-   * インデックスに保存されたハッシュがある場合は、実体ストレージーのチェックサム検証に使います。
+   * 実体が見つからない場合は、インデックスを再確認して並行削除と実体欠落を区別します。
    *
-   * @param entityId 取得する実体 ID です。
+   * @param key 取得するキーです。
    * @param signal 処理を中断するための中断シグナルです。
-   * @param hash インデックスに保存されたハッシュ値です。
-   * @param hashAlgorithm ハッシュアルゴリズムの識別子です。
    *
-   * @returns バイト列、存在しない場合は null です。
+   * @returns バイト列、削除済みの場合は null です。
    */
-  async #readEntityBytes(
-    entityId: string,
+  async #readObjectBytes(key: OmnioKey, signal: AbortSignal): Promise<Uint8Array | null> {
+    let object = await this.#index.get<unknown>({
+      key,
+      action: "get",
+      signal,
+    });
+
+    if (object === null) {
+      return null;
+    }
+
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.#entity.get(object.entityId, {
+          vars: checksumVars(object.hash, object.hashAlgorithm),
+          signal,
+        });
+      } catch (ex) {
+        if (!(ex instanceof KeyNotFoundError)) {
+          throw ex;
+        }
+
+        const latest = await this.#index.get<unknown>({
+          key,
+          action: "get",
+          signal,
+        });
+
+        if (latest === null) {
+          return null;
+        }
+
+        if (latest.entityId === object.entityId) {
+          throw new EntityMissingError({
+            key: key.key,
+            hash: object.hash,
+            entityId: object.entityId,
+          });
+        }
+
+        if (attempt >= 1) {
+          throw new EntityMissingError({
+            key: key.key,
+            hash: latest.hash,
+            entityId: latest.entityId,
+          });
+        }
+
+        object = latest;
+      }
+    }
+  }
+
+  /**
+   * 実体のストリームを開きます。
+   *
+   * 実体が見つからない場合は、インデックスを再確認して並行削除と実体欠落を区別します。
+   *
+   * @param key 取得するキーです。
+   * @param signal 処理を中断するための中断シグナルです。
+   *
+   * @returns 実体のストリーム、削除済みの場合は null です。
+   */
+  async #openObjectStream(
+    key: OmnioKey,
     signal: AbortSignal,
-    hash?: string,
-    hashAlgorithm?: string,
-  ): Promise<Uint8Array | null> {
-    return nullIfKeyNotFound(() =>
-      this.#entity.get(entityId, {
-        vars: checksumVars(hash, hashAlgorithm),
-        signal,
-      }),
-    );
+  ): Promise<IValueStream<Uint8Array> | null> {
+    let object = await this.#index.get<unknown>({
+      key,
+      action: "get",
+      signal,
+    });
+
+    if (object === null) {
+      return null;
+    }
+
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.#entity.stream(object.entityId, {
+          vars: checksumVars(object.hash, object.hashAlgorithm),
+          signal,
+        });
+      } catch (ex) {
+        if (!(ex instanceof KeyNotFoundError)) {
+          throw ex;
+        }
+
+        const latest = await this.#index.get<unknown>({
+          key,
+          action: "get",
+          signal,
+        });
+
+        if (latest === null) {
+          return null;
+        }
+
+        if (latest.entityId === object.entityId) {
+          throw new EntityMissingError({
+            key: key.key,
+            hash: object.hash,
+            entityId: object.entityId,
+          });
+        }
+
+        if (attempt >= 1) {
+          throw new EntityMissingError({
+            key: key.key,
+            hash: latest.hash,
+            entityId: latest.entityId,
+          });
+        }
+
+        object = latest;
+      }
+    }
   }
 
   /**

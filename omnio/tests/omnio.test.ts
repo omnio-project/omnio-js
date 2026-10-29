@@ -5,6 +5,7 @@ import {
   type IndexedObject,
   OmnioKey,
   DbNotOpenError,
+  EntityMissingError,
   InvalidOmnioKeyError,
   OperationAbortedError,
 } from "@omniojs/core";
@@ -2134,16 +2135,36 @@ describe("putObject と getObject", () => {
     });
     await getEntity().set("legacy", bytes, { signal });
 
-    // 実行：
-    const actual = await omnio.getObject("legacy", signal);
-    const stream = await omnio.streamObject("legacy", signal);
-
-    // 検証：
-    expect(actual).toBeNull();
-    expect(stream).toBeNull();
-
+    // 実行と検証：
+    await expect(omnio.getObject("legacy", signal)).rejects.toBeInstanceOf(EntityMissingError);
+    await expect(omnio.streamObject("legacy", signal)).rejects.toBeInstanceOf(EntityMissingError);
     expect(await getEntity().has("legacy")).toBe(true);
     expect(await getEntity().has(entityId)).toBe(false);
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("実体が見つからない場合に索引を再確認し、削除済みなら null を返す", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const { builder, getEntity } = createInspectableTestEntity();
+    const index = new SqliteWasmIndex();
+    const omnio = await createTestOmnio(signal, index, builder);
+    const stored = await omnio.putObject({
+      key: "k",
+      data: new Uint8Array([1]),
+      contentType: "text/plain",
+    });
+    await getEntity().delete(stored.entityId, { signal });
+
+    using _get = vi.spyOn(index, "get").mockResolvedValueOnce(stored).mockResolvedValueOnce(null);
+
+    // 実行と検証：
+    expect(await omnio.getObject("k", signal)).toBeNull();
+    expect(_get).toHaveBeenCalledTimes(2);
 
     // 後始末：
     await omnio.close(signal);
@@ -2827,7 +2848,7 @@ describe("hasObject", () => {
     await getEntity().delete(stored.entityId, { signal });
 
     // 実行と検証：
-    expect(await omnio.getObject("k", signal)).toBeNull();
+    await expect(omnio.getObject("k", signal)).rejects.toBeInstanceOf(EntityMissingError);
     expect(await omnio.hasObject("k", signal)).toBe(true);
 
     // 後始末：

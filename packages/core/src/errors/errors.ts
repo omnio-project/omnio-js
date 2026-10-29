@@ -83,6 +83,70 @@ export class InvalidOmnioKeyError extends InvalidUsageErrorBase<InvalidOmnioKeyE
 setErrorMessage(InvalidOmnioKeyError, () => "無効なオブジェクトキーです", "ja");
 
 /**
+ * `EntityMissingError` のメタデータです。
+ */
+export type EntityMissingErrorMeta = {
+  /** 実体を持っていたオブジェクトのキーです。 */
+  readonly key: string;
+
+  /** 実体ストレージー上のキーです。 */
+  readonly entityId: string;
+
+  /** インデックスに保存されていたハッシュ値です。存在しない場合もあります。 */
+  readonly hash?: string | undefined;
+};
+
+/**
+ * `EntityMissingError` のコンストラクター引数です。
+ */
+export type EntityMissingErrorArgs = ErrorOptions & EntityMissingErrorMeta;
+
+/**
+ * 索引には存在するが、対応する実体のバイト列が見つからないことを示すエラーです。
+ *
+ * 削除との競合ではなく、データ損失や不整合を示します。
+ *
+ * @example
+ * ```
+ * import { EntityMissingError } from "@omniojs/core";
+ *
+ * throw new EntityMissingError({ key: "foo/bar", entityId: "..." });
+ * ```
+ */
+export class EntityMissingError extends UnexpectedErrorBase<EntityMissingErrorMeta> {
+  static {
+    this.prototype.name = "OmnioEntityMissingError";
+  }
+
+  public constructor(args: EntityMissingErrorArgs) {
+    const { key, hash, entityId, ...options } = args;
+    const meta: EntityMissingErrorMeta =
+      hash === undefined
+        ? {
+            key,
+            entityId,
+          }
+        : {
+            key,
+            hash,
+            entityId,
+          };
+    super(
+      meta,
+      ({ key: missingKey, entityId: missingEntityId }) =>
+        `Entity data is missing: ${missingKey} (${missingEntityId})`,
+      options,
+    );
+  }
+}
+
+setErrorMessage(
+  EntityMissingError,
+  ({ key, entityId }) => `実体データが見つかりません: ${key} (${entityId})`,
+  "ja",
+);
+
+/**
  * 操作が中断されたことを示すエラーです。
  *
  * 中断シグナルの reason として使い、呼び出し側が中断理由を判別できるようにします。
