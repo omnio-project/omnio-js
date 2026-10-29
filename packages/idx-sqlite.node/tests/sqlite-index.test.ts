@@ -1,6 +1,7 @@
 import { rm, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import {
   type OmnioObject,
@@ -11,11 +12,22 @@ import {
   OperationAbortedError,
   VectorDimensionMismatchError,
 } from "@omniojs/core";
-import { Kysely } from "kysely";
+import type { SqlIndexBackend } from "@omniojs/idx-sql";
+import {
+  type UnknownRow,
+  type QueryResult,
+  type KyselyPlugin,
+  type RootOperationNode,
+  type PluginTransformQueryArgs,
+  type PluginTransformResultArgs,
+  Kysely,
+} from "kysely";
 import type { Migration } from "kysely/migration";
 import { vi, test, describe } from "vite-plus/test";
 
+import { SqliteNodeDialect } from "../src/dialect.js";
 import { SqliteNodeMigrationProvider } from "../src/migrations.js";
+import type { SqliteNodeDatabase } from "../src/schema.js";
 import { SqliteNodeIndex } from "../src/sqlite-index.js";
 
 /** ハッシュの絞り込み条件の検証に使うハッシュ値です。 */
@@ -26,6 +38,91 @@ const HASH_K2 = "2".repeat(64);
 
 /** ハッシュの絞り込み条件の検証に使うハッシュ値です。 */
 const HASH_K3 = "3".repeat(64);
+
+/**
+ * クエリー結果の配送を任意のタイミングまで遅らせる Kysely プラグインです。
+ *
+ * 読み取りロックが共有されていることを検証するために使用します。
+ */
+class ResultGatePlugin implements KyselyPlugin {
+  /** 遅延を開始したことを通知します。 */
+  public readonly started = Promise.withResolvers<void>();
+
+  /** 遅延を解除するための Promise です。 */
+  public readonly release = Promise.withResolvers<void>();
+
+  #blockNext = false;
+
+  /**
+   * 次のクエリー結果を遅延させます。
+   */
+  public blockNext(): void {
+    this.#blockNext = true;
+  }
+
+  /**
+   * クエリーをそのまま返します。
+   *
+   * @param args クエリーの変換引数です。
+   *
+   * @returns 変換していないクエリーです。
+   */
+  public transformQuery(args: PluginTransformQueryArgs): RootOperationNode {
+    return args.node;
+  }
+
+  /**
+   * 指定された場合は結果の配送を待機します。
+   *
+   * @param args 結果の変換引数です。
+   *
+   * @returns 変換していないクエリー結果です。
+   */
+  public async transformResult(args: PluginTransformResultArgs): Promise<QueryResult<UnknownRow>> {
+    if (this.#blockNext) {
+      this.#blockNext = false;
+      this.started.resolve();
+
+      await this.release.promise;
+    }
+
+    return args.result;
+  }
+}
+
+/**
+ * 結果の配送を遅延できる SQLite インデックスです。
+ */
+class GatedSqliteNodeIndex extends SqliteNodeIndex {
+  readonly #plugin: KyselyPlugin;
+
+  /**
+   * @param plugin 結果の配送を遅延させるプラグインです。
+   */
+  public constructor(plugin: KyselyPlugin) {
+    super();
+    this.#plugin = plugin;
+  }
+
+  protected override async createBackend(): Promise<SqlIndexBackend> {
+    const handle = new DatabaseSync(":memory:");
+    const kysely = new Kysely<SqliteNodeDatabase>({
+      dialect: new SqliteNodeDialect(handle),
+      plugins: [this.#plugin],
+    });
+
+    return {
+      kysely,
+      dispose: async () => {
+        await kysely.destroy().catch(() => undefined);
+
+        if (handle.isOpen) {
+          handle.close();
+        }
+      },
+    };
+  }
+}
 
 /**
  * 開いた状態のインデックスを作ります。
@@ -239,6 +336,50 @@ describe("lifecycle", () => {
       }),
     ).resolves.toBeUndefined();
     expect(index.isOpen).toBe(false);
+  });
+
+  test("読み取り中でも別の読み取りを開始できる", async ({ expect, signal }) => {
+    // 準備：
+    const plugin = new ResultGatePlugin();
+    const index = new GatedSqliteNodeIndex(plugin);
+    await index.open({
+      action: "open",
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: createObject("k"),
+      signal,
+    });
+    plugin.blockNext();
+
+    const pending = index.get({
+      key: OmnioKey.parse("k"),
+      action: "get",
+      signal,
+    });
+
+    await plugin.started.promise;
+
+    try {
+      // 実行：get の結果配送を待っている間に一覧を読む。
+      const listed = await index.list({
+        action: "list",
+        signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
+      });
+
+      // 検証：
+      expect(keysOf(listed.items)).toStrictEqual(["k"]);
+    } finally {
+      plugin.release.resolve();
+      await pending;
+    }
+
+    // 後始末：
+    await index.close({
+      action: "close",
+      signal,
+    });
   });
 
   test("destroy が失敗しても開いた状態を維持し、再試行で閉じられる", async ({ expect, signal }) => {

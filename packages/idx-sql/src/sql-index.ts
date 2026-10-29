@@ -61,8 +61,12 @@ export type SqlIndexBackend = {
  * ベクトル検索は、派生クラスがデータベースネイティブの検索を提供しない場合は JavaScript で総当たり計算します。
  * データベースごとの接続方法とマイグレーションは派生クラスが用意します。
  *
- * すべての非同期メソッドは `asyncmux` によりインスタンス単位で排他します。
- * データの整合性のためではなく、`open` や `close` などのライフサイクルと操作が同時実行されないためです。
+ * 読み取りは `asyncmux.readonly` の共有ロック、書き込みとライフサイクルは `asyncmux` の排他ロックで保護します。
+ * 複数の読み取りはロック待ちにならず、読み取りは背景の埋め込み計算を待ちません。
+ * 読み取り中は同一インスタンスの書き込みが入らないため、複数クエリにまたがる一覧や検索も一貫したスナップショットを見ます。
+ * ベクトル検索は `dirty` と削除済みの行を除外します。
+ * 取得・存在確認・一覧は削除済みの行だけを除外し、再インデックス待ちの行も最新のメタデータとして返します。
+ * 書き込みと読み取りの境界を明確にし、読み取りが書き込み途中のスナップショットを見ないようにするためのロックです。
  */
 export abstract class SqlObjectIndex implements IObjectIndex {
   /**
@@ -426,7 +430,7 @@ export abstract class SqlObjectIndex implements IObjectIndex {
   ): Promise<OmnioObject<TUserMetadata> | null> {
     c.signal.throwIfAborted();
 
-    using _lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux.readonly(this, c.signal);
 
     const kysely = this.#requireOpen("get");
     const row = await kysely
@@ -455,7 +459,7 @@ export abstract class SqlObjectIndex implements IObjectIndex {
   public async has(c: IObjectIndex.HasContext): Promise<boolean> {
     c.signal.throwIfAborted();
 
-    using _lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux.readonly(this, c.signal);
 
     const kysely = this.#requireOpen("has");
     const row = await kysely
@@ -550,7 +554,7 @@ export abstract class SqlObjectIndex implements IObjectIndex {
   ): Promise<IObjectIndex.ListResult<TUserMetadata>> {
     c.signal.throwIfAborted();
 
-    using _lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux.readonly(this, c.signal);
 
     const kysely = this.#requireOpen("list");
     const limit = c.limit ?? 100;
@@ -628,7 +632,7 @@ export abstract class SqlObjectIndex implements IObjectIndex {
   ): Promise<OmnioObject<TUserMetadata>[]> {
     c.signal.throwIfAborted();
 
-    using _lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux.readonly(this, c.signal);
 
     const kysely = this.#requireOpen("listDirty");
     const limit = c.limit ?? 100;
@@ -671,7 +675,7 @@ export abstract class SqlObjectIndex implements IObjectIndex {
   ): Promise<IndexedObject<TUserMetadata>[]> {
     c.signal.throwIfAborted();
 
-    using _lock = await asyncmux(this, c.signal);
+    using _lock = await asyncmux.readonly(this, c.signal);
 
     const kysely = this.#requireOpen("search");
 

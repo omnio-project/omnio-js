@@ -116,6 +116,35 @@ class GatedEmbedder extends FakeEmbedder {
 }
 
 /**
+ * 指定した説明文の埋め込みだけを待機させる埋め込み器です。
+ */
+class GatedDescriptionEmbedder extends FakeEmbedder {
+  public readonly started = Promise.withResolvers<void>();
+
+  public readonly release = Promise.withResolvers<void>();
+
+  readonly #text: string;
+
+  /**
+   * @param text 待機させる説明文です。
+   */
+  public constructor(text: string) {
+    super();
+    this.#text = text;
+  }
+
+  public override async embedText(c: IEmbedder.EmbedTextContext): Promise<Float32Array> {
+    if (c.text === this.#text) {
+      this.started.resolve();
+
+      await this.release.promise;
+    }
+
+    return super.embedText(c);
+  }
+}
+
+/**
  * "fail" を含む説明文の埋め込みだけを失敗させる埋め込み器です。
  */
 class FailingEmbedder extends FakeEmbedder {
@@ -1055,6 +1084,97 @@ describe("dirty 再インデックス", () => {
       kind: "description",
       model: "fake-model",
     });
+
+    // 後始末：
+    await omnio.close(signal);
+  });
+
+  test("バックグラウンドの埋め込み中でも完了済みのオブジェクトを検索できる", async ({
+    expect,
+    signal,
+  }) => {
+    // 準備：
+    const index = new SqliteWasmIndex();
+    await index.open({
+      action: "open",
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: {
+        key: OmnioKey.parse("done"),
+        size: 3,
+        tags: [],
+        entityId: crypto.randomUUID(),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        embedding: new Float32Array([1, 0]),
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        contentType: "text/plain",
+        description: "cat current",
+        userMetadata: {},
+        embeddingDims: 2,
+        embeddingModel: "fake-model",
+        embeddingSource: {
+          kind: "description",
+          model: "fake-model",
+        },
+      },
+      signal,
+    });
+    await index.upsert({
+      action: "upsert",
+      object: {
+        key: OmnioKey.parse("pending"),
+        size: 3,
+        tags: [],
+        entityId: crypto.randomUUID(),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        embedding: new Float32Array([0, 1]),
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        contentType: "text/plain",
+        description: "old description",
+        userMetadata: {},
+        embeddingDims: 2,
+        embeddingModel: "old-model",
+        embeddingSource: {
+          kind: "description",
+          model: "old-model",
+        },
+      },
+      signal,
+    });
+
+    const embedder = new GatedDescriptionEmbedder("old description");
+    const omnio = new Omnio({
+      index,
+      entity: createTestEntityBuilder(),
+      embedder,
+    });
+
+    // 実行：
+    await omnio.open(signal);
+    await embedder.started.promise;
+
+    try {
+      const actual = await omnio.searchObjects({
+        topK: 10,
+        query: { vector: new Float32Array([1, 0]) },
+        signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
+      });
+
+      // 検証：再インデックス中の行は含まれず、完了済みの行だけが返る。
+      expect(actual.map((item) => item.key.key)).toStrictEqual(["done"]);
+    } finally {
+      embedder.release.resolve();
+    }
+
+    await vi.waitFor(
+      async () => {
+        const head = await omnio.headObject("pending", signal);
+        expect(head?.embeddingModel).toBe("fake-model");
+      },
+      { timeout: 5000 },
+    );
 
     // 後始末：
     await omnio.close(signal);
