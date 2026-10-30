@@ -1,0 +1,99 @@
+---
+title: データを永続化する
+description: エンティティストレージとインデックスを永続化し、再起動後もオブジェクトを読み出せるようにします。
+---
+
+## 永続化の考え方 [#concept]
+
+Omnio のデータは、次の 2 か所に分かれています。
+
+- **エンティティ**: オブジェクトのバイト列です。unikvs のストレージに保存します。
+- **インデックス**: キー、メタデータ、埋め込み、削除予約です。`IObjectIndex` のデータベースに保存します。
+
+両方が揃っていないとオブジェクトを読み出せません。バックアップや移行では、必ず 2 つを同じタイミングで扱ってください。
+
+## Node.js のファイルに保存する [#node]
+
+```ts
+import { SqliteNodeIndex } from "@omniojs/idx-sqlite.node";
+import { NodeFs } from "@unikvs/fs.node";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const entity = new unikvs.Builder<EntityMapping>().persist(new NodeFs("./data/entities"));
+const index = new SqliteNodeIndex({ location: "./data/index.sqlite3" });
+```
+
+`NodeFs` は指定したルートディレクトリーを作り、`entityId` ごとに 1 ファイルとして保存します。`SqliteNodeIndex` の `location` は SQLite のデータベースファイルです。
+
+## ブラウザーに保存する [#browser]
+
+```ts
+import { PGliteIndex } from "@omniojs/idx-pglite";
+import { Opfs } from "@unikvs/opfs";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const entity = new unikvs.Builder<EntityMapping>().persist(new Opfs("omnio-entities"));
+const index = new PGliteIndex({ location: "idb://omnio-index" });
+```
+
+OPFS と IndexedDB はどちらもブラウザーのオリジンごとに保存されます。同じオリジンであれば、ページを再読み込みしてもデータが残ります。プライベートブラウズでは消える場合があります。
+
+## PostgreSQL に保存する [#postgresql]
+
+```ts
+import { PostgresqlIndex } from "@omniojs/idx-postgresql.node";
+
+const index = new PostgresqlIndex({
+  connectionString: process.env.DATABASE_URL!,
+});
+```
+
+バイト列は別のストレージに置くので、インデックスだけを PostgreSQL にしてもバイト列は永続化されません。バイト列にも `NodeFs` などの永続ストレージを指定してください。
+
+## メモリーで試す [#memory]
+
+テストや試作では、`@unikvs/memory` とメモリーインデックスを使えます。プロセスを終了するとデータは消えます。
+
+```ts
+import { SqliteWasmIndex } from "@omniojs/idx-sqlite.wasm";
+import { Memory } from "@unikvs/memory";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const entity = new unikvs.Builder<EntityMapping>().persist(new Memory());
+const index = new SqliteWasmIndex();
+```
+
+## バックアップする [#backup]
+
+1. 書き込みを止めます。必要であれば `close()` で開いている接続を閉じます。
+2. インデックスのデータベースとエンティティストレージのルートディレクトリーをコピーします。
+3. 復元後は同じ構成で `open()` します。
+
+SQLite のファイルは、書き込み中にコピーしないでください。PostgreSQL を使うときは、データベースのバックアップとエンティティストレージのコピーを同じ時点で取得します。
+
+## 再起動後の回収 [#recovery]
+
+`open()` は次の処理をバックグラウンドで開始します。
+
+- 猶予期間を過ぎた削除済みオブジェクトのバイト列を物理削除します。
+- 中断やクラッシュで残った物理削除予約を処理します。
+- 埋め込みモデルや次元数が変わったオブジェクトを再インデックスします。
+
+このため、前回の `close()` が正常に終わらなくても、次回の `open()` で回収できる場合があります。
+
+## 注意点 [#caveats]
+
+- 複数のプロセスから同じインデックスとエンティティストレージに同時に書き込んでも、Omnio は整合性を保証しません。データベース側の排他制御が別途必要です。
+- `entityId` は変わりません。同じ `entityId` のバイト列を外部から書き換えないでください。
+- インデックスだけを削除すると、バイト列が孤児として残ります。インデックスとエンティティストレージはセットで管理してください。
+
+## 次に読む [#next]
+
+- [一貫性とライフサイクル](/explanation/consistency-and-lifecycle)
+- [削除と回収の仕組み](/explanation/consistency-and-lifecycle#deletion)

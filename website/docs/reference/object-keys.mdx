@@ -1,0 +1,122 @@
+---
+title: オブジェクトキー
+description: OmnioKey の解析方法と、オブジェクトキーの制約のリファレンスです。
+---
+
+## 制約 [#constraints]
+
+オブジェクトキーは 1 文字以上で、次の制限を満たす必要があります。
+
+| 制限                | 値                              |
+| ------------------- | ------------------------------- |
+| 最大文字数          | 1024                            |
+| 最大 UTF-8 バイト数 | 1024                            |
+| 最小文字数          | 1                               |
+| 文字種              | 正しい UTF-8 であれば任意です。 |
+
+空文字、長すぎるキー、不正な UTF-8 では `InvalidOmnioKeyError` が投げられます。
+
+```ts
+import { OmnioKey } from "@omniojs/core";
+
+OmnioKey.check("notes/a.txt"); // true
+OmnioKey.check(""); // false
+```
+
+## `OmnioKey` の生成 [#create]
+
+```ts
+import { OmnioKey } from "@omniojs/core";
+
+const key = new OmnioKey("photos/2026/sunset.jpg");
+const same = OmnioKey.parse("photos/2026/sunset.jpg");
+```
+
+`new OmnioKey()` と `OmnioKey.parse()` はどちらもキーを検証します。`OmnioKey.check()` はインスタンスを作らず、検証だけをします。
+
+`Omnio` の各メソッドは文字列か `OmnioKey` を受け付けます。文字列を渡すと、内部で `OmnioKey.parse()` されます。
+
+## プロパティ [#properties]
+
+### `key` [#key]
+
+```ts
+const key = OmnioKey.parse("photos/2026/sunset.jpg");
+
+key.key; // "photos/2026/sunset.jpg"
+```
+
+キー全体の文字列です。
+
+### `segments` [#segments]
+
+```ts
+key.segments; // ["photos", "2026", "sunset.jpg"]
+```
+
+スラッシュで区切ったセグメントの配列です。少なくとも 1 つの要素を持ちます。返される配列はコピーです。
+
+### `prefix` [#prefix]
+
+```ts
+key.prefix; // "photos/2026/"
+
+OmnioKey.parse("root").prefix; // ""
+```
+
+最後のセグメントを除いた接頭辞です。
+
+### `basename` [#basename]
+
+```ts
+key.basename; // "sunset.jpg"
+```
+
+最後のセグメントです。
+
+### `filename` [#filename]
+
+```ts
+OmnioKey.parse("archive.tar.gz").filename; // "archive.tar"
+OmnioKey.parse(".hidden").filename; // ".hidden"
+OmnioKey.parse("Makefile").filename; // "Makefile"
+```
+
+拡張子を除いたファイル名です。先頭がドットだけの隠しファイルは、拡張子なしとして扱います。
+
+### `extname` [#extname]
+
+```ts
+OmnioKey.parse("archive.tar.gz").extname; // ".gz"
+OmnioKey.parse(".hidden").extname; // ""
+```
+
+最後のドット以降の拡張子です。ドットを含みます。
+
+## 文字列変換 [#string-conversion]
+
+```ts
+const key = OmnioKey.parse("notes/a.txt");
+
+String(key); // "notes/a.txt"
+JSON.stringify(key); // "\"notes/a.txt\""
+```
+
+`toString()` と `toJSON()` はキー文字列を返します。
+
+## キーの設計 [#design]
+
+キーは一覧の並び順に使われます。`listObjects` はキーの昇順で返るため、日付やカテゴリーを前段に置くと意図した順に並べやすくなります。
+
+```txt
+photos/2026/01/sunset.jpg
+photos/2026/02/beach.jpg
+notes/2026-01-15/meeting.md
+```
+
+キーに依存した処理を書く場合は、`OmnioKey` の `prefix` や `extname` を使うと、文字列操作の誤りを減らせます。
+
+## 次に読む [#next]
+
+- [オブジェクトモデル](/reference/object-model)
+- [一覧と絞り込み](/how-to/filter-and-paginate)

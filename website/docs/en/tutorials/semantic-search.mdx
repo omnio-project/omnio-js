@@ -1,0 +1,166 @@
+---
+title: Try semantic search
+description: Save several objects and try text search, tag filters, and image queries.
+---
+
+## What you will build [#what-you-will-build]
+
+Save three descriptions, then run a natural-language search, narrow it with tags, and query with an image.
+
+This tutorial uses the same setup as [Save your first object](/tutorials/first-objects). Complete that tutorial first. Create a new file named `src/search.ts`.
+
+## 1. Seed data [#seed-data]
+
+Inside the `try` block of `src/search.ts`, save three objects.
+
+```ts src/search.ts
+const documents = [
+  {
+    key: "travel/sea.md",
+    description: "A quiet beach at sunset",
+    tags: ["travel", "sea"],
+    body: "Notes from the day I photographed the coast.",
+  },
+  {
+    key: "travel/mountain.md",
+    description: "A snow-capped mountain under a clear blue sky",
+    tags: ["travel", "mountain"],
+    body: "Notes about the view from the summit.",
+  },
+  {
+    key: "food/ramen.md",
+    description: "A bowl of ramen with rich pork broth",
+    tags: ["food", "noodle"],
+    body: "Thoughts on the ramen I ate near the station.",
+  },
+];
+
+for (const document of documents) {
+  await omnio.putObject({
+    key: document.key,
+    data: new TextEncoder().encode(document.body),
+    contentType: "text/markdown",
+    description: document.description,
+    tags: document.tags,
+  });
+}
+```
+
+Each description has an embedding by the time the write completes.
+
+## 2. Search by text [#search-by-text]
+
+Search for something related to the sea.
+
+```ts
+const results = await omnio.searchObjects({
+  query: { text: "a calm coast at dusk" },
+  topK: 3,
+});
+
+for (const result of results) {
+  console.log(result.key.key, result.description, result.score);
+}
+```
+
+`travel/sea.md` should come first. The default score is cosine similarity: a larger value means a closer match.
+
+## 3. Filter results [#filter-results]
+
+You can narrow the candidates with metadata before comparing vectors. Restrict the search to objects tagged `travel`.
+
+```ts
+const travelResults = await omnio.searchObjects({
+  query: { text: "a quiet landscape" },
+  topK: 5,
+  filter: {
+    tags: { has: "travel" },
+  },
+});
+```
+
+The filter is applied before similarity is calculated. See [Metadata filters](/reference/metadata-filter) for every condition.
+
+`minScore` drops results below a threshold.
+
+```ts
+const strongResults = await omnio.searchObjects({
+  query: { text: "a beach at sunset" },
+  topK: 10,
+  minScore: 0.5,
+});
+```
+
+The right threshold depends on the model and the data, so tune it against real results.
+
+## 4. Paginate a list [#paginate]
+
+Use `listObjects` when you need key-ordered results rather than semantic search.
+
+```ts
+let cursor: string | null = null;
+
+do {
+  const page = await omnio.listObjects({
+    limit: 2,
+    cursor,
+    filter: { tags: { hasSome: ["travel", "food"] } },
+  });
+
+  for (const item of page.items) {
+    console.log(item.key.key);
+  }
+
+  cursor = page.nextCursor;
+} while (cursor !== null);
+```
+
+Repeat until `nextCursor` is `null`. Items are returned in ascending key order.
+
+## 5. Search by image [#search-by-image]
+
+`Gemma2Embedder` also embeds images, and it maps text and images into the same embedding space.
+
+```ts
+import { readFile } from "node:fs/promises";
+
+const image = await readFile("./sunset.jpg");
+
+const imageResults = await omnio.searchObjects({
+  query: {
+    image,
+    mimeType: "image/jpeg",
+  },
+  topK: 5,
+});
+```
+
+An image query is compared with the embeddings generated from description text. If the image and the description match, the score is higher.
+
+## 6. Omit embeddings from results [#omit-embeddings]
+
+Search results include a `Float32Array` embedding by default. Pass `includeEmbedding: false` when you do not need it.
+
+```ts
+const lightResults = await omnio.searchObjects({
+  query: { text: "ramen" },
+  topK: 5,
+  includeEmbedding: false,
+});
+```
+
+This is useful when returning many results or serializing them to JSON.
+
+## 7. Run it [#run]
+
+```sh
+pnpm tsx src/search.ts
+```
+
+Remember to construct `Omnio` and call `open` and `close` in `src/search.ts`, exactly as in the first tutorial.
+
+## Next steps [#next]
+
+- [Metadata filters](/reference/metadata-filter)
+- [Manage embeddings](/how-to/manage-embeddings)
+- [How semantic search works](/explanation/semantic-search)

@@ -1,0 +1,171 @@
+---
+title: インデックス
+description: SQL インデックスパッケージのオプション、ベクトル検索、マイグレーション、IObjectIndex のリファレンスです。
+---
+
+## パッケージ [#packages]
+
+| パッケージ                     | 環境                | データベース   | ベクトル検索                                               |
+| ------------------------------ | ------------------- | -------------- | ---------------------------------------------------------- |
+| `@omniojs/idx-sqlite.node`     | Node.js             | `node:sqlite`  | sqlite-vec。読み込めない場合は JavaScript の総当たりです。 |
+| `@omniojs/idx-sqlite.wasm`     | ブラウザー、Node.js | WASM 版 SQLite | JavaScript の総当たりです。                                |
+| `@omniojs/idx-pglite`          | ブラウザー、Node.js | PGlite         | pgvector です。                                            |
+| `@omniojs/idx-postgresql.node` | Node.js             | PostgreSQL     | pgvector です。                                            |
+
+`@omniojs/idx-sql` は SQL インデックスの共通実装です。直接使うのではなく、派生パッケージを通して使います。
+
+## コンストラクター [#constructors]
+
+### `SqliteNodeIndex` [#sqlite-node-index]
+
+```ts
+new SqliteNodeIndex(options?: { location?: string })
+```
+
+| オプション | 既定値       | 説明                                              |
+| ---------- | ------------ | ------------------------------------------------- |
+| `location` | `":memory:"` | SQLite のデータベースファイルか `:memory:` です。 |
+
+Node.js 標準の `node:sqlite` を使います。`sqlite-vec` を読み込めればベクトル検索に使い、読み込めなければ JavaScript の総当たりにフォールバックします。
+
+### `SqliteWasmIndex` [#sqlite-wasm-index]
+
+```ts
+new SqliteWasmIndex(options?: { location?: string })
+```
+
+| オプション | 既定値       | 説明                                              |
+| ---------- | ------------ | ------------------------------------------------- |
+| `location` | `":memory:"` | SQLite のデータベースファイルか `:memory:` です。 |
+
+`@sqlite.org/sqlite-wasm` を使います。ベクトル検索は JavaScript の総当たりです。
+
+### `PGliteIndex` [#pglite-index]
+
+```ts
+new PGliteIndex(options?: { location?: string })
+```
+
+| オプション | 既定値        | 説明                          |
+| ---------- | ------------- | ----------------------------- |
+| `location` | `"memory://"` | PGlite のデータ保存場所です。 |
+
+pgvector 拡張は `@electric-sql/pglite-pgvector` に同梱されています。別途インストールする必要はありません。
+
+### `PostgresqlIndex` [#postgresql-index]
+
+```ts
+new PostgresqlIndex(options: {
+  connectionString: string;
+  maxConnections?: number;
+})
+```
+
+| オプション         | 既定値 | 説明                                      |
+| ------------------ | ------ | ----------------------------------------- |
+| `connectionString` | -      | PostgreSQL への接続文字列です。必須です。 |
+| `maxConnections`   | `10`   | コネクションプールの最大接続数です。      |
+
+接続先で pgvector 拡張を作成できる権限が必要です。マイグレーション時に `CREATE EXTENSION IF NOT EXISTS vector` を実行します。
+
+## マイグレーション [#migrations]
+
+`open()` は `Migrator.migrateToLatest()` を実行し、必要なテーブルを作成します。
+
+| テーブル        | 内容                                                           |
+| --------------- | -------------------------------------------------------------- |
+| `journal`       | キー、メタデータ、埋め込み、レコードタイプ、dirty フラグです。 |
+| `object_tag`    | タグとキーの対応です。                                         |
+| `pending_purge` | 物理削除を待つバイト列の予約です。                             |
+
+マイグレーションは各パッケージから `MIGRATIONS` と `Migrator` としてエクスポートされています。通常は `open()` に任せてください。
+
+```ts
+import { MIGRATIONS, Migrator } from "@omniojs/idx-sqlite.node";
+```
+
+## ベクトル検索 [#vector-search]
+
+- PGlite と PostgreSQL は pgvector の距離演算子を使います。
+- SQLite Node は sqlite-vec の距離関数を使います。利用できない場合は JavaScript で計算します。
+- SQLite WASM は JavaScript で計算します。
+- 現在のマイグレーションは、近似最近傍探索用のベクトルインデックスを作りません。検索では、条件に合う行を走査して正確な類似度を計算します。
+
+`search` の `metric` は `"cosine"` か `"l2"` で、既定値は `"cosine"` です。`Omnio.searchObjects` は `metric` を指定しないため、常にコサイン類似度を使います。L2 距離を使うときは、インデックスの `search` を直接呼び出してください。
+
+スコアの高い順に並びます。コサイン類似度は `-1` から `1` の範囲で、大きいほど近くなります。L2 距離は負の距離として表され、`0` が最も近くなります。
+
+## `IObjectIndex` [#object-index]
+
+独自のインデックスを実装するときは、次のインターフェースを満たします。
+
+```ts
+interface IObjectIndex {
+  readonly isOpen: boolean;
+  open(c: OpenContext): MaybePromise<void>;
+  close(c: CloseContext): MaybePromise<void>;
+  upsert<T>(c: UpsertContext<T>): MaybePromise<string | undefined>;
+  updateMetadata<T>(c: UpdateMetadataContext<T>): MaybePromise<OmnioObject<T> | null>;
+  rename<T>(c: RenameContext): MaybePromise<RenameResult<T> | null>;
+  get<T>(c: GetContext): MaybePromise<OmnioObject<T> | null>;
+  has(c: HasContext): MaybePromise<boolean>;
+  delete(c: DeleteContext): MaybePromise<boolean>;
+  purge(c: PurgeContext): MaybePromise<boolean>;
+  hasDeleted(c: HasDeletedContext): MaybePromise<boolean>;
+  hasEntity(c: HasEntityContext): MaybePromise<boolean>;
+  list<T>(c: ListContext): MaybePromise<ListResult<T>>;
+  listDeleted(c: ListDeletedContext): MaybePromise<DeletedObject[]>;
+  addPendingPurge(c: AddPendingPurgeContext): MaybePromise<void>;
+  listPendingPurges(c: ListPendingPurgesContext): MaybePromise<PendingPurge[]>;
+  removePendingPurge(c: RemovePendingPurgeContext): MaybePromise<boolean>;
+  markDirty(c: MarkDirtyContext): MaybePromise<number>;
+  listDirty<T>(c: ListDirtyContext): MaybePromise<OmnioObject<T>[]>;
+  search<T>(c: SearchContext): MaybePromise<IndexedObject<T>[]>;
+}
+```
+
+### 操作の意味 [#operation-semantics]
+
+| メソッド             | 説明                                                             |
+| -------------------- | ---------------------------------------------------------------- |
+| `upsert`             | オブジェクトを保存します。置き換える前の `entityId` を返します。 |
+| `updateMetadata`     | 変更可能なメタデータだけを更新します。                           |
+| `rename`             | キーを変更し、`entityId` を維持します。                          |
+| `get`                | メタデータを取得します。削除済みは `null` です。                 |
+| `has`                | メタデータの存在を確認します。                                   |
+| `delete`             | 論理削除します。                                                 |
+| `purge`              | 削除フラグ付きレコードを物理削除し、予約を作成します。           |
+| `hasDeleted`         | 削除フラグ付きレコードの存在を確認します。                       |
+| `hasEntity`          | `entityId` が参照されているか確認します。                        |
+| `list`               | 削除されていないオブジェクトをキー順で返します。                 |
+| `listDeleted`        | 削除フラグ付きレコードを返します。                               |
+| `addPendingPurge`    | 物理削除の予約を追加します。                                     |
+| `listPendingPurges`  | 物理削除の予約を一覧します。                                     |
+| `removePendingPurge` | 物理削除の予約を削除します。                                     |
+| `markDirty`          | 埋め込みモデルが変わったオブジェクトに dirty フラグを立てます。  |
+| `listDirty`          | dirty フラグが立ったオブジェクトを返します。                     |
+| `search`             | ベクトル検索をします。                                           |
+
+すべての操作は単一のコンテキストオブジェクトを受け取り、`action` と `signal` を持ちます。
+
+## 検索コンテキスト [#search-context]
+
+```ts
+type SearchContext = {
+  action: "search";
+  signal: AbortSignal;
+  vector: Float32Array;
+  topK: number;
+  metric?: "cosine" | "l2";
+  minScore?: number;
+  filter?: MetadataFilter;
+  embeddingModel?: string;
+};
+```
+
+`embeddingModel` を指定した場合は、そのモデル名を持つ行だけを対象にします。指定しない場合はモデル名で絞り込みません。
+
+## 次に読む [#next]
+
+- [部品を選んで設定する](/how-to/configure-stack)
+- [意味検索の仕組み](/explanation/semantic-search)

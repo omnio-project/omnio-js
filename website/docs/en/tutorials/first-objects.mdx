@@ -1,0 +1,233 @@
+---
+title: Save your first object
+description: Build an Omnio instance and try saving, reading, searching, and deleting an object.
+---
+
+## What you will build [#what-you-will-build]
+
+You will write a small program that saves a text object in Omnio, reads its metadata, runs a semantic search, and deletes it.
+
+The data is stored in the Node.js file system and SQLite, so it remains after the program exits.
+
+## 1. Create a project [#create-project]
+
+Create an empty directory and install the packages.
+
+```sh
+mkdir omnio-tutorial
+cd omnio-tutorial
+pnpm init
+pnpm add omnio @omniojs/idx-sqlite.node @omniojs/emb-gemma2 unikvs @unikvs/fs.node valibot @logtape/logtape
+pnpm add -D tsx typescript
+```
+
+Add `"type": "module"` to `package.json`.
+
+```json
+{
+  "type": "module"
+}
+```
+
+## 2. Construct Omnio [#construct-omnio]
+
+Create `src/main.ts` and pass an entity store, an index, and an embedder.
+
+```ts src/main.ts
+import { Gemma2Embedder } from "@omniojs/emb-gemma2";
+import { SqliteNodeIndex } from "@omniojs/idx-sqlite.node";
+import { NodeFs } from "@unikvs/fs.node";
+import { Omnio } from "omnio";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const omnio = new Omnio({
+  entity: new unikvs.Builder<EntityMapping>().persist(new NodeFs("./omnio-entities")),
+  index: new SqliteNodeIndex({ location: "./omnio.sqlite3" }),
+  embedder: new Gemma2Embedder(),
+});
+
+await omnio.open();
+
+try {
+  // Write operations here.
+} finally {
+  await omnio.close();
+}
+```
+
+`entity` stores the bytes. Pass a `unikvs` builder configured through `persist()`. `Omnio` calls `build()` in its constructor.
+
+`index` stores metadata and embedding vectors. `SqliteNodeIndex` creates the tables it needs when it opens.
+
+`embedder` turns descriptions into vectors. `Gemma2Embedder` downloads the model on the first embedding.
+
+## 3. Save an object [#put-an-object]
+
+Add the object write inside the `try` block.
+
+```ts
+const bytes = new TextEncoder().encode(
+  "Omnio is a library that adds metadata and embeddings to objects.",
+);
+
+const saved = await omnio.putObject({
+  key: "notes/first.txt",
+  data: bytes,
+  contentType: "text/plain",
+  description: "A note from the first time using Omnio",
+  tags: ["tutorial", "note"],
+  userMetadata: { language: "en" },
+});
+
+console.log(saved.key.key); // notes/first.txt
+console.log(saved.size); // number of bytes written
+console.log(saved.tags); // ["tutorial", "note"]
+```
+
+When `description` is present, Omnio generates an embedding for it by default. `key` accepts a string or an `OmnioKey`.
+
+## 4. Read metadata and bytes [#read-the-object]
+
+Use `headObject` for metadata and `getObject` for the bytes.
+
+```ts
+const head = await omnio.headObject("notes/first.txt", {
+  select: {
+    key: true,
+    size: true,
+    tags: true,
+    description: true,
+  },
+});
+
+console.log(head);
+
+const data = await omnio.getObject("notes/first.txt");
+console.log(data === null ? "not found" : new TextDecoder().decode(data));
+```
+
+If you omit `select`, `headObject` returns every metadata field. `getObject` returns the stored bytes unchanged.
+
+## 5. Search semantically [#search]
+
+Find objects whose descriptions are close to a query.
+
+```ts
+const results = await omnio.searchObjects({
+  query: { text: "a note from the first time" },
+  topK: 5,
+});
+
+for (const result of results) {
+  console.log(result.key.key, result.score);
+}
+```
+
+`searchObjects` embeds the query text and compares it with the stored embeddings. Results are ordered by similarity and include a `score`.
+
+## 6. List and delete [#list-and-delete]
+
+Filter by tag, then delete the object.
+
+```ts
+const list = await omnio.listObjects({
+  filter: { tags: { has: "note" } },
+});
+
+console.log(list.items.map((item) => item.key.key));
+
+const deleted = await omnio.deleteObject("notes/first.txt");
+console.log(deleted); // true
+
+console.log(await omnio.hasObject("notes/first.txt")); // false
+console.log(await omnio.getObject("notes/first.txt")); // null
+```
+
+Deletion is logical. The object disappears from reads and searches immediately, but its bytes are reclaimed in the background after the grace period.
+
+## 7. Run it [#run]
+
+```sh
+pnpm tsx src/main.ts
+```
+
+The first run downloads the embedding model. Later runs use the cache.
+
+## Complete code [#complete-code]
+
+```ts src/main.ts
+import { Gemma2Embedder } from "@omniojs/emb-gemma2";
+import { SqliteNodeIndex } from "@omniojs/idx-sqlite.node";
+import { NodeFs } from "@unikvs/fs.node";
+import { Omnio } from "omnio";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const omnio = new Omnio({
+  entity: new unikvs.Builder<EntityMapping>().persist(new NodeFs("./omnio-entities")),
+  index: new SqliteNodeIndex({ location: "./omnio.sqlite3" }),
+  embedder: new Gemma2Embedder(),
+});
+
+await omnio.open();
+
+try {
+  const bytes = new TextEncoder().encode(
+    "Omnio is a library that adds metadata and embeddings to objects.",
+  );
+
+  const saved = await omnio.putObject({
+    key: "notes/first.txt",
+    data: bytes,
+    contentType: "text/plain",
+    description: "A note from the first time using Omnio",
+    tags: ["tutorial", "note"],
+    userMetadata: { language: "en" },
+  });
+
+  console.log(saved.key.key);
+  console.log(saved.tags);
+
+  const head = await omnio.headObject("notes/first.txt", {
+    select: {
+      key: true,
+      size: true,
+      tags: true,
+      description: true,
+    },
+  });
+
+  console.log(head);
+
+  const data = await omnio.getObject("notes/first.txt");
+  console.log(data === null ? "not found" : new TextDecoder().decode(data));
+
+  const results = await omnio.searchObjects({
+    query: { text: "a note from the first time" },
+    topK: 5,
+  });
+
+  for (const result of results) {
+    console.log(result.key.key, result.score);
+  }
+
+  const list = await omnio.listObjects({
+    filter: { tags: { has: "note" } },
+  });
+
+  console.log(list.items.map((item) => item.key.key));
+
+  console.log(await omnio.deleteObject("notes/first.txt"));
+  console.log(await omnio.hasObject("notes/first.txt"));
+  console.log(await omnio.getObject("notes/first.txt"));
+} finally {
+  await omnio.close();
+}
+```
+
+## Next steps [#next]
+
+In [Try semantic search](/tutorials/semantic-search) you will save several objects and try filters and image queries. For a production setup, see [Choose and configure components](/how-to/configure-stack).

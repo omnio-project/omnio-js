@@ -1,0 +1,156 @@
+---
+title: メタデータフィルター
+description: listObjects と searchObjects で使う MetadataFilter の型と条件の意味をまとめています。
+---
+
+## 概要 [#overview]
+
+`MetadataFilter` は、一覧と検索の候補を絞り込む条件です。
+
+```ts
+type MetadataFilter = {
+  contentType?: string | MetadataFilter.Condition;
+  createdAt?: string | Date | MetadataFilter.DateCondition;
+  fullText?: string;
+  hash?: string | MetadataFilter.Condition;
+  recordTimestamp?: string | Date | MetadataFilter.DateCondition;
+  recordType?: RecordType | MetadataFilter.RecordTypeCondition;
+  size?: number | bigint | MetadataFilter.SizeCondition;
+  tags?: string | MetadataFilter.TagsCondition;
+  updatedAt?: string | Date | MetadataFilter.DateCondition;
+};
+```
+
+同じフィールドに複数の条件を指定すると、すべてを満たす必要があります。異なるフィールドの条件もすべて組み合わされます。
+
+削除済みのレコードは、条件に関係なく常に除外されます。
+
+## 文字列の条件 [#string-conditions]
+
+`contentType` と `hash` は、文字列を渡すと完全一致として扱います。オブジェクト形式では次の条件を使えます。
+
+```ts
+type Condition = {
+  contains?: string;
+  endsWith?: string;
+  equals?: string;
+  in?: readonly string[];
+  not?: string;
+  notIn?: readonly string[];
+  startsWith?: string;
+};
+```
+
+| 条件         | 意味                                                             |
+| ------------ | ---------------------------------------------------------------- |
+| `equals`     | 完全一致します。                                                 |
+| `not`        | 一致しません。                                                   |
+| `in`         | いずれかに一致します。空配列はどのオブジェクトにも一致しません。 |
+| `notIn`      | いずれにも一致しません。空配列は条件なしとして扱います。         |
+| `contains`   | 部分一致します。                                                 |
+| `startsWith` | 前方一致します。                                                 |
+| `endsWith`   | 後方一致します。                                                 |
+
+部分一致には SQL の `LIKE` または `ILIKE` を使います。`%` と `_` はエスケープされます。
+
+## 日時の条件 [#date-conditions]
+
+`createdAt`、`updatedAt`、`recordTimestamp` は、文字列か `Date` を渡すと完全一致として扱います。オブジェクト形式では次の条件を使えます。
+
+```ts
+type DateCondition = {
+  equals?: string | Date;
+  gt?: string | Date;
+  gte?: string | Date;
+  in?: string | Date | readonly (string | Date)[];
+  lt?: string | Date;
+  lte?: string | Date;
+  not?: string | Date;
+  notIn?: string | Date | readonly (string | Date)[];
+};
+```
+
+日時は ISO 8601 形式で指定します。`Date` を渡した場合は ISO 8601 文字列に正規化されます。削除済みレコードは条件を適用する前に除外されます。また、削除済みレコードの作成時刻と更新時刻は `null` です。
+
+## サイズの条件 [#size-conditions]
+
+`size` は、数値か `bigint` を渡すと完全一致として扱います。オブジェクト形式では次の条件を使えます。
+
+```ts
+type SizeCondition = {
+  equals?: number | bigint;
+  gt?: number | bigint;
+  gte?: number | bigint;
+  in?: number | bigint | readonly (number | bigint)[];
+  lt?: number | bigint;
+  lte?: number | bigint;
+  not?: number | bigint | readonly (number | bigint)[];
+  notIn?: readonly (number | bigint)[];
+};
+```
+
+## タグの条件 [#tags-conditions]
+
+`tags` は、文字列を渡すとそのタグを含むオブジェクトに絞り込みます。オブジェクト形式では次の条件を使えます。
+
+```ts
+type TagsCondition = {
+  equals?: readonly string[];
+  has?: string;
+  hasEvery?: readonly string[];
+  hasSome?: readonly string[];
+  isEmpty?: boolean;
+};
+```
+
+| 条件       | 意味                                                                         |
+| ---------- | ---------------------------------------------------------------------------- |
+| `has`      | 指定したタグを含みます。                                                     |
+| `hasEvery` | 指定したタグをすべて含みます。                                               |
+| `hasSome`  | 指定したタグのいずれかを含みます。空配列はどのオブジェクトにも一致しません。 |
+| `equals`   | タグ一覧が一致します。順序は問いません。空配列はタグなしを意味します。       |
+| `isEmpty`  | `true` でタグなし、`false` でタグありを意味します。                          |
+
+## レコードタイプの条件 [#record-type-conditions]
+
+`recordType` は `"CREATE"`、`"UPDATE_METADATA"`、`"DELETE"` のいずれかか、次の条件です。
+
+```ts
+type RecordTypeCondition = {
+  in?: RecordType | readonly RecordType[];
+  not?: RecordType | readonly RecordType[];
+};
+```
+
+削除済みレコードは常に除外されるため、`"DELETE"` を指定しても結果は空です。
+
+## 全文検索 [#full-text]
+
+`fullText` は説明文とキーを連結した文字列に対する部分一致です。
+
+```ts
+await omnio.listObjects({
+  filter: { fullText: "夕日" },
+});
+```
+
+- 単語に分割したり、語幹をそろえたり、順位を付けたりはしません。
+- 空文字は条件なしとして扱います。
+- 大文字と小文字の区別はデータベースに依存します。SQLite は ASCII の範囲で区別せず、PostgreSQL は `ILIKE` を使います。
+
+## 使用例 [#examples]
+
+```ts
+const filter: MetadataFilter = {
+  contentType: { startsWith: "image/" },
+  createdAt: { gte: new Date("2026-01-01T00:00:00Z") },
+  size: { lte: 10 * 1024 * 1024 },
+  tags: { hasEvery: ["public", "2026"] },
+  recordType: "CREATE",
+};
+```
+
+## 次に読む [#next]
+
+- [絞り込んで一覧する](/how-to/filter-and-paginate)
+- [Omnio クラス](/reference/omnio)

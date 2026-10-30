@@ -1,0 +1,118 @@
+---
+title: エンティティストレージ
+description: IOmnioEntity、IOmnioEntityBuilder、unikvs の接続方法のリファレンスです。
+---
+
+## 役割 [#role]
+
+エンティティストレージは、オブジェクトのバイト列を `entityId` ごとに保存します。Omnio はキーと `entityId` の対応をインデックスに保存し、バイト列はエンティティストレージから読み出します。
+
+## `IOmnioEntity` [#iomnio-entity]
+
+```ts
+interface IOmnioEntity {
+  open(options?: { signal?: AbortSignal }): Promise<void>;
+  close(options?: { signal?: AbortSignal }): Promise<void>;
+  has(key: string, options?: { signal?: AbortSignal }): Promise<boolean>;
+  get(key: string, options?: IOmnioEntityReadOptions): Promise<Uint8Array>;
+  set(
+    key: string,
+    value: Uint8Array | ReadableStream<Uint8Array>,
+    options?: { vars?: IOmnioEntityVariables; signal?: AbortSignal },
+  ): Promise<void>;
+  copy(key: string, destinationKey: string, options?: { signal?: AbortSignal }): Promise<void>;
+  delete(key: string, options?: { signal?: AbortSignal }): Promise<void>;
+  stream(key: string, options?: IOmnioEntityReadOptions): Promise<IValueStream<Uint8Array>>;
+}
+```
+
+| メソッド | 説明                                                 |
+| -------- | ---------------------------------------------------- |
+| `open`   | ストレージを開きます。                               |
+| `close`  | ストレージを閉じます。                               |
+| `has`    | キーが存在するか返します。                           |
+| `get`    | バイト列を取得します。存在しなければエラーです。     |
+| `set`    | バイト列またはストリームを保存します。               |
+| `copy`   | バイト列を別のキーへ複製します。                     |
+| `delete` | バイト列を削除します。存在しない場合は何もしません。 |
+| `stream` | バイト列のストリームを返します。                     |
+
+`get` と `stream` は `vars` を受け取ります。Omnio はここに SHA-256 の期待値を渡し、ストレージのミドルウェアが読み取り時に検証します。
+
+## `IOmnioEntityBuilder` [#iomnio-entity-builder]
+
+```ts
+interface IOmnioEntityBuilder {
+  build(options?: UniKvsBuildOptions): IOmnioEntity;
+}
+```
+
+`Omnio` はコンストラクターで `build()` を実行し、チェックサム用のミドルウェアを `beforeAll` に指定します。実装では、受け取ったオプションを unikvs の `build()` に渡してください。
+
+```ts
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const entity = new unikvs.Builder<EntityMapping>().persist(new NodeFs("./data/entities"));
+```
+
+## unikvs のストレージ [#unikvs-storage]
+
+| パッケージ        | 保存先                     | 用途               |
+| ----------------- | -------------------------- | ------------------ |
+| `@unikvs/memory`  | メモリー                   | テスト、試作       |
+| `@unikvs/fs.node` | Node.js のファイルシステム | Node.js の永続化   |
+| `@unikvs/opfs`    | Origin Private File System | ブラウザーの永続化 |
+
+`NodeFs` にはルートディレクトリーを、`Opfs` には OPFS 内のルート名を渡します。
+
+```ts
+import { NodeFs } from "@unikvs/fs.node";
+
+const entity = new unikvs.Builder<EntityMapping>().persist(new NodeFs("./data/entities"));
+```
+
+```ts
+import { Opfs } from "@unikvs/opfs";
+
+const entity = new unikvs.Builder<EntityMapping>().persist(new Opfs("omnio-entities"));
+```
+
+## エンティティの不変性 [#immutability]
+
+Omnio は一度保存した `entityId` のバイト列を変更しません。
+
+- `putObject` と `copyObject` は新しい `entityId` を割り当てます。
+- `renameObject` は同じ `entityId` を維持します。
+- 上書き時も新しい `entityId` を割り当てます。
+
+同じ `entityId` のバイト列を外部から書き換えると、チェックサム検証に失敗したり、読み取り中のストリームが壊れたりします。
+
+## チェックサム [#checksum]
+
+`Omnio` は SHA-256 を計算するミドルウェアをエンティティストレージのビルダーに注入します。保存時にハッシュを取得し、インデックスに `hash` と `hashAlgorithm: "sha256"` を記録します。
+
+読み取り時は次のように動きます。
+
+- `getObject`: 返す前にチェックサムを検証します。一致しなければ `ChecksumMismatchError` が投げられます。
+- `streamObject`: ストリームの終端で検証します。途中でキャンセルすると検証されません。
+
+エンティティストレージのビルダーに別の `ChecksumSha256` が含まれていても、Omnio が注入したインスタンスの結果だけを使います。
+
+## ストリーム [#stream]
+
+`IOmnioEntity.stream` は `IValueStream<Uint8Array>` を返します。`streamObject` で取得したストリームは、呼び出し側で使い切るか破棄してください。
+
+```ts
+const stream = await omnio.streamObject("large/file.bin");
+
+if (stream !== null) {
+  for await (const chunk of stream) {
+    // chunk を処理します。
+  }
+}
+```
+
+## 次に読む [#next]
+
+- [データを永続化する](/how-to/persist-data)
+- [インデックス](/reference/indexes)

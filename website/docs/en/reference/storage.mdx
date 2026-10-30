@@ -1,0 +1,118 @@
+---
+title: Entity storage
+description: Reference for IOmnioEntity, IOmnioEntityBuilder, and the unikvs integration.
+---
+
+## Role [#role]
+
+Entity storage keeps object bytes under an `entityId`. Omnio stores the key-to-entity mapping in the index and reads the bytes from entity storage.
+
+## `IOmnioEntity` [#iomnio-entity]
+
+```ts
+interface IOmnioEntity {
+  open(options?: { signal?: AbortSignal }): Promise<void>;
+  close(options?: { signal?: AbortSignal }): Promise<void>;
+  has(key: string, options?: { signal?: AbortSignal }): Promise<boolean>;
+  get(key: string, options?: IOmnioEntityReadOptions): Promise<Uint8Array>;
+  set(
+    key: string,
+    value: Uint8Array | ReadableStream<Uint8Array>,
+    options?: { vars?: IOmnioEntityVariables; signal?: AbortSignal },
+  ): Promise<void>;
+  copy(key: string, destinationKey: string, options?: { signal?: AbortSignal }): Promise<void>;
+  delete(key: string, options?: { signal?: AbortSignal }): Promise<void>;
+  stream(key: string, options?: IOmnioEntityReadOptions): Promise<IValueStream<Uint8Array>>;
+}
+```
+
+| Method   | Description                              |
+| -------- | ---------------------------------------- |
+| `open`   | Opens storage.                           |
+| `close`  | Closes storage.                          |
+| `has`    | Returns whether a key exists.            |
+| `get`    | Returns bytes. Missing keys throw.       |
+| `set`    | Saves bytes or a stream.                 |
+| `copy`   | Copies bytes to another key.             |
+| `delete` | Deletes bytes. Missing keys are ignored. |
+| `stream` | Returns a byte stream.                   |
+
+`get` and `stream` accept `vars`. Omnio passes the expected SHA-256 value there, and the storage middleware verifies it on read.
+
+## `IOmnioEntityBuilder` [#iomnio-entity-builder]
+
+```ts
+interface IOmnioEntityBuilder {
+  build(options?: UniKvsBuildOptions): IOmnioEntity;
+}
+```
+
+`Omnio` calls `build()` in its constructor and passes checksum middleware through `beforeAll`. Implementations must forward the options to unikvs `build()`.
+
+```ts
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const entity = new unikvs.Builder<EntityMapping>().persist(new NodeFs("./data/entities"));
+```
+
+## unikvs stores [#unikvs-storage]
+
+| Package           | Storage                    | Use case              |
+| ----------------- | -------------------------- | --------------------- |
+| `@unikvs/memory`  | Memory                     | Tests and prototypes. |
+| `@unikvs/fs.node` | Node.js file system        | Node.js persistence.  |
+| `@unikvs/opfs`    | Origin Private File System | Browser persistence.  |
+
+`NodeFs` takes a root directory. `Opfs` takes a root name inside OPFS.
+
+```ts
+import { NodeFs } from "@unikvs/fs.node";
+
+const entity = new unikvs.Builder<EntityMapping>().persist(new NodeFs("./data/entities"));
+```
+
+```ts
+import { Opfs } from "@unikvs/opfs";
+
+const entity = new unikvs.Builder<EntityMapping>().persist(new Opfs("omnio-entities"));
+```
+
+## Entity immutability [#immutability]
+
+Omnio never changes the bytes for an existing `entityId`.
+
+- `putObject` and `copyObject` create a new `entityId`.
+- `renameObject` keeps the same `entityId`.
+- An overwrite also creates a new `entityId`.
+
+Changing the bytes for an `entityId` outside Omnio can break checksum verification or corrupt an in-flight stream.
+
+## Checksums [#checksum]
+
+Omnio injects SHA-256 middleware into the entity builder. It records the hash during a write and stores `hash` and `hashAlgorithm: "sha256"` in the index.
+
+Reads behave as follows.
+
+- `getObject`: verifies the checksum before returning bytes. A mismatch throws `ChecksumMismatchError`.
+- `streamObject`: verifies at the end of the stream. A cancelled stream is not verified.
+
+If the entity builder already contains another `ChecksumSha256`, only the instance injected by Omnio is used.
+
+## Streams [#stream]
+
+`IOmnioEntity.stream` returns `IValueStream<Uint8Array>`. Consume or dispose of streams returned by `streamObject`.
+
+```ts
+const stream = await omnio.streamObject("large/file.bin");
+
+if (stream !== null) {
+  for await (const chunk of stream) {
+    // Process the chunk.
+  }
+}
+```
+
+## Next steps [#next]
+
+- [Persist data](/how-to/persist-data)
+- [Indexes](/reference/indexes)

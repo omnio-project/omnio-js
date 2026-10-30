@@ -1,0 +1,171 @@
+---
+title: Indexes
+description: Reference for SQL index options, vector search, migrations, and IObjectIndex.
+---
+
+## Packages [#packages]
+
+| Package                        | Environment      | Database                       | Vector search                           |
+| ------------------------------ | ---------------- | ------------------------------ | --------------------------------------- |
+| `@omniojs/idx-sqlite.node`     | Node.js          | `node:sqlite`                  | sqlite-vec, with a JavaScript fallback. |
+| `@omniojs/idx-sqlite.wasm`     | Browser, Node.js | SQLite compiled to WebAssembly | JavaScript brute force.                 |
+| `@omniojs/idx-pglite`          | Browser, Node.js | PGlite                         | pgvector.                               |
+| `@omniojs/idx-postgresql.node` | Node.js          | PostgreSQL                     | pgvector.                               |
+
+`@omniojs/idx-sql` contains the shared SQL implementation. Use it through one of the derived packages.
+
+## Constructors [#constructors]
+
+### `SqliteNodeIndex` [#sqlite-node-index]
+
+```ts
+new SqliteNodeIndex(options?: { location?: string })
+```
+
+| Option     | Default      | Description                         |
+| ---------- | ------------ | ----------------------------------- |
+| `location` | `":memory:"` | SQLite database file or `:memory:`. |
+
+Uses Node.js' built-in `node:sqlite`. If `sqlite-vec` can be loaded, it is used for vector search. Otherwise search falls back to JavaScript brute force.
+
+### `SqliteWasmIndex` [#sqlite-wasm-index]
+
+```ts
+new SqliteWasmIndex(options?: { location?: string })
+```
+
+| Option     | Default      | Description                         |
+| ---------- | ------------ | ----------------------------------- |
+| `location` | `":memory:"` | SQLite database file or `:memory:`. |
+
+Uses `@sqlite.org/sqlite-wasm`. Vector search uses JavaScript brute force.
+
+### `PGliteIndex` [#pglite-index]
+
+```ts
+new PGliteIndex(options?: { location?: string })
+```
+
+| Option     | Default       | Description           |
+| ---------- | ------------- | --------------------- |
+| `location` | `"memory://"` | PGlite data location. |
+
+The pgvector extension is bundled with `@electric-sql/pglite-pgvector`, so no separate installation is needed.
+
+### `PostgresqlIndex` [#postgresql-index]
+
+```ts
+new PostgresqlIndex(options: {
+  connectionString: string;
+  maxConnections?: number;
+})
+```
+
+| Option             | Default | Description                             |
+| ------------------ | ------- | --------------------------------------- |
+| `connectionString` | -       | PostgreSQL connection string. Required. |
+| `maxConnections`   | `10`    | Maximum pool connections.               |
+
+The database user must be allowed to create the pgvector extension. The migration runs `CREATE EXTENSION IF NOT EXISTS vector`.
+
+## Migrations [#migrations]
+
+`open()` runs `Migrator.migrateToLatest()` and creates the required tables.
+
+| Table           | Contents                                                      |
+| --------------- | ------------------------------------------------------------- |
+| `journal`       | Keys, metadata, embeddings, record types, and the dirty flag. |
+| `object_tag`    | Tag-to-key mapping.                                           |
+| `pending_purge` | Reservations for entities waiting to be physically deleted.   |
+
+Each package exports `MIGRATIONS` and `Migrator`, but normally you let `open()` handle migrations.
+
+```ts
+import { MIGRATIONS, Migrator } from "@omniojs/idx-sqlite.node";
+```
+
+## Vector search [#vector-search]
+
+- PGlite and PostgreSQL use pgvector distance operators.
+- SQLite Node uses sqlite-vec distance functions, or JavaScript when sqlite-vec is unavailable.
+- SQLite WASM calculates distances in JavaScript.
+- The current migrations do not create approximate nearest-neighbor indexes. Search scans the matching rows and computes exact distances.
+
+`search` accepts `metric: "cosine" | "l2"`, defaulting to `"cosine"`. `Omnio.searchObjects` does not pass `metric`, so it always uses cosine similarity. To use L2, call the index's `search` directly.
+
+Scores are ordered descending. Cosine similarity ranges from `-1` to `1`, and larger is closer. L2 distance is represented as a negative distance, so `0` is the closest.
+
+## `IObjectIndex` [#object-index]
+
+A custom index must implement this interface.
+
+```ts
+interface IObjectIndex {
+  readonly isOpen: boolean;
+  open(c: OpenContext): MaybePromise<void>;
+  close(c: CloseContext): MaybePromise<void>;
+  upsert<T>(c: UpsertContext<T>): MaybePromise<string | undefined>;
+  updateMetadata<T>(c: UpdateMetadataContext<T>): MaybePromise<OmnioObject<T> | null>;
+  rename<T>(c: RenameContext): MaybePromise<RenameResult<T> | null>;
+  get<T>(c: GetContext): MaybePromise<OmnioObject<T> | null>;
+  has(c: HasContext): MaybePromise<boolean>;
+  delete(c: DeleteContext): MaybePromise<boolean>;
+  purge(c: PurgeContext): MaybePromise<boolean>;
+  hasDeleted(c: HasDeletedContext): MaybePromise<boolean>;
+  hasEntity(c: HasEntityContext): MaybePromise<boolean>;
+  list<T>(c: ListContext): MaybePromise<ListResult<T>>;
+  listDeleted(c: ListDeletedContext): MaybePromise<DeletedObject[]>;
+  addPendingPurge(c: AddPendingPurgeContext): MaybePromise<void>;
+  listPendingPurges(c: ListPendingPurgesContext): MaybePromise<PendingPurge[]>;
+  removePendingPurge(c: RemovePendingPurgeContext): MaybePromise<boolean>;
+  markDirty(c: MarkDirtyContext): MaybePromise<number>;
+  listDirty<T>(c: ListDirtyContext): MaybePromise<OmnioObject<T>[]>;
+  search<T>(c: SearchContext): MaybePromise<IndexedObject<T>[]>;
+}
+```
+
+### Operation semantics [#operation-semantics]
+
+| Method               | Description                                          |
+| -------------------- | ---------------------------------------------------- |
+| `upsert`             | Saves an object and returns the replaced entity ID.  |
+| `updateMetadata`     | Updates mutable metadata only.                       |
+| `rename`             | Changes the key and keeps the entity ID.             |
+| `get`                | Returns metadata, or `null` when deleted.            |
+| `has`                | Checks metadata existence.                           |
+| `delete`             | Marks the object deleted.                            |
+| `purge`              | Deletes a tombstone and creates a purge reservation. |
+| `hasDeleted`         | Checks for a tombstone.                              |
+| `hasEntity`          | Checks whether an entity ID is referenced.           |
+| `list`               | Returns active objects in key order.                 |
+| `listDeleted`        | Returns tombstones.                                  |
+| `addPendingPurge`    | Adds a physical deletion reservation.                |
+| `listPendingPurges`  | Lists physical deletion reservations.                |
+| `removePendingPurge` | Removes a reservation.                               |
+| `markDirty`          | Marks objects whose embedding model changed.         |
+| `listDirty`          | Returns dirty objects.                               |
+| `search`             | Runs a vector search.                                |
+
+Every operation takes a single context object with `action` and `signal`.
+
+## Search context [#search-context]
+
+```ts
+type SearchContext = {
+  action: "search";
+  signal: AbortSignal;
+  vector: Float32Array;
+  topK: number;
+  metric?: "cosine" | "l2";
+  minScore?: number;
+  filter?: MetadataFilter;
+  embeddingModel?: string;
+};
+```
+
+When `embeddingModel` is set, only rows with that model name are considered. When it is omitted, model names are not filtered.
+
+## Next steps [#next]
+
+- [Choose and configure components](/how-to/configure-stack)
+- [How semantic search works](/explanation/semantic-search)

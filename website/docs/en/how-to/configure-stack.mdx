@@ -1,0 +1,122 @@
+---
+title: Choose and configure components
+description: Select an entity store, index, and embedder for your environment, then construct Omnio.
+---
+
+## Decide on a setup [#choose-components]
+
+The `Omnio` constructor requires three components.
+
+| Component  | Role                       | Examples                                 |
+| ---------- | -------------------------- | ---------------------------------------- |
+| `entity`   | Byte storage.              | unikvs memory, Node.js file system, OPFS |
+| `index`    | Metadata and vector index. | SQLite, PGlite, PostgreSQL               |
+| `embedder` | Text and image embedder.   | `Gemma2Embedder`, custom implementation  |
+
+Common combinations:
+
+| Environment                   | Entity              | Index                              | Embedder         |
+| ----------------------------- | ------------------- | ---------------------------------- | ---------------- |
+| Single Node.js process        | `NodeFs`            | `SqliteNodeIndex`                  | `Gemma2Embedder` |
+| Browser                       | `Opfs`              | `PGliteIndex` or `SqliteWasmIndex` | `Gemma2Embedder` |
+| Server with a shared database | `NodeFs` or similar | `PostgresqlIndex`                  | `Gemma2Embedder` |
+
+## Node.js [#node]
+
+```ts
+import { Gemma2Embedder } from "@omniojs/emb-gemma2";
+import { SqliteNodeIndex } from "@omniojs/idx-sqlite.node";
+import { NodeFs } from "@unikvs/fs.node";
+import { Omnio } from "omnio";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const omnio = new Omnio({
+  entity: new unikvs.Builder<EntityMapping>().persist(new NodeFs("./data/entities")),
+  index: new SqliteNodeIndex({ location: "./data/index.sqlite3" }),
+  embedder: new Gemma2Embedder(),
+});
+
+await omnio.open();
+```
+
+## Browser [#browser]
+
+OPFS is the browser's Origin Private File System. PGlite can persist its database in IndexedDB.
+
+```ts
+import { Gemma2Embedder } from "@omniojs/emb-gemma2";
+import { PGliteIndex } from "@omniojs/idx-pglite";
+import { Opfs } from "@unikvs/opfs";
+import { Omnio } from "omnio";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const omnio = new Omnio({
+  entity: new unikvs.Builder<EntityMapping>().persist(new Opfs("omnio-entities")),
+  index: new PGliteIndex({ location: "idb://omnio-index" }),
+  embedder: new Gemma2Embedder(),
+});
+
+await omnio.open();
+```
+
+## PostgreSQL [#postgresql]
+
+Use `PostgresqlIndex` when several processes or servers need to share the index.
+
+```ts
+import { PostgresqlIndex } from "@omniojs/idx-postgresql.node";
+
+const index = new PostgresqlIndex({
+  connectionString: process.env.DATABASE_URL!,
+  maxConnections: 10,
+});
+```
+
+The database user must be allowed to create the pgvector extension. The migration runs `CREATE EXTENSION IF NOT EXISTS vector`.
+
+## Set the purge grace period [#purge-grace-period]
+
+`purgeGracePeriodMs` controls how long bytes remain after a logical delete. The default is 60000 milliseconds.
+
+```ts
+const omnio = new Omnio({
+  entity,
+  index,
+  embedder,
+  purgeGracePeriodMs: 5 * 60 * 1000,
+});
+```
+
+Use a larger value when long-running streams must be protected. Use `0` for tests or disposable data.
+
+## Implement custom components [#custom-components]
+
+`index` must implement `IObjectIndex`, `embedder` must implement `IEmbedder`, and `entity` must implement `IOmnioEntityBuilder`. See [Indexes](/reference/indexes), [Embedders](/reference/embedders), and [Entity storage](/reference/storage).
+
+The entity builder must pass the `beforeAll` option it receives from `build(options)` to the unikvs `build()` call. `Omnio` injects its checksum middleware through that option.
+
+## Validate configuration [#validation]
+
+The constructor and method inputs are validated with valibot. Invalid values throw `ValiError`.
+
+```ts
+import * as v from "valibot";
+
+try {
+  new Omnio({ entity, index, embedder, purgeGracePeriodMs: -1 });
+} catch (error) {
+  if (error instanceof v.ValiError) {
+    console.error("Invalid configuration", error.issues);
+  }
+}
+```
+
+## Next steps [#next]
+
+- [Persist data](/how-to/persist-data)
+- [Indexes reference](/reference/indexes)
+- [Handle errors and cancellation](/how-to/handle-errors)

@@ -1,0 +1,143 @@
+---
+title: 絞り込んで一覧する
+description: メタデータ条件でオブジェクトを絞り込み、カーソルでページを取得します。
+---
+
+## 一覧の基本 [#basics]
+
+`listObjects` はキーの昇順でオブジェクトを返します。既定の件数は 100 件です。
+
+```ts
+const page = await omnio.listObjects({ limit: 20 });
+
+for (const item of page.items) {
+  console.log(item.key.key);
+}
+
+console.log(page.nextCursor); // 続きがない場合は null
+```
+
+## 続きを取得する [#pagination]
+
+`nextCursor` をそのまま次の呼び出しに渡します。
+
+```ts
+let cursor: string | null = null;
+const all = [];
+
+do {
+  const page = await omnio.listObjects({ limit: 100, cursor });
+
+  all.push(...page.items);
+  cursor = page.nextCursor;
+} while (cursor !== null);
+```
+
+カーソルは先頭からの件数を表します。ページを取得している間にオブジェクトが追加・削除されると、項目が重複したり飛ばされたりすることがあります。厳密なスナップショットが必要なときは、一覧の取得中に書き込まないでください。
+
+## タグで絞り込む [#tags]
+
+```ts
+// タグを 1 つ含む
+await omnio.listObjects({ filter: { tags: "important" } });
+
+// すべてのタグを含む
+await omnio.listObjects({ filter: { tags: { hasEvery: ["work", "2026"] } } });
+
+// いずれかのタグを含む
+await omnio.listObjects({ filter: { tags: { hasSome: ["red", "blue"] } } });
+
+// タグが空
+await omnio.listObjects({ filter: { tags: { isEmpty: true } } });
+```
+
+タグの順序は比較に影響しません。
+
+## コンテンツタイプで絞り込む [#content-type]
+
+```ts
+await omnio.listObjects({
+  filter: { contentType: "image/jpeg" },
+});
+
+await omnio.listObjects({
+  filter: {
+    contentType: {
+      startsWith: "image/",
+      not: "image/svg+xml",
+    },
+  },
+});
+```
+
+`contentType` は保存時に小文字へ正規化されます。絞り込み条件の値も小文字として扱われます。
+
+## サイズと日時で絞り込む [#size-and-time]
+
+```ts
+await omnio.listObjects({
+  filter: {
+    size: { gte: 1024, lt: 10 * 1024 * 1024 },
+    createdAt: { gte: new Date("2026-01-01T00:00:00Z") },
+    updatedAt: { lt: "2026-12-31T23:59:59Z" },
+  },
+});
+```
+
+日時は ISO 8601 文字列か `Date` で指定します。サイズの比較には数値か `bigint` を使えます。
+
+## 全文検索で絞り込む [#full-text]
+
+`fullText` は説明文とキーに対する部分一致です。単語に分割したり、順位を付けたりはしません。
+
+```ts
+await omnio.listObjects({
+  filter: { fullText: "夕日" },
+});
+```
+
+大文字と小文字の区別はデータベースによって異なります。SQLite は ASCII の範囲で大文字と小文字を区別せず、PostgreSQL は `ILIKE` を使います。
+
+## レコードタイプで絞り込む [#record-type]
+
+```ts
+await omnio.listObjects({
+  filter: { recordType: "UPDATE_METADATA" },
+});
+```
+
+`recordType` は `"CREATE"`、`"UPDATE_METADATA"`、`"DELETE"` のいずれかです。ただし削除済みのレコードは常に一覧から除外されるため、`"DELETE"` を指定しても結果は空です。
+
+## 複数の条件を組み合わせる [#combine]
+
+同じフィールドに複数の条件を指定した場合は、すべてを満たす必要があります。異なるフィールドの条件もすべて組み合わされます。
+
+```ts
+await omnio.listObjects({
+  filter: {
+    contentType: { startsWith: "image/" },
+    tags: { hasEvery: ["public", "2026"] },
+    size: { lte: 5 * 1024 * 1024 },
+    createdAt: { gte: new Date("2026-01-01") },
+  },
+});
+```
+
+## 検索と組み合わせる [#with-search]
+
+`searchObjects` の `filter` も同じ形式です。ベクトルの類似度を計算する前に候補を絞り込みます。
+
+```ts
+await omnio.searchObjects({
+  query: { text: "海辺の写真" },
+  topK: 10,
+  filter: {
+    contentType: { startsWith: "image/" },
+    tags: { has: "public" },
+  },
+});
+```
+
+## 次に読む [#next]
+
+条件の正確な型と意味は[メタデータによる絞り込み](/reference/metadata-filter)を参照してください。

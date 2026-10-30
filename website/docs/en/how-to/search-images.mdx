@@ -1,0 +1,85 @@
+---
+title: Search by image
+description: Use an image query for semantic search and understand what it compares against.
+---
+
+## How an image query works [#how-it-works]
+
+`Gemma2Embedder` maps text and images into the same embedding space. When you pass an image to `searchObjects`, Omnio embeds the image and compares it with the stored description embeddings.
+
+```ts
+import { readFile } from "node:fs/promises";
+
+const image = await readFile("./query.jpg");
+
+const results = await omnio.searchObjects({
+  query: {
+    image,
+    mimeType: "image/jpeg",
+  },
+  topK: 10,
+});
+```
+
+`mimeType` is optional, but specifying it makes image decoding more reliable. Both `Uint8Array` and `Blob` are accepted.
+
+## What is compared [#stored-data]
+
+Omnio automatically embeds the `description` passed to `putObject`. It does not automatically embed the stored file bytes as an image.
+
+Therefore, an image query measures similarity against the descriptions of stored objects. To search for images, store a description of each image.
+
+```ts
+await omnio.putObject({
+  key: "photos/sunset.jpg",
+  data: imageBytes,
+  contentType: "image/jpeg",
+  description: "The sun setting over the sea. The sky is orange and the waves are calm.",
+  tags: ["photo", "sunset"],
+});
+```
+
+## Use the same model [#same-model]
+
+Text and image queries must use the same embedding model as the stored data. `searchObjects` filters results by the current `embedder.info.name`.
+
+If you change `model`, `dtype`, or `dims` on `Gemma2Embedder`, existing embeddings become reindex targets. See [Manage embeddings](/how-to/manage-embeddings).
+
+## Filter and limit results [#filter-and-limit]
+
+Image queries also accept `filter`, `topK`, and `minScore`.
+
+```ts
+const results = await omnio.searchObjects({
+  query: { image: imageBytes, mimeType: "image/png" },
+  topK: 5,
+  minScore: 0.4,
+  filter: {
+    contentType: { startsWith: "image/" },
+    tags: { has: "public" },
+  },
+});
+```
+
+## Omit embeddings from results [#omit-embedding]
+
+```ts
+const results = await omnio.searchObjects({
+  query: { image: imageBytes },
+  topK: 5,
+  includeEmbedding: false,
+});
+```
+
+Image search results include a `Float32Array` embedding by default. Omit it when it is not needed.
+
+## Caveats [#caveats]
+
+- Embedding images needs the model's image pipeline. `Gemma2Embedder` loads additional model files on first use.
+- If you need to index image content directly, consider a custom `IObjectIndex` or a direct vector registration path. An `embedding` passed to `putObject` does not record a model name, so it is excluded from normal text search.
+- If the MIME type does not match the data, decoding can fail with `EmbedFailedError`.
+
+## Next steps [#next]
+
+- [Embedder reference](/reference/embedders)
+- [How semantic search works](/explanation/semantic-search)

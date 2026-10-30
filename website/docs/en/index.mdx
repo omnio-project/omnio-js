@@ -1,4 +1,71 @@
 ---
 title: "Omnio-js"
-description: ""
+description: "A TypeScript library that combines object storage with metadata and semantic search."
 ---
+
+## What is Omnio-js [#what-is-omnio]
+
+Omnio-js is a TypeScript library for storing arbitrary bytes as objects and searching them by metadata and embedding vectors.
+
+It separates entity storage, metadata indexing, and embedding inference so each part can be replaced. You can choose the pieces that fit Node.js, the browser, or PostgreSQL.
+
+```ts
+const object = await omnio.putObject({
+  key: "photos/sunset.jpg",
+  data: imageBytes,
+  contentType: "image/jpeg",
+  description: "The sun setting over a quiet beach",
+  tags: ["photo", "sunset"],
+  userMetadata: { takenBy: "Alice" },
+});
+
+const results = await omnio.searchObjects({
+  query: { text: "a calm seaside landscape" },
+  topK: 10,
+});
+```
+
+## Four entry points [#four-entry-points]
+
+The documentation follows the Diátaxis framework. Start with the tutorials if you are new to Omnio-js.
+
+<CardGroup cols={2}>
+  <Card title="Tutorials" href="/tutorials" icon="graduation-cap">
+    Learn the full flow of saving and searching by building something.
+  </Card>
+  <Card title="How-to guides" href="/how-to" icon="wrench">
+    Follow steps that solve a specific problem.
+  </Card>
+  <Card title="Reference" href="/reference" icon="book-marked">
+    Look up exact APIs, types, options, and errors.
+  </Card>
+  <Card title="Explanation" href="/explanation" icon="lightbulb">
+    Understand the design, consistency, and search behavior.
+  </Card>
+</CardGroup>
+
+## Highlights [#features]
+
+- Uses [unikvs](https://tai-kun.github.io/unikvs/) for entity storage and keeps bytes unchanged.
+- Separates metadata and vector storage behind `IObjectIndex`.
+- Generates embeddings from descriptions and supports text and image queries.
+- Ships with SQLite, PGlite, and PostgreSQL index implementations.
+- Deletes objects logically at once and reclaims entity bytes safely after a grace period.
+- Uses `AbortSignal` for cancellation and provides a unified `open` and `close` lifecycle.
+
+## Packages [#packages]
+
+| Package                        | Role                                           |
+| ------------------------------ | ---------------------------------------------- |
+| `omnio`                        | Main package that exposes the public API.      |
+| `@omniojs/core`                | Shared types, keys, schemas, and errors.       |
+| `@omniojs/emb-gemma2`          | EmbeddingGemma 2 embedder.                     |
+| `@omniojs/idx-sql`             | Shared SQL index implementation.               |
+| `@omniojs/idx-sqlite.node`     | Index built on Node.js' built-in SQLite.       |
+| `@omniojs/idx-sqlite.wasm`     | Index built on SQLite compiled to WebAssembly. |
+| `@omniojs/idx-pglite`          | Index built on PGlite and pgvector.            |
+| `@omniojs/idx-postgresql.node` | Index built on PostgreSQL and pgvector.        |
+
+## Next steps [#next]
+
+Start with [Save your first object](/tutorials/first-objects). If you already know what you need, see [Choose and configure components](/how-to/configure-stack).

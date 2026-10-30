@@ -1,0 +1,119 @@
+---
+title: Handle errors and cancellation
+description: Classify Omnio exceptions and cancel work safely with AbortSignal.
+---
+
+## Input validation errors [#validation-errors]
+
+Public method inputs are validated with valibot. Invalid values throw `ValiError`.
+
+```ts
+import * as v from "valibot";
+
+try {
+  await omnio.putObject({
+    key: "notes/a.txt",
+    data: bytes,
+    contentType: "text/plain",
+    tags: new Array(11).fill("tag"),
+  });
+} catch (error) {
+  if (error instanceof v.ValiError) {
+    console.error(error.issues);
+  }
+}
+```
+
+At most 10 tags are allowed, and each tag is limited to 128 characters and 128 bytes. Keys are limited to 1024 characters and 1024 bytes.
+
+## Common exceptions [#common-errors]
+
+| Error                      | When it occurs                                           |
+| -------------------------- | -------------------------------------------------------- |
+| `ValiError`                | Input does not match the schema.                         |
+| `InvalidOmnioKeyError`     | The key is empty, too long, or not valid UTF-8.          |
+| `DbNotOpenError`           | An operation ran before `open()` or after `close()`.     |
+| `OperationAbortedError`    | `close()` aborted a running operation.                   |
+| `EntityMissingError`       | The index has a record but the entity bytes are missing. |
+| `ChecksumMismatchError`    | The SHA-256 of the bytes does not match the index hash.  |
+| `DbQueryError`             | An index database operation failed.                      |
+| `ModelLoadError`           | The embedding model could not be loaded.                 |
+| `EmbedFailedError`         | Text or image embedding failed.                          |
+| `UnsupportedModalityError` | The embedder does not support the requested modality.    |
+
+`error.name` is specific, such as `OmnioInvalidKeyError` or `OmnioDbNotOpenError`. Use `instanceof` when you can.
+
+## Pass an abort signal [#abort-signal]
+
+Each method accepts an `AbortSignal`, either as the last argument or as `signal` in the input object.
+
+```ts
+const controller = new AbortController();
+
+const pending = omnio.searchObjects({
+  query: { text: "seaside" },
+  signal: controller.signal,
+});
+
+controller.abort();
+
+try {
+  await pending;
+} catch (error) {
+  if (controller.signal.aborted) {
+    console.log("Search aborted", controller.signal.reason);
+  }
+}
+```
+
+For a time limit, use `AbortSignal.timeout()`.
+
+```ts
+await omnio.putObject({
+  key: "large/file.bin",
+  data: stream,
+  contentType: "application/octet-stream",
+  signal: AbortSignal.timeout(30_000),
+});
+```
+
+## Cancellation by close [#close-aborts]
+
+`close()` combines the caller's signal with the lifecycle signal, so running operations are aborted with `OperationAbortedError`.
+
+```ts
+const operation = omnio.getObject("notes/a.txt");
+
+await omnio.close();
+
+await operation.catch((error) => {
+  if (error instanceof OperationAbortedError) {
+    // Aborted by close.
+  }
+});
+```
+
+`open()` and `close()` time out after 30 seconds when no signal is passed. Pass an explicit signal when the operation may take longer.
+
+## Retry [#retry]
+
+Transient database failures surface as `DbQueryError`. Before retrying, check whether the operation is idempotent.
+
+- `getObject`, `headObject`, `hasObject`, `listObjects`, and `searchObjects` are easy to retry because they read.
+- `putObject`, `copyObject`, `renameObject`, and `deleteObject` can create new entities or purge reservations when retried.
+- `updateObjectMetadata` produces the same result when retried with the same values.
+
+## Localize messages [#localize]
+
+`@omniojs/core` exports `setErrorMessage`. You can replace messages for your application language.
+
+```ts
+import { DbNotOpenError, setErrorMessage } from "@omniojs/core";
+
+setErrorMessage(DbNotOpenError, () => "The database is not open", "en");
+```
+
+## Next steps [#next]
+
+- [Errors reference](/reference/errors)
+- [Consistency and lifecycle](/explanation/consistency-and-lifecycle)

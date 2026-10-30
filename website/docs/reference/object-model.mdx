@@ -1,0 +1,118 @@
+---
+title: オブジェクトモデル
+description: OmnioObject のフィールド、可変メタデータ、レコードタイプのリファレンスです。
+---
+
+## `OmnioObject` [#omnio-object]
+
+`OmnioObject` は、エンティティ（バイト列）とメタデータをまとめた論理単位です。
+
+```ts
+type OmnioObject<TUserMetadata = Record<string, unknown>> = {
+  key: OmnioKey;
+  entityId: string;
+  contentType: string;
+  createdAt: string;
+  updatedAt: string;
+  size: number;
+  hash?: string;
+  hashAlgorithm?: string;
+  tags: readonly string[];
+  description?: string;
+  userMetadata: TUserMetadata;
+  embedding?: Float32Array;
+  embeddingDims?: number;
+  embeddingModel?: string;
+  embeddingSource?: EmbedSource;
+};
+```
+
+| フィールド        | 説明                                                  |
+| ----------------- | ----------------------------------------------------- |
+| `key`             | オブジェクトを一意に識別する `OmnioKey` です。        |
+| `entityId`        | エンティティストレージ上のキーです。UUID で表します。 |
+| `contentType`     | 小文字に正規化されたコンテンツタイプです。            |
+| `createdAt`       | 作成時刻です。ISO 8601 文字列です。                   |
+| `updatedAt`       | 更新時刻です。ISO 8601 文字列です。                   |
+| `size`            | バイト列のサイズです。                                |
+| `hash`            | バイト列のハッシュ値です。存在しない場合もあります。  |
+| `hashAlgorithm`   | ハッシュのアルゴリズムです。`"sha256"` などです。     |
+| `tags`            | 絞り込み用のタグです。埋め込み対象ではありません。    |
+| `description`     | 任意の説明文です。埋め込みの対象にできます。          |
+| `userMetadata`    | 利用者が自由に付与するメタデータです。                |
+| `embedding`       | 埋め込みベクトルです。未生成の場合もあります。        |
+| `embeddingDims`   | 埋め込みの次元数です。                                |
+| `embeddingModel`  | 埋め込みに使ったモデル名です。                        |
+| `embeddingSource` | 埋め込みの由来です。                                  |
+
+## バイト列に由来する値 [#entity-derived]
+
+`size`、`hash`、`hashAlgorithm`、`createdAt` はオブジェクトのバイト列に由来します。`updateObjectMetadata` では変更できません。
+
+`entityId` はバイト列の保存先を指します。`putObject` と `copyObject` は新しい `entityId` を割り当て、`renameObject` は同じ `entityId` を維持します。同じ `entityId` のバイト列は変更されません。
+
+## 変更可能なメタデータ [#mutable-metadata]
+
+```ts
+type ObjectMetadataPatch<TUserMetadata = Record<string, unknown>> = {
+  contentType?: string;
+  description?: string;
+  tags?: readonly string[];
+  userMetadata?: TUserMetadata;
+  updatedAt: string;
+};
+```
+
+省略した項目は変更しません。`tags` に空配列を渡すと、すべてのタグを削除します。
+
+## 埋め込みの由来 [#embedding-source]
+
+```ts
+type EmbedSource =
+  | { kind: "custom"; model: string }
+  | { kind: "description"; model: string }
+  | { kind: "image"; model: string }
+  | { kind: "vector"; model?: string };
+```
+
+`putObject` が説明文から生成した埋め込みは `kind: "description"` です。`embeddingModel` には `embedder.info.name` が入ります。
+
+## レコードタイプ [#record-type]
+
+インデックスのレコードには、次の種類があります。
+
+| 値                  | 意味                                                                         |
+| ------------------- | ---------------------------------------------------------------------------- |
+| `"CREATE"`          | オブジェクトを新規作成したレコードです。削除済みから復元した場合も含みます。 |
+| `"UPDATE_METADATA"` | メタデータを更新したレコードです。キー変更も含みます。                       |
+| `"DELETE"`          | 論理削除したレコードです。                                                   |
+
+`MetadataFilter.recordType` で絞り込めますが、削除済みのレコードは一覧から常に除外されます。
+
+## `IndexedObject` [#indexed-object]
+
+検索結果は `OmnioObject` に `score` を加えた `IndexedObject` です。
+
+```ts
+type IndexedObject<TUserMetadata = Record<string, unknown>> = OmnioObject<TUserMetadata> & {
+  score?: number;
+};
+```
+
+スコアの意味は類似度の計算方式によって変わります。コサイン類似度は値が大きいほど近く、L2 距離は負の距離として表されます。
+
+## `OmnioKey` の扱い [#key-type]
+
+`OmnioObject.key` は文字列ではなく `OmnioKey` インスタンスです。文字列が必要なときは `key.key` を使います。`JSON.stringify` では文字列として扱われます。
+
+```ts
+const object = await omnio.headObject("notes/a.txt");
+
+console.log(object?.key.key); // notes/a.txt
+console.log(JSON.stringify(object?.key)); // "notes/a.txt"
+```
+
+## 次に読む [#next]
+
+- [オブジェクトキー](/reference/object-keys)
+- [メタデータフィルター](/reference/metadata-filter)

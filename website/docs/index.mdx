@@ -1,4 +1,71 @@
 ---
 title: "Omnio-js"
-description: ""
+description: "オブジェクトストレージにメタデータ検索と意味検索を組み合わせる TypeScript ライブラリです。"
 ---
+
+## Omnio-js とは [#what-is-omnio]
+
+Omnio-js は、任意のバイト列をオブジェクトとして保存し、メタデータや埋め込みベクトルで検索できる TypeScript ライブラリです。
+
+バイト列の保存、メタデータのインデックス、埋め込みの生成を分離し、それぞれを差し替えられるようにしています。Node.js、ブラウザー、PostgreSQL など、実行環境に合わせて部品を選べます。
+
+```ts
+const object = await omnio.putObject({
+  key: "photos/sunset.jpg",
+  data: imageBytes,
+  contentType: "image/jpeg",
+  description: "海辺に沈む夕日",
+  tags: ["photo", "sunset"],
+  userMetadata: { takenBy: "Alice" },
+});
+
+const results = await omnio.searchObjects({
+  query: { text: "静かな海の風景" },
+  topK: 10,
+});
+```
+
+## 4 つの分類 [#four-entry-points]
+
+Diátaxis の分類に合わせて、目的別にドキュメントを分けています。初めての方はチュートリアルから始めてください。
+
+<CardGroup cols={2}>
+  <Card title="チュートリアル" href="/tutorials" icon="graduation-cap">
+    手を動かしながら、保存と検索の一連の流れを学びます。
+  </Card>
+  <Card title="ハウツーガイド" href="/how-to" icon="wrench">
+    目的別の手順を確認します。
+  </Card>
+  <Card title="リファレンス" href="/reference" icon="book-marked">
+    API、型、設定値、エラーの正確な仕様を調べます。
+  </Card>
+  <Card title="解説" href="/explanation" icon="lightbulb">
+    設計の背景や、一貫性と検索の仕組みを理解します。
+  </Card>
+</CardGroup>
+
+## 主な特徴 [#features]
+
+- バイト列の保存先（エンティティストレージ）に [unikvs](https://tai-kun.github.io/unikvs/) を使い、データをそのまま保存します。
+- メタデータとベクトルのインデックスを `IObjectIndex` として分離しています。
+- 説明文から埋め込みを生成し、テキストや画像で意味検索できます。
+- SQLite、PGlite、PostgreSQL 向けのインデックス実装を同梱しています。
+- 削除はすぐに反映し、バイト列は猶予期間の後に安全に回収します。
+- `AbortSignal` による中断と、`open`・`close` のライフサイクルを共通の仕組みで扱います。
+
+## パッケージ構成 [#packages]
+
+| パッケージ                     | 役割                                            |
+| ------------------------------ | ----------------------------------------------- |
+| `omnio`                        | 公開 API を提供するメインのパッケージです。     |
+| `@omniojs/core`                | 型、キー、スキーマ、エラーの共通定義です。      |
+| `@omniojs/emb-gemma2`          | EmbeddingGemma 2 による埋め込み器です。         |
+| `@omniojs/idx-sql`             | SQL インデックスの共通実装です。                |
+| `@omniojs/idx-sqlite.node`     | Node.js 標準の SQLite によるインデックスです。  |
+| `@omniojs/idx-sqlite.wasm`     | WASM 版 SQLite によるインデックスです。         |
+| `@omniojs/idx-pglite`          | PGlite と pgvector によるインデックスです。     |
+| `@omniojs/idx-postgresql.node` | PostgreSQL と pgvector によるインデックスです。 |
+
+## 次に読む [#next]
+
+まずは[最初のオブジェクトを保存する](/tutorials/first-objects)チュートリアルに進んでください。すでに構成が決まっている場合は、[部品を選んで設定する](/how-to/configure-stack)を参照してください。

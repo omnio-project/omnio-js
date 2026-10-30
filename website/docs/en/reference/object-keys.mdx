@@ -1,0 +1,122 @@
+---
+title: Object keys
+description: Reference for OmnioKey parsing and object key constraints.
+---
+
+## Constraints [#constraints]
+
+An object key must contain at least one character and satisfy these limits.
+
+| Constraint          | Value                   |
+| ------------------- | ----------------------- |
+| Maximum characters  | 1024                    |
+| Maximum UTF-8 bytes | 1024                    |
+| Minimum characters  | 1                       |
+| Characters          | Any valid UTF-8 string. |
+
+An empty string, an overlong key, or invalid UTF-8 throws `InvalidOmnioKeyError`.
+
+```ts
+import { OmnioKey } from "@omniojs/core";
+
+OmnioKey.check("notes/a.txt"); // true
+OmnioKey.check(""); // false
+```
+
+## Creating an `OmnioKey` [#create]
+
+```ts
+import { OmnioKey } from "@omniojs/core";
+
+const key = new OmnioKey("photos/2026/sunset.jpg");
+const same = OmnioKey.parse("photos/2026/sunset.jpg");
+```
+
+Both `new OmnioKey()` and `OmnioKey.parse()` validate the input. `OmnioKey.check()` validates without creating an instance.
+
+Every `Omnio` method accepts a string or an `OmnioKey`. A string is parsed with `OmnioKey.parse()` internally.
+
+## Properties [#properties]
+
+### `key` [#key]
+
+```ts
+const key = OmnioKey.parse("photos/2026/sunset.jpg");
+
+key.key; // "photos/2026/sunset.jpg"
+```
+
+The full key string.
+
+### `segments` [#segments]
+
+```ts
+key.segments; // ["photos", "2026", "sunset.jpg"]
+```
+
+The slash-separated segments. The array always has at least one element, and the returned array is a copy.
+
+### `prefix` [#prefix]
+
+```ts
+key.prefix; // "photos/2026/"
+
+OmnioKey.parse("root").prefix; // ""
+```
+
+Everything except the last segment.
+
+### `basename` [#basename]
+
+```ts
+key.basename; // "sunset.jpg"
+```
+
+The last segment.
+
+### `filename` [#filename]
+
+```ts
+OmnioKey.parse("archive.tar.gz").filename; // "archive.tar"
+OmnioKey.parse(".hidden").filename; // ".hidden"
+OmnioKey.parse("Makefile").filename; // "Makefile"
+```
+
+The basename without its extension. A leading-dot hidden file is treated as having no extension.
+
+### `extname` [#extname]
+
+```ts
+OmnioKey.parse("archive.tar.gz").extname; // ".gz"
+OmnioKey.parse(".hidden").extname; // ""
+```
+
+The extension from the last dot, including the dot.
+
+## String conversion [#string-conversion]
+
+```ts
+const key = OmnioKey.parse("notes/a.txt");
+
+String(key); // "notes/a.txt"
+JSON.stringify(key); // "\"notes/a.txt\""
+```
+
+`toString()` and `toJSON()` return the key string.
+
+## Designing keys [#design]
+
+Keys determine listing order. `listObjects` sorts by key, so putting a date or category first makes the order predictable.
+
+```txt
+photos/2026/01/sunset.jpg
+photos/2026/02/beach.jpg
+notes/2026-01-15/meeting.md
+```
+
+When logic depends on key structure, use `prefix` and `extname` instead of manual string manipulation.
+
+## Next steps [#next]
+
+- [Object model](/reference/object-model)
+- [Filter and paginate](/how-to/filter-and-paginate)

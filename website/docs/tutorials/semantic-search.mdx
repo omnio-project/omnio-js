@@ -1,0 +1,166 @@
+---
+title: 意味検索を試す
+description: 複数のオブジェクトを保存し、テキスト検索・タグ絞り込み・画像検索を試します。
+---
+
+## このチュートリアルで作るもの [#what-you-will-build]
+
+3 件のオブジェクトを説明文付きで保存し、自然言語での検索、タグでの絞り込み、画像での検索を順に試します。
+
+[最初のオブジェクトを保存する](/tutorials/first-objects)と同じ構成を使うので、先にそちらを完了してください。ここでは `src/search.ts` を新しく作ります。
+
+## 1. 検索用のデータを保存する [#seed-data]
+
+`src/search.ts` の `try` ブロックに、3 件のオブジェクトを保存します。
+
+```ts src/search.ts
+const documents = [
+  {
+    key: "travel/sea.md",
+    description: "夕日に染まる静かな海辺の風景",
+    tags: ["travel", "sea"],
+    body: "海辺の写真を撮りに行った日の記録です。",
+  },
+  {
+    key: "travel/mountain.md",
+    description: "雪をかぶった山と澄んだ青空",
+    tags: ["travel", "mountain"],
+    body: "山頂から見た景色についてのメモです。",
+  },
+  {
+    key: "food/ramen.md",
+    description: "濃厚な豚骨スープのラーメン",
+    tags: ["food", "noodle"],
+    body: "駅前の店で食べたラーメンの感想です。",
+  },
+];
+
+for (const document of documents) {
+  await omnio.putObject({
+    key: document.key,
+    data: new TextEncoder().encode(document.body),
+    contentType: "text/markdown",
+    description: document.description,
+    tags: document.tags,
+  });
+}
+```
+
+保存が終わると、各説明文の埋め込みもできています。
+
+## 2. テキストで検索する [#search-by-text]
+
+海に関係する内容を検索してみます。
+
+```ts
+const results = await omnio.searchObjects({
+  query: { text: "穏やかな海岸の夕暮れ" },
+  topK: 3,
+});
+
+for (const result of results) {
+  console.log(result.key.key, result.description, result.score);
+}
+```
+
+`travel/sea.md` が先頭に来るはずです。`score` は既定のコサイン類似度で、値が大きいほどクエリーに近いことを示します。
+
+## 3. 結果を絞り込む [#filter-results]
+
+検索する前に、メタデータで候補を絞り込めます。ここではタグが `travel` のオブジェクトだけを対象にします。
+
+```ts
+const travelResults = await omnio.searchObjects({
+  query: { text: "静かな景色" },
+  topK: 5,
+  filter: {
+    tags: { has: "travel" },
+  },
+});
+```
+
+`filter` は埋め込みの類似度を計算する前に適用されます。絞り込み条件の一覧は[メタデータによる絞り込み](/reference/metadata-filter)を参照してください。
+
+`minScore` を指定すると、スコアがしきい値未満の結果を除外できます。
+
+```ts
+const strongResults = await omnio.searchObjects({
+  query: { text: "海辺の夕日" },
+  topK: 10,
+  minScore: 0.5,
+});
+```
+
+しきい値はモデルやデータによって変わるため、実際の結果を見ながら調整してください。
+
+## 4. 一覧をページ分けする [#paginate]
+
+検索ではなくキー順の一覧が必要なときは、`listObjects` を使います。
+
+```ts
+let cursor: string | null = null;
+
+do {
+  const page = await omnio.listObjects({
+    limit: 2,
+    cursor,
+    filter: { tags: { hasSome: ["travel", "food"] } },
+  });
+
+  for (const item of page.items) {
+    console.log(item.key.key);
+  }
+
+  cursor = page.nextCursor;
+} while (cursor !== null);
+```
+
+`nextCursor` が `null` になるまで繰り返します。一覧はキーの昇順で返ります。
+
+## 5. 画像で検索する [#search-by-image]
+
+`Gemma2Embedder` は画像の埋め込みにも対応しており、テキストと画像を同じ埋め込み空間に変換します。
+
+```ts
+import { readFile } from "node:fs/promises";
+
+const image = await readFile("./sunset.jpg");
+
+const imageResults = await omnio.searchObjects({
+  query: {
+    image,
+    mimeType: "image/jpeg",
+  },
+  topK: 5,
+});
+```
+
+画像クエリーも、説明文から作った埋め込みと比較されます。画像の内容と説明文が近いほど、スコアが高くなります。
+
+## 6. 埋め込みを結果から省く [#omit-embeddings]
+
+検索結果には既定で `Float32Array` の埋め込みが含まれます。必要ない場合は `includeEmbedding: false` を指定します。
+
+```ts
+const lightResults = await omnio.searchObjects({
+  query: { text: "ラーメン" },
+  topK: 5,
+  includeEmbedding: false,
+});
+```
+
+大量の結果を扱う場合や、結果をそのまま JSON に変換する場合に便利です。
+
+## 7. 実行する [#run]
+
+```sh
+pnpm tsx src/search.ts
+```
+
+`src/search.ts` では、最初のチュートリアルと同じ `Omnio` の組み立てと `open`・`close` を忘れずに書いてください。
+
+## 次に読む [#next]
+
+- [メタデータによる絞り込み](/reference/metadata-filter)
+- [埋め込みを管理する](/how-to/manage-embeddings)
+- [意味検索の仕組み](/explanation/semantic-search)

@@ -1,0 +1,171 @@
+---
+title: 埋め込み器
+description: Gemma2Embedder のオプションと、IEmbedder インターフェースのリファレンスです。
+---
+
+## `Gemma2Embedder` [#gemma2-embedder]
+
+EmbeddingGemma 2 による埋め込み器です。テキストと画像に対応し、両方を同じ埋め込み空間に変換します。
+
+```ts
+import { Gemma2Embedder } from "@omniojs/emb-gemma2";
+
+const embedder = new Gemma2Embedder();
+```
+
+## オプション [#options]
+
+```ts
+type Gemma2EmbedderOptions = {
+  model?: string;
+  dtype?: DataType;
+  subfolder?: string;
+  dims?: number;
+  device?: DeviceType;
+};
+```
+
+| オプション  | 既定値                                   | 説明                                 |
+| ----------- | ---------------------------------------- | ------------------------------------ |
+| `model`     | `"onnx-community/embeddinggemma-2-ONNX"` | Hugging Face のモデル ID です。      |
+| `dtype`     | `"q4"`                                   | 量子化形式です。                     |
+| `subfolder` | `"onnx"`                                 | モデルファイルのサブフォルダーです。 |
+| `dims`      | `768`                                    | 出力ベクトルの次元数です。           |
+| `device`    | モデルライブラリーの既定値               | 推論デバイスです。                   |
+
+`dims` がモデルの出力より小さいときは、先頭から切り詰めて L2 正規化します。大きいときは `EmbedFailedError` が投げられます。
+
+`dtype` は `"auto"`、`"fp32"`、`"fp16"`、`"q8"`、`"int8"`、`"uint8"`、`"q4"`、`"bnb4"`、`"q4f16"`、`"q2"`、`"q2f16"`、`"q1"`、`"q1f16"` のいずれかです。
+
+`device` は `"auto"`、`"gpu"`、`"cpu"`、`"wasm"`、`"webgpu"`、`"cuda"`、`"dml"`、`"coreml"`、`"webnn"`、`"webnn-npu"`、`"webnn-gpu"`、`"webnn-cpu"` のいずれかです。
+
+```ts
+const embedder = new Gemma2Embedder({
+  dims: 256,
+  dtype: "q8",
+  device: "cpu",
+});
+```
+
+## 能力情報 [#info]
+
+```ts
+embedder.info;
+// {
+//   dims: 768,
+//   name: "onnx-community/embeddinggemma-2-ONNX",
+//   modalities: ["text", "image"],
+//   normalized: true,
+//   multilingual: true,
+// }
+```
+
+`name` はインデックスに保存されるモデル名です。`dims` とともに、再インデックスの判定に使われます。
+
+## 動作 [#behavior]
+
+- 初回の埋め込み時にモデルを読み込みます。読み込みに失敗すると `ModelLoadError` が投げられます。
+- テキストは平均プーリングして正規化します。
+- 画像は `RawImage` に復号してから埋め込みます。
+- 推論はインスタンスごとに直列化され、同時には実行されません。
+- `embedText`、`embed`、`embedMany` は `AbortSignal` を受け取ります。
+
+## `IEmbedder` [#iembedder]
+
+独自の埋め込み器を実装する場合のインターフェースです。
+
+```ts
+interface IEmbedder {
+  readonly info: EmbedderInfo;
+
+  embed(c: IEmbedder.EmbedContext): MaybePromise<Float32Array>;
+  embedMany(c: IEmbedder.EmbedManyContext): MaybePromise<Float32Array[]>;
+  embedText(c: IEmbedder.EmbedTextContext): MaybePromise<Float32Array>;
+  supports(c: IEmbedder.SupportsContext): boolean;
+}
+```
+
+### `EmbedderInfo` [#embedder-info]
+
+```ts
+type EmbedderInfo = {
+  dims: number;
+  maxTokens?: number;
+  modalities: readonly EmbedModality[];
+  multilingual: boolean;
+  name: string;
+  normalized: boolean;
+};
+```
+
+| フィールド     | 説明                                                 |
+| -------------- | ---------------------------------------------------- |
+| `dims`         | 出力ベクトルの次元数です。                           |
+| `maxTokens`    | 入力の最大トークン数です。制限がない場合もあります。 |
+| `modalities`   | 対応するモダリティーです。`"text"` は必須です。      |
+| `multilingual` | 多言語に対応しているかどうかです。                   |
+| `name`         | モデル名です。インデックスに保存されます。           |
+| `normalized`   | 出力が L2 正規化済みかどうかです。                   |
+
+### メソッド [#methods]
+
+| メソッド    | 説明                                     |
+| ----------- | ---------------------------------------- |
+| `embed`     | 1 つの入力を埋め込みます。               |
+| `embedMany` | 複数の入力をまとめて埋め込みます。       |
+| `embedText` | テキストを埋め込みます。                 |
+| `supports`  | モダリティーに対応しているかを返します。 |
+
+`Omnio` は説明文の埋め込みに `embedText` を使います。画像クエリーには `embed` を使います。
+
+### 実装例 [#implementation-example]
+
+```ts
+import type { IEmbedder } from "@omniojs/core";
+
+class MyEmbedder implements IEmbedder {
+  readonly info = {
+    dims: 384,
+    name: "my-model-v1",
+    modalities: ["text"],
+    normalized: true,
+    multilingual: false,
+  };
+
+  async embed(c: IEmbedder.EmbedContext): Promise<Float32Array> {
+    return this.#embedInput(c.input, c.signal);
+  }
+
+  async embedMany(c: IEmbedder.EmbedManyContext): Promise<Float32Array[]> {
+    return Promise.all(c.inputs.map((input) => this.#embedInput(input, c.signal)));
+  }
+
+  async embedText(c: IEmbedder.EmbedTextContext): Promise<Float32Array> {
+    return this.#embedInput({ kind: "text", text: c.text }, c.signal);
+  }
+
+  supports(c: IEmbedder.SupportsContext): boolean {
+    return c.modality === "text";
+  }
+
+  async #embedInput(
+    input: IEmbedder.EmbedContext["input"],
+    signal: AbortSignal,
+  ): Promise<Float32Array> {
+    signal.throwIfAborted();
+    // 実際の埋め込み処理を書きます。
+    return new Float32Array(this.info.dims);
+  }
+}
+```
+
+## モデルの変更 [#model-changes]
+
+`info.name` か `info.dims` が保存済みの値と異なると、`open()` が対象のオブジェクトに dirty フラグを立て、バックグラウンドで再インデックスします。
+
+再インデックスの対象は、説明文があって埋め込みモデルが記録されているオブジェクトのうち、削除されていないものだけです。`embed: false` で保存したオブジェクトや、`embedding` を手動で渡したオブジェクトは対象になりません。
+
+## 次に読む [#next]
+
+- [埋め込みを管理する](/how-to/manage-embeddings)
+- [意味検索の仕組み](/explanation/semantic-search)

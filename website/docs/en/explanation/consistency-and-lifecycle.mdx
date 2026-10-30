@@ -1,0 +1,89 @@
+---
+title: Consistency and lifecycle
+description: Visibility, deletion, crash recovery, and multi-process caveats in Omnio.
+---
+
+## Visibility [#visibility]
+
+Omnio operations expose data as follows.
+
+| Operation       | Deleted objects | Objects waiting for reindex |
+| --------------- | --------------- | --------------------------- |
+| `getObject`     | Hidden          | Visible                     |
+| `headObject`    | Hidden          | Visible                     |
+| `hasObject`     | Hidden          | Visible                     |
+| `listObjects`   | Hidden          | Visible                     |
+| `searchObjects` | Hidden          | Hidden                      |
+
+An object waiting for reindex still has current metadata, but it is excluded from vector search.
+
+## Lifecycle [#lifecycle]
+
+`open()` opens entity storage and the index. Opening the index applies migrations and marks objects whose embedding model changed as dirty.
+
+`close()` processes shutdown in this order.
+
+1. Abort the lifecycle signal and notify running operations.
+2. Wait for reindexing to finish.
+3. Wait for background deletion work.
+4. Close the index and entity storage.
+
+When no signal is passed to `close()`, the wait times out after 30 seconds. If closing the index or entity store fails, it throws, and a later `close()` can retry.
+
+## Deletion [#deletion]
+
+Deletion has two stages.
+
+1. **Logical delete**: `deleteObject` marks the record deleted in the index. It disappears immediately from reads, listings, and searches.
+2. **Physical delete**: after `purgeGracePeriodMs`, background work deletes the entity bytes.
+
+### Purge reservations [#pending-purge]
+
+Purge reservations are stored in the index's `pending_purge` table. They serve three purposes.
+
+- A reservation written before entity storage lets Omnio reclaim an orphan if the process crashes mid-write.
+- After a key is recreated, Omnio can check references so it does not delete bytes that are still needed.
+- When a rename moves an entity, the reservation's key can be updated.
+
+### Grace period [#grace-period]
+
+The grace period protects reads and streams that overlap a deletion. It prevents an in-flight stream from losing its bytes halfway through.
+
+`purgeGracePeriodMs: 0` attempts physical deletion immediately after the logical delete. Use it for tests or disposable data; the default 60 seconds is safer elsewhere.
+
+### Crash recovery [#crash-recovery]
+
+`open()` does the following.
+
+- Scans deleted records whose grace period has passed and schedules physical deletion.
+- Drains remaining purge reservations.
+- Processes objects that need reindexing.
+
+Even if the previous `close()` did not complete cleanly, Omnio can recover using the reservations and delete flags left in the index.
+
+## Concurrency [#concurrency]
+
+- Reads can run concurrently.
+- Writes to the same key are serialized.
+- `open` and `close` do not overlap with other operations.
+- Multi-key operations acquire keys in sorted order to avoid deadlocks.
+
+## Multiple processes [#multi-process]
+
+Omnio's locks do not cross process boundaries. If several processes write to the same index and entity store, you need database-level or application-level coordination.
+
+Single-process crash recovery works through reservations persisted in the index. For shared deployments, use a shared database such as PostgreSQL and verify transaction isolation and locking.
+
+## Consistency boundaries [#consistency-boundary]
+
+Omnio guarantees serialization within a single process and recovery based on recorded index state. Consistency can break when:
+
+- entity bytes are modified outside Omnio;
+- the index and entity store are backed up at different points in time;
+- the same key is updated concurrently by several processes;
+- listings cross transaction isolation boundaries.
+
+## Next steps [#next]
+
+- [Architecture](/explanation/architecture)
+- [Persist data](/how-to/persist-data)

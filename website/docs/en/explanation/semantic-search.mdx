@@ -1,0 +1,98 @@
+---
+title: How semantic search works
+description: Understand embeddings, similarity, model changes, and reindexing.
+---
+
+## What an embedding is [#what-is-embedding]
+
+An embedding is a fixed-length numeric vector that represents text or an image. Inputs with similar meaning land close together in the vector space.
+
+Omnio uses `IEmbedder` to produce embeddings and stores them as `Float32Array` values in the index.
+
+```ts
+const object = await omnio.putObject({
+  key: "notes/a.txt",
+  data: bytes,
+  contentType: "text/plain",
+  description: "The sun setting over the sea",
+});
+```
+
+Here, Omnio embeds `description` and records the model in `embeddingModel`, the dimensions in `embeddingDims`, and the source in `embeddingSource`.
+
+## What gets embedded [#what-is-embedded]
+
+By default, `putObject` embeds only `description`.
+
+- Tags are not embedded.
+- Stored file bytes are not embedded, regardless of their content.
+- Image queries embed the image and compare it with stored description embeddings.
+
+To search file contents, store a description of those contents.
+
+## Similarity [#similarity]
+
+SQL indexes support two similarity metrics.
+
+| Metric   | Score                | Meaning                                          |
+| -------- | -------------------- | ------------------------------------------------ |
+| `cosine` | Cosine similarity    | Ranges from `-1` to `1`; larger is closer.       |
+| `l2`     | Negative L2 distance | `0` is closest; smaller values are farther away. |
+
+`Omnio.searchObjects` does not pass `metric`, so it always uses cosine similarity. To use L2, call `IObjectIndex.search` directly.
+
+`minScore` applies to this score. Because the metric changes what the value means, inspect real scores before choosing a threshold.
+
+## Models and dimensions [#model-and-dims]
+
+Stored vectors depend on the model that produced them. Comparing vectors from different models in one search does not produce meaningful results.
+
+Omnio prevents mixing models in several ways.
+
+- `putObject` records `embedder.info.name` in `embeddingModel`.
+- Text and image queries in `searchObjects` consider only rows with the same model name.
+- `open()` marks rows whose model name or dimensions differ from the current settings as dirty.
+
+After a model change, affected rows are excluded from search until reindexing completes. Metadata reads and listings still return them.
+
+## Reindexing [#reindexing]
+
+Reindexing embeds the description again with the current embedder.
+
+- `open()` processes dirty rows in the background.
+- `reindexObject` processes one object explicitly.
+- Updating a description does not reindex automatically; call `reindexObject`.
+
+If an object is updated or deleted during reindexing, Omnio does not write back an old snapshot. It applies the result if the description and entity are unchanged, and otherwise gives up.
+
+## How search executes [#execution]
+
+The current SQL indexes do not create approximate nearest-neighbor vector indexes. Search scans the rows that match the filter and computes exact similarities.
+
+Search time therefore grows with the number of candidates. For large datasets, consider:
+
+- using `filter` to reduce candidates;
+- lowering `topK`;
+- implementing a custom index with approximate nearest-neighbor search.
+
+Reads do not wait for writes. A search uses only embeddings that are complete at that moment. Rows whose background embedding is still running are not included.
+
+## Full text versus semantic search [#full-text-vs-semantic]
+
+`MetadataFilter.fullText` is a substring match against the description and key. It does not tokenize or rank.
+
+Semantic search can match inputs with different wording when their meaning is close. Choose according to the task.
+
+```ts
+// Literal match
+await omnio.listObjects({ filter: { fullText: "sunset" } });
+
+// Meaning
+await omnio.searchObjects({ query: { text: "dusk by the sea" } });
+```
+
+## Next steps [#next]
+
+- [Manage embeddings](/how-to/manage-embeddings)
+- [Indexes](/reference/indexes)
+- [Embedders](/reference/embedders)

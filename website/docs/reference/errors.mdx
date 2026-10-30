@@ -1,0 +1,187 @@
+---
+title: エラー
+description: Omnio-js が公開する例外クラスと、発生条件のリファレンスです。
+---
+
+## 概要 [#overview]
+
+Omnio-js のエラーはすべて `ErrorBase` を継承し、用途ごとに `InvalidUsageErrorBase`、`UnexpectedErrorBase`、`DbErrorBase`、`EmbErrorBase` の 4 つに分かれています。
+
+`@omniojs/core` からエラークラスとメタデータの型をインポートできます。`omnio` は `ChecksumMismatchError` を再エクスポートします。
+
+```ts
+import {
+  DbNotOpenError,
+  EntityMissingError,
+  InvalidOmnioKeyError,
+  OperationAbortedError,
+} from "@omniojs/core";
+import { ChecksumMismatchError } from "omnio";
+```
+
+## 入力とキーのエラー [#input-errors]
+
+### `ValiError` [#vali-error]
+
+valibot の検証エラーです。`@omniojs/core` ではなく `valibot` からインポートします。
+
+コンストラクターや公開メソッドの入力がスキーマに合わないときに投げられます。`error.issues` に詳細が入ります。
+
+### `InvalidOmnioKeyError` [#invalid-omnio-key-error]
+
+キーが空のとき、1024 文字か 1024 バイトを超えたとき、または正しい UTF-8 でないときに投げられます。
+
+```ts
+class InvalidOmnioKeyError extends InvalidUsageErrorBase<{
+  input: unknown;
+}> {}
+```
+
+`name` は `OmnioInvalidKeyError` です。
+
+## ライフサイクルのエラー [#lifecycle-errors]
+
+### `DbNotOpenError` [#db-not-open-error]
+
+`open()` の前や `close()` の後に操作すると投げられます。
+
+```ts
+class DbNotOpenError extends DbErrorBase<{
+  operation: string;
+}> {}
+```
+
+`name` は `OmnioDbNotOpenError` です。
+
+### `OperationAbortedError` [#operation-aborted-error]
+
+`close()` で実行中の操作を中断するときの理由として使います。
+
+```ts
+class OperationAbortedError extends ErrorBase<undefined> {}
+```
+
+`name` は `OmnioOperationAbortedError` です。
+
+## データのエラー [#data-errors]
+
+### `EntityMissingError` [#entity-missing-error]
+
+インデックスにレコードがあるのに、オブジェクトのバイト列が見つからない場合に投げられます。削除との競合ではなく、データ損失や不整合を示します。
+
+```ts
+class EntityMissingError extends UnexpectedErrorBase<{
+  key: string;
+  entityId: string;
+  hash?: string;
+}> {}
+```
+
+`name` は `OmnioEntityMissingError` です。
+
+### `ChecksumMismatchError` [#checksum-mismatch-error]
+
+取得したバイト列の SHA-256 がインデックスに記録されたハッシュと一致しない場合に投げられます。`@unikvs/checksum` のエラーで、`omnio` から再エクスポートされています。
+
+### `DbQueryError` [#db-query-error]
+
+インデックスのデータベース操作に失敗した場合に投げられます。
+
+```ts
+class DbQueryError extends DbErrorBase<{
+  operation: string;
+  queryText?: string;
+}> {}
+```
+
+`name` は `OmnioDbQueryError` です。
+
+### `VectorDimensionMismatchError` [#vector-dimension-mismatch-error]
+
+ベクトルの次元数が保存先の定義と一致しない場合に投げられます。
+
+```ts
+class VectorDimensionMismatchError extends DbErrorBase<{
+  actual: number;
+  expected: number;
+}> {}
+```
+
+`name` は `OmnioVectorDimensionMismatchError` です。
+
+### `EmbeddingModelMismatchError` [#embedding-model-mismatch-error]
+
+埋め込みモデル名が期待されるものと一致しない場合に使うエラーです。通常の SQL インデックスでは使いませんが、独自のインデックス実装で利用できます。
+
+```ts
+class EmbeddingModelMismatchError extends DbErrorBase<{
+  actual?: string;
+  expected: string;
+}> {}
+```
+
+`name` は `OmnioEmbeddingModelMismatchError` です。
+
+## 埋め込みのエラー [#embedding-errors]
+
+### `ModelLoadError` [#model-load-error]
+
+埋め込みモデルの読み込みに失敗した場合に投げられます。
+
+```ts
+class ModelLoadError extends EmbErrorBase<{
+  model: string;
+}> {}
+```
+
+`name` は `OmnioModelLoadError` です。
+
+### `EmbedFailedError` [#embed-failed-error]
+
+テキストや画像の埋め込みに失敗したときに投げられます。
+
+```ts
+class EmbedFailedError extends EmbErrorBase<{
+  kind: string;
+}> {}
+```
+
+`name` は `OmnioEmbedFailedError` です。
+
+### `UnsupportedModalityError` [#unsupported-modality-error]
+
+埋め込み器が対応していないモダリティーを要求したときに投げられます。
+
+```ts
+class UnsupportedModalityError extends EmbErrorBase<{
+  actual: string;
+  supported: readonly string[];
+}> {}
+```
+
+`name` は `OmnioUnsupportedModalityError` です。
+
+## エラーの基底クラス [#base-classes]
+
+| クラス                  | 用途                                     |
+| ----------------------- | ---------------------------------------- |
+| `ErrorBase`             | すべてのエラーの基底です。               |
+| `InvalidUsageErrorBase` | 不正な使い方を示します。                 |
+| `UnexpectedErrorBase`   | 予期しない失敗を示します。               |
+| `DbErrorBase`           | インデックスとデータベースのエラーです。 |
+| `EmbErrorBase`          | 埋め込みのエラーです。                   |
+
+## メッセージのカスタマイズ [#messages]
+
+`setErrorMessage` を使うと、言語ごとにメッセージを設定できます。
+
+```ts
+import { setErrorMessage, DbQueryError } from "@omniojs/core";
+
+setErrorMessage(DbQueryError, ({ operation }) => `DB エラー: ${operation}`, "ja");
+```
+
+## 次に読む [#next]
+
+- [エラーと中断を扱う](/how-to/handle-errors)
+- [Omnio クラス](/reference/omnio)

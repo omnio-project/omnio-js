@@ -1,0 +1,281 @@
+---
+title: Omnio class
+description: Reference for the Omnio constructor, properties, and public methods.
+---
+
+## Overview [#overview]
+
+`Omnio` is the facade that combines an entity store, an index, and an embedder.
+
+```ts
+import { Omnio } from "omnio";
+
+const omnio = new Omnio({
+  entity,
+  index,
+  embedder,
+});
+
+await omnio.open();
+```
+
+Every method accepts an `AbortSignal`, either as `signal` in its input object or as the last argument. `close()` aborts running operations through the lifecycle signal.
+
+## Constructor [#constructor]
+
+```ts
+new Omnio(options: OmnioOptions)
+```
+
+| Option               | Type                  | Required | Description                                                            |
+| -------------------- | --------------------- | -------- | ---------------------------------------------------------------------- |
+| `entity`             | `IOmnioEntityBuilder` | Yes      | A unikvs builder configured through `persist()`.                       |
+| `index`              | `IObjectIndex`        | Yes      | Metadata and vector index.                                             |
+| `embedder`           | `IEmbedder`           | Yes      | Embedding runtime.                                                     |
+| `purgeGracePeriodMs` | `number`              | No       | Delay before entity bytes are physically deleted. Defaults to `60000`. |
+
+The constructor calls `entity.build()` and injects the checksum middleware. Inputs are validated with valibot and throw `ValiError` when invalid.
+
+## Properties [#properties]
+
+### `isOpen` [#is-open]
+
+```ts
+readonly isOpen: boolean
+```
+
+`true` when both the entity store and the index are open.
+
+## Lifecycle [#lifecycle]
+
+### `open` [#open]
+
+```ts
+open(signal?: AbortSignal): Promise<void>
+```
+
+Opens the entity store and the index. Opening the index applies migrations and marks objects whose embedding model changed as dirty.
+
+Calling `open()` on an open instance does nothing. When `signal` is omitted, the operation times out after 30 seconds.
+
+### `close` [#close]
+
+```ts
+close(signal?: AbortSignal): Promise<void>
+```
+
+Aborts running operations, waits for background work, and closes the index and entity store.
+
+When `signal` is omitted, the operation times out after 30 seconds. If closing the index or entity store fails, it throws, and a later `close()` can retry.
+
+## Writing objects [#write]
+
+### `putObject` [#put-object]
+
+```ts
+putObject<TUserMetadata>(input: PutObjectInput<TUserMetadata>): Promise<OmnioObject<TUserMetadata>>
+```
+
+Saves an object and overwrites an existing key.
+
+| Input          | Type                                               | Required | Default |
+| -------------- | -------------------------------------------------- | -------- | ------- |
+| `key`          | `string \| OmnioKey`                               | Yes      | -       |
+| `data`         | `Uint8Array \| Blob \| ReadableStream<Uint8Array>` | Yes      | -       |
+| `contentType`  | `string`                                           | Yes      | -       |
+| `description`  | `string`                                           | No       | -       |
+| `tags`         | `readonly string[]`                                | No       | `[]`    |
+| `userMetadata` | `TUserMetadata`                                    | No       | `{}`    |
+| `embedding`    | `Float32Array`                                     | No       | -       |
+| `embed`        | `boolean`                                          | No       | `true`  |
+| `signal`       | `AbortSignal`                                      | No       | -       |
+
+When `description` is present, `embedding` is absent, and `embed` is not `false`, Omnio generates an embedding for the description.
+
+An overwrite creates a new `entityId`. It keeps `createdAt` and sets `updatedAt` to the current time.
+
+### `copyObject` [#copy-object]
+
+```ts
+copyObject<TUserMetadata>(
+  sourceKey: string | OmnioKey,
+  destinationKey: string | OmnioKey,
+  signal?: AbortSignal,
+): Promise<OmnioObject<TUserMetadata> | null>
+```
+
+Copies bytes and metadata. The destination gets a new `entityId`. An existing destination is overwritten and keeps its creation time.
+
+A missing source returns `null`. The same key returns the original object.
+
+### `renameObject` [#rename-object]
+
+```ts
+renameObject<TUserMetadata>(
+  sourceKey: string | OmnioKey,
+  destinationKey: string | OmnioKey,
+  signal?: AbortSignal,
+): Promise<OmnioObject<TUserMetadata> | null>
+```
+
+Changes the key without moving the bytes and keeps the same `entityId`. An existing destination is overwritten and its old entity is deleted in the background.
+
+A missing source returns `null`. The same key returns the original object.
+
+### `updateObjectMetadata` [#update-object-metadata]
+
+```ts
+updateObjectMetadata<TUserMetadata>(
+  input: UpdateObjectMetadataInput<TUserMetadata>,
+): Promise<OmnioObject<TUserMetadata> | null>
+```
+
+Updates only mutable metadata. A missing key returns `null`.
+
+| Input          | Type                 | Description                                               |
+| -------------- | -------------------- | --------------------------------------------------------- |
+| `key`          | `string \| OmnioKey` | Key to update.                                            |
+| `contentType`  | `string`             | Omit to leave unchanged.                                  |
+| `description`  | `string`             | Omit to leave unchanged.                                  |
+| `tags`         | `readonly string[]`  | Omit to leave unchanged. An empty array removes all tags. |
+| `userMetadata` | `TUserMetadata`      | Omit to leave unchanged.                                  |
+| `signal`       | `AbortSignal`        | Abort signal.                                             |
+
+Size, hash, creation time, `entityId`, and the embedding cannot be updated. Changing the description does not rebuild the embedding.
+
+## Reading objects [#read]
+
+### `getObject` [#get-object]
+
+```ts
+getObject(key: string | OmnioKey, signal?: AbortSignal): Promise<Uint8Array | null>
+```
+
+Returns the entity bytes. Returns `null` when the key is missing or deleted.
+
+When the index records `hashAlgorithm: "sha256"`, the checksum is verified before the bytes are returned. A record with missing bytes throws `EntityMissingError`.
+
+### `streamObject` [#stream-object]
+
+```ts
+streamObject(
+  key: string | OmnioKey,
+  signal?: AbortSignal,
+): Promise<IValueStream<Uint8Array> | null>
+```
+
+Returns the entity as a stream. Returns `null` when the key is missing or deleted.
+
+The checksum is verified at the end of the stream. It is not verified if the stream is cancelled or not fully consumed. Dispose of the stream on the caller side.
+
+### `headObject` [#head-object]
+
+```ts
+headObject<TUserMetadata>(
+  key: string | OmnioKey,
+  signal?: AbortSignal,
+): Promise<OmnioObject<TUserMetadata> | null>
+
+headObject<TUserMetadata, const TSelect extends HeadObjectSelect>(
+  key: string | OmnioKey,
+  options: HeadObjectOptions<TSelect>,
+): Promise<Pick<OmnioObject<TUserMetadata>, SelectedHeadObjectField<TSelect>> | null>
+```
+
+Returns metadata, or `null` when the key is missing.
+
+Omitting `select` returns every field. When `select` is provided, only fields set to `true` are returned.
+
+```ts
+const head = await omnio.headObject("notes/a.txt", {
+  select: { key: true, size: true, tags: true },
+});
+```
+
+### `hasObject` [#has-object]
+
+```ts
+hasObject(key: string | OmnioKey, signal?: AbortSignal): Promise<boolean>
+```
+
+Returns whether the index has metadata for the key. It does not touch entity storage. A deleted object returns `false`.
+
+### `listObjects` [#list-objects]
+
+```ts
+listObjects<TUserMetadata>(
+  options?: {
+    limit?: number;
+    cursor?: string | null;
+    filter?: MetadataFilter;
+  },
+  signal?: AbortSignal,
+): Promise<IObjectIndex.ListResult<TUserMetadata>>
+```
+
+Returns active objects in ascending key order. The default limit is 100. When `nextCursor` is not `null`, pass it to the next call.
+
+```ts
+type ListResult<TUserMetadata> = {
+  items: readonly OmnioObject<TUserMetadata>[];
+  nextCursor: string | null;
+};
+```
+
+### `searchObjects` [#search-objects]
+
+```ts
+searchObjects<TUserMetadata>(
+  input: SearchObjectsInput,
+): Promise<IndexedObject<TUserMetadata>[]>
+```
+
+Runs a semantic search and returns results in descending score order.
+
+| Input              | Type                                             | Default |
+| ------------------ | ------------------------------------------------ | ------- |
+| `query`            | `{ text } \| { image, mimeType? } \| { vector }` | -       |
+| `topK`             | `number`                                         | `20`    |
+| `minScore`         | `number`                                         | -       |
+| `filter`           | `MetadataFilter`                                 | -       |
+| `includeEmbedding` | `boolean`                                        | `true`  |
+| `signal`           | `AbortSignal`                                    | -       |
+
+`query.text` and `query.image` are embedded with the current embedder, and only stored vectors with the same `embedder.info.name` are considered. `query.vector` does not filter by model name.
+
+`searchObjects` uses the index's default similarity, which is cosine similarity. To use L2 distance, call `IObjectIndex.search` directly.
+
+### `deleteObject` [#delete-object]
+
+```ts
+deleteObject(key: string | OmnioKey, signal?: AbortSignal): Promise<boolean>
+```
+
+Logically deletes the object. Returns `true` when the object was marked deleted and `false` when the key did not exist.
+
+The entity bytes are physically deleted in the background after `purgeGracePeriodMs`.
+
+## Reindexing [#reindex]
+
+### `reindexObject` [#reindex-object]
+
+```ts
+reindexObject<TUserMetadata>(
+  key: string | OmnioKey,
+  signal?: AbortSignal,
+): Promise<OmnioObject<TUserMetadata> | null>
+```
+
+Rebuilds the description embedding with the current embedder. A missing key returns `null`. If there is no description, nothing changes and the current object is returned.
+
+## Cancellation and timeouts [#abort]
+
+- `open` and `close` time out after 30 seconds when no signal is passed.
+- Other methods combine the caller's signal with the lifecycle signal used by `close`.
+- An aborted operation fails with the signal's reason, such as `OperationAbortedError`.
+
+## Next steps [#next]
+
+- [Object model](/reference/object-model)
+- [Metadata filters](/reference/metadata-filter)
+- [Errors](/reference/errors)

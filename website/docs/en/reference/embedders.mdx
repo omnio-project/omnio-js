@@ -1,0 +1,171 @@
+---
+title: Embedders
+description: Reference for Gemma2Embedder options and the IEmbedder interface.
+---
+
+## `Gemma2Embedder` [#gemma2-embedder]
+
+An embedder based on EmbeddingGemma 2. It supports text and images and maps both into the same embedding space.
+
+```ts
+import { Gemma2Embedder } from "@omniojs/emb-gemma2";
+
+const embedder = new Gemma2Embedder();
+```
+
+## Options [#options]
+
+```ts
+type Gemma2EmbedderOptions = {
+  model?: string;
+  dtype?: DataType;
+  subfolder?: string;
+  dims?: number;
+  device?: DeviceType;
+};
+```
+
+| Option      | Default                                  | Description               |
+| ----------- | ---------------------------------------- | ------------------------- |
+| `model`     | `"onnx-community/embeddinggemma-2-ONNX"` | Hugging Face model ID.    |
+| `dtype`     | `"q4"`                                   | Quantization format.      |
+| `subfolder` | `"onnx"`                                 | Model file subfolder.     |
+| `dims`      | `768`                                    | Output vector dimensions. |
+| `device`    | Library default                          | Inference device.         |
+
+When `dims` is smaller than the model output, the vector is truncated and L2-normalized. When it is larger, embedding fails with `EmbedFailedError`.
+
+`dtype` is one of `"auto"`, `"fp32"`, `"fp16"`, `"q8"`, `"int8"`, `"uint8"`, `"q4"`, `"bnb4"`, `"q4f16"`, `"q2"`, `"q2f16"`, `"q1"`, or `"q1f16"`.
+
+`device` is one of `"auto"`, `"gpu"`, `"cpu"`, `"wasm"`, `"webgpu"`, `"cuda"`, `"dml"`, `"coreml"`, `"webnn"`, `"webnn-npu"`, `"webnn-gpu"`, or `"webnn-cpu"`.
+
+```ts
+const embedder = new Gemma2Embedder({
+  dims: 256,
+  dtype: "q8",
+  device: "cpu",
+});
+```
+
+## Capability information [#info]
+
+```ts
+embedder.info;
+// {
+//   dims: 768,
+//   name: "onnx-community/embeddinggemma-2-ONNX",
+//   modalities: ["text", "image"],
+//   normalized: true,
+//   multilingual: true,
+// }
+```
+
+`name` is the model name stored in the index. It is used together with `dims` to decide whether to reindex.
+
+## Behavior [#behavior]
+
+- The model is loaded on the first embedding. A load failure throws `ModelLoadError`.
+- Text uses mean pooling and normalization.
+- Images are decoded to a `RawImage` before embedding.
+- Inference is serialized per instance.
+- `embedText`, `embed`, and `embedMany` accept an `AbortSignal`.
+
+## `IEmbedder` [#iembedder]
+
+The interface for custom embedders.
+
+```ts
+interface IEmbedder {
+  readonly info: EmbedderInfo;
+
+  embed(c: IEmbedder.EmbedContext): MaybePromise<Float32Array>;
+  embedMany(c: IEmbedder.EmbedManyContext): MaybePromise<Float32Array[]>;
+  embedText(c: IEmbedder.EmbedTextContext): MaybePromise<Float32Array>;
+  supports(c: IEmbedder.SupportsContext): boolean;
+}
+```
+
+### `EmbedderInfo` [#embedder-info]
+
+```ts
+type EmbedderInfo = {
+  dims: number;
+  maxTokens?: number;
+  modalities: readonly EmbedModality[];
+  multilingual: boolean;
+  name: string;
+  normalized: boolean;
+};
+```
+
+| Field          | Description                                 |
+| -------------- | ------------------------------------------- |
+| `dims`         | Output vector dimensions.                   |
+| `maxTokens`    | Maximum input tokens, when limited.         |
+| `modalities`   | Supported modalities. `"text"` is required. |
+| `multilingual` | Whether the model is multilingual.          |
+| `name`         | Model name stored in the index.             |
+| `normalized`   | Whether outputs are L2-normalized.          |
+
+### Methods [#methods]
+
+| Method      | Description                              |
+| ----------- | ---------------------------------------- |
+| `embed`     | Embeds one input.                        |
+| `embedMany` | Embeds several inputs.                   |
+| `embedText` | Embeds text.                             |
+| `supports`  | Returns whether a modality is supported. |
+
+`Omnio` uses `embedText` for descriptions and `embed` for image queries.
+
+### Implementation example [#implementation-example]
+
+```ts
+import type { IEmbedder } from "@omniojs/core";
+
+class MyEmbedder implements IEmbedder {
+  readonly info = {
+    dims: 384,
+    name: "my-model-v1",
+    modalities: ["text"],
+    normalized: true,
+    multilingual: false,
+  };
+
+  async embed(c: IEmbedder.EmbedContext): Promise<Float32Array> {
+    return this.#embedInput(c.input, c.signal);
+  }
+
+  async embedMany(c: IEmbedder.EmbedManyContext): Promise<Float32Array[]> {
+    return Promise.all(c.inputs.map((input) => this.#embedInput(input, c.signal)));
+  }
+
+  async embedText(c: IEmbedder.EmbedTextContext): Promise<Float32Array> {
+    return this.#embedInput({ kind: "text", text: c.text }, c.signal);
+  }
+
+  supports(c: IEmbedder.SupportsContext): boolean {
+    return c.modality === "text";
+  }
+
+  async #embedInput(
+    input: IEmbedder.EmbedContext["input"],
+    signal: AbortSignal,
+  ): Promise<Float32Array> {
+    signal.throwIfAborted();
+    // Implement the actual embedding call.
+    return new Float32Array(this.info.dims);
+  }
+}
+```
+
+## Model changes [#model-changes]
+
+When `info.name` or `info.dims` differs from the stored value, `open()` marks the affected objects dirty and reindexes them in the background.
+
+Only active objects with a description and a recorded embedding model are targeted. Objects saved with `embed: false` or an explicit `embedding` are not included.
+
+## Next steps [#next]
+
+- [Manage embeddings](/how-to/manage-embeddings)
+- [How semantic search works](/explanation/semantic-search)

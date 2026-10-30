@@ -1,0 +1,143 @@
+---
+title: Filter and paginate
+description: Narrow objects with metadata conditions and return pages with a cursor.
+---
+
+## List basics [#basics]
+
+`listObjects` returns objects in ascending key order. The default limit is 100.
+
+```ts
+const page = await omnio.listObjects({ limit: 20 });
+
+for (const item of page.items) {
+  console.log(item.key.key);
+}
+
+console.log(page.nextCursor); // null when there are no more pages
+```
+
+## Fetch the next page [#pagination]
+
+Pass `nextCursor` into the next call.
+
+```ts
+let cursor: string | null = null;
+const all = [];
+
+do {
+  const page = await omnio.listObjects({ limit: 100, cursor });
+
+  all.push(...page.items);
+  cursor = page.nextCursor;
+} while (cursor !== null);
+```
+
+The cursor represents an offset from the beginning. If objects are added or removed while you paginate, items can be duplicated or skipped. Avoid writes during a listing when you need a stable snapshot.
+
+## Filter by tag [#tags]
+
+```ts
+// Contains one tag
+await omnio.listObjects({ filter: { tags: "important" } });
+
+// Contains every tag
+await omnio.listObjects({ filter: { tags: { hasEvery: ["work", "2026"] } } });
+
+// Contains any of the tags
+await omnio.listObjects({ filter: { tags: { hasSome: ["red", "blue"] } } });
+
+// Has no tags
+await omnio.listObjects({ filter: { tags: { isEmpty: true } } });
+```
+
+Tag order does not affect comparison.
+
+## Filter by content type [#content-type]
+
+```ts
+await omnio.listObjects({
+  filter: { contentType: "image/jpeg" },
+});
+
+await omnio.listObjects({
+  filter: {
+    contentType: {
+      startsWith: "image/",
+      not: "image/svg+xml",
+    },
+  },
+});
+```
+
+Content types are lowercased when saved. Filter values are treated as lowercase too.
+
+## Filter by size and time [#size-and-time]
+
+```ts
+await omnio.listObjects({
+  filter: {
+    size: { gte: 1024, lt: 10 * 1024 * 1024 },
+    createdAt: { gte: new Date("2026-01-01T00:00:00Z") },
+    updatedAt: { lt: "2026-12-31T23:59:59Z" },
+  },
+});
+```
+
+Timestamps accept ISO 8601 strings or `Date`. Sizes accept numbers and `bigint`.
+
+## Filter by text [#full-text]
+
+`fullText` performs a substring match against the description and key. It does not tokenize words or rank results.
+
+```ts
+await omnio.listObjects({
+  filter: { fullText: "sunset" },
+});
+```
+
+Case sensitivity depends on the database. SQLite ignores case for ASCII, and PostgreSQL uses `ILIKE`.
+
+## Filter by record type [#record-type]
+
+```ts
+await omnio.listObjects({
+  filter: { recordType: "UPDATE_METADATA" },
+});
+```
+
+`recordType` is `"CREATE"`, `"UPDATE_METADATA"`, or `"DELETE"`. Deleted records are always excluded from listings, so filtering by `"DELETE"` produces an empty result.
+
+## Combine conditions [#combine]
+
+Conditions on the same field must all match, and conditions on different fields are applied together.
+
+```ts
+await omnio.listObjects({
+  filter: {
+    contentType: { startsWith: "image/" },
+    tags: { hasEvery: ["public", "2026"] },
+    size: { lte: 5 * 1024 * 1024 },
+    createdAt: { gte: new Date("2026-01-01") },
+  },
+});
+```
+
+## Use filters with search [#with-search]
+
+`searchObjects` accepts the same `filter` shape. It narrows candidates before similarity is calculated.
+
+```ts
+await omnio.searchObjects({
+  query: { text: "a beach photo" },
+  topK: 10,
+  filter: {
+    contentType: { startsWith: "image/" },
+    tags: { has: "public" },
+  },
+});
+```
+
+## Next steps [#next]
+
+See [Metadata filters](/reference/metadata-filter) for exact types and semantics.

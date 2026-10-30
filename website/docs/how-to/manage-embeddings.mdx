@@ -1,0 +1,147 @@
+---
+title: 埋め込みを管理する
+description: 埋め込みの生成を制御し、モデルを変更した後に既存データを再インデックスします。
+---
+
+## 自動生成の条件 [#automatic-embedding]
+
+`putObject` は次の条件をすべて満たすとき、説明文の埋め込みを生成します。
+
+- `embedding` を指定していない
+- `embed` が `false` ではない
+- `description` が存在する
+
+```ts
+const saved = await omnio.putObject({
+  key: "notes/a.txt",
+  data: bytes,
+  contentType: "text/plain",
+  description: "検索対象にしたい説明文",
+});
+```
+
+生成された埋め込みには、モデル名、次元数、由来が記録されます。`embeddingSource.kind` は `"description"` です。
+
+## 自動生成を止める [#disable-embedding]
+
+```ts
+await omnio.putObject({
+  key: "notes/b.txt",
+  data: bytes,
+  contentType: "text/plain",
+  description: "後で埋め込みを作る説明文",
+  embed: false,
+});
+```
+
+このとき、説明文は保存されますが埋め込みは作りません。後から作るには `reindexObject` を使います。
+
+```ts
+await omnio.reindexObject("notes/b.txt");
+```
+
+## 事前に計算したベクトルを使う [#explicit-embedding]
+
+```ts
+await omnio.putObject({
+  key: "vectors/a",
+  data: bytes,
+  contentType: "application/octet-stream",
+  embedding: new Float32Array([0.1, 0.2, 0.3]),
+});
+```
+
+:::warning
+`putObject` に `embedding` を渡すと、モデル名と由来が記録されません。そのため、テキストや画像のクエリーで行う検索では、モデル名による絞り込みの対象から外れます。手動のベクトルは、`query: { vector }` での検索や、インデックスの直接操作に使ってください。
+:::
+
+## 説明文を変えたとき [#change-description]
+
+`updateObjectMetadata` は埋め込みを作り直しません。検索結果に反映するには、更新後に `reindexObject` を呼び出します。
+
+```ts
+await omnio.updateObjectMetadata({
+  key: "notes/a.txt",
+  description: "新しい説明文",
+});
+
+await omnio.reindexObject("notes/a.txt");
+```
+
+説明文がなければ、`reindexObject` は何も変更せず、現在のオブジェクトを返します。
+
+## モデルを変更したとき [#change-model]
+
+`open()` は、保存済みの埋め込みモデルか次元数が現在の `embedder.info` と異なるオブジェクトに dirty フラグを立てます。対象になるのは、説明文があり、埋め込みモデルが記録されている削除されていないオブジェクトだけです。
+
+その後、バックグラウンドで少しずつ再インデックスします。
+
+```ts
+// 以前はモデル A を使っていた。
+const omnio = new Omnio({
+  entity,
+  index,
+  embedder: new Gemma2Embedder({ dims: 256 }),
+});
+
+await omnio.open();
+```
+
+再インデックスが完了するまで、そのオブジェクトはベクトル検索の対象から外れます。`headObject` や `listObjects` では最新のメタデータとして取得できます。
+
+`open()` は再インデックスの完了を待ちません。検索結果が揃うまで時間がかかることがあります。
+
+## 手動で再インデックスする [#manual-reindex]
+
+```ts
+const reindexed = await omnio.reindexObject("photos/sunset.jpg");
+```
+
+`reindexObject` は現在の `embedder` で説明文を埋め込み直し、`embedding`、`embeddingDims`、`embeddingModel`、`embeddingSource`、`updatedAt` を更新します。キーが存在しなければ `null` を返します。
+
+## 独自の埋め込み器を使う [#custom-embedder]
+
+`IEmbedder` を実装し、`info` に次元数、モデル名、対応するモダリティーを設定します。
+
+```ts
+import type { IEmbedder } from "@omniojs/core";
+
+class MyEmbedder implements IEmbedder {
+  readonly info = {
+    dims: 384,
+    name: "my-model-v1",
+    modalities: ["text"],
+    normalized: true,
+    multilingual: false,
+  };
+
+  async embed(c: IEmbedder.EmbedContext) {
+    return this.#embedInput(c.input, c.signal);
+  }
+
+  async embedMany(c: IEmbedder.EmbedManyContext) {
+    return Promise.all(c.inputs.map((input) => this.#embedInput(input, c.signal)));
+  }
+
+  async embedText(c: IEmbedder.EmbedTextContext) {
+    return this.#embedInput({ kind: "text", text: c.text }, c.signal);
+  }
+
+  supports(c: IEmbedder.SupportsContext) {
+    return c.modality === "text";
+  }
+
+  async #embedInput(input: IEmbedder.EmbedContext["input"], signal: AbortSignal) {
+    signal.throwIfAborted();
+    // 実際の埋め込み処理を書きます。
+    return new Float32Array(this.info.dims);
+  }
+}
+```
+
+`info.name` を変更すると、既存の埋め込みは別のモデルのものとして扱われ、次回の `open()` で再インデックスの対象です。`info.dims` を変えたときも同じです。
+
+## 次に読む [#next]
+
+- [意味検索の仕組み](/explanation/semantic-search)
+- [埋め込み器のリファレンス](/reference/embedders)

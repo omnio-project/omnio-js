@@ -1,0 +1,83 @@
+---
+title: Architecture
+description: How entity storage, the index, and the embedder divide responsibilities and process data.
+---
+
+## Three layers [#three-layers]
+
+Omnio combines three components with different responsibilities.
+
+| Layer     | Interface      | Responsibility                                                   |
+| --------- | -------------- | ---------------------------------------------------------------- |
+| Entity    | `IOmnioEntity` | Stores bytes under an `entityId`.                                |
+| Index     | `IObjectIndex` | Stores keys, metadata, tags, embeddings, and purge reservations. |
+| Embedding | `IEmbedder`    | Converts text or images into `Float32Array` values.              |
+
+This separation lets you choose byte storage and metadata search independently. For example, bytes can live on a local file system while the index lives in PostgreSQL.
+
+## Write path [#write-path]
+
+`putObject` processes a write in this order.
+
+1. Validate the input and convert the key to an `OmnioKey`.
+2. Convert the data to bytes.
+3. Generate an embedding when a description exists and embedding is enabled.
+4. Read the existing record for the same key from the index.
+5. Create a new `entityId` and record a purge reservation in the index.
+6. Write the bytes to entity storage and compute SHA-256.
+7. Store metadata and the hash in the index.
+8. Remove the purge reservation that is no longer needed.
+
+The reservation in step 5 is written first so that an unreferenced entity can be reclaimed if the process crashes between steps 6 and 7.
+
+## Read path [#read-path]
+
+`headObject` and `listObjects` read only the index. They do not touch entity storage.
+
+`getObject` and `streamObject` first read the `entityId` and hash from the index, then read bytes from entity storage. If a record exists but its bytes do not, Omnio throws `EntityMissingError`.
+
+## Search path [#search-path]
+
+`searchObjects` processes a query in this order.
+
+1. Embed the query. Text and image queries use `IEmbedder`.
+2. Call `search` on the index.
+3. The index applies `filter` and excludes dirty and deleted rows.
+4. It computes similarity and returns results in descending score order.
+5. With `includeEmbedding: false`, it removes embeddings from the results.
+
+Text and image queries consider only rows whose model name matches the current embedder. This prevents vectors from different models from being mixed.
+
+## Background work [#background-tasks]
+
+`open()` starts background work.
+
+- **Deletion reclamation**: physically deletes entities whose grace period has passed.
+- **Reservation draining**: processes purge reservations left by a crash or an interrupted operation.
+- **Reindexing**: rebuilds embeddings for objects whose model or dimensions changed.
+
+Background work never blocks reads. Searches consider only rows that are complete at that moment.
+
+## Locks [#locks]
+
+Omnio uses `asyncmux` to coordinate lifecycle changes and operations.
+
+- `open` and `close` take an exclusive lock.
+- Normal operations take a shared lock and can run concurrently.
+- Writes to the same key are serialized with a per-key exclusive lock.
+- Operations that touch several keys acquire them in sorted order to avoid deadlocks.
+
+SQL indexes also use shared locks for reads and exclusive locks for writes.
+
+## Why separate the layers [#why-separate]
+
+- Byte storage can use a file system, OPFS, or cloud storage depending on the deployment.
+- Metadata search can use SQL filtering and transactions.
+- Embedding models can be swapped for accuracy, speed, or modality support.
+
+Clear responsibilities let the same API cover an in-memory test setup and a production PostgreSQL setup.
+
+## Next steps [#next]
+
+- [Consistency and lifecycle](/explanation/consistency-and-lifecycle)
+- [How semantic search works](/explanation/semantic-search)

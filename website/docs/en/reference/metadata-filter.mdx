@@ -1,0 +1,156 @@
+---
+title: Metadata filters
+description: Reference for the MetadataFilter types used by listObjects and searchObjects.
+---
+
+## Overview [#overview]
+
+`MetadataFilter` narrows the candidates for listings and searches.
+
+```ts
+type MetadataFilter = {
+  contentType?: string | MetadataFilter.Condition;
+  createdAt?: string | Date | MetadataFilter.DateCondition;
+  fullText?: string;
+  hash?: string | MetadataFilter.Condition;
+  recordTimestamp?: string | Date | MetadataFilter.DateCondition;
+  recordType?: RecordType | MetadataFilter.RecordTypeCondition;
+  size?: number | bigint | MetadataFilter.SizeCondition;
+  tags?: string | MetadataFilter.TagsCondition;
+  updatedAt?: string | Date | MetadataFilter.DateCondition;
+};
+```
+
+Conditions on the same field must all match, and conditions on different fields are applied together.
+
+Deleted records are always excluded, regardless of the filter.
+
+## String conditions [#string-conditions]
+
+For `contentType` and `hash`, a string means exact equality. The object form supports these conditions.
+
+```ts
+type Condition = {
+  contains?: string;
+  endsWith?: string;
+  equals?: string;
+  in?: readonly string[];
+  not?: string;
+  notIn?: readonly string[];
+  startsWith?: string;
+};
+```
+
+| Condition    | Meaning                                                                |
+| ------------ | ---------------------------------------------------------------------- |
+| `equals`     | Exact match.                                                           |
+| `not`        | Not equal.                                                             |
+| `in`         | Matches any of the values. An empty array matches nothing.             |
+| `notIn`      | Matches none of the values. An empty array is treated as no condition. |
+| `contains`   | Substring match.                                                       |
+| `startsWith` | Prefix match.                                                          |
+| `endsWith`   | Suffix match.                                                          |
+
+Substring matching uses SQL `LIKE` or `ILIKE`. `%` and `_` are escaped.
+
+## Date conditions [#date-conditions]
+
+For `createdAt`, `updatedAt`, and `recordTimestamp`, a string or `Date` means exact equality. The object form supports these conditions.
+
+```ts
+type DateCondition = {
+  equals?: string | Date;
+  gt?: string | Date;
+  gte?: string | Date;
+  in?: string | Date | readonly (string | Date)[];
+  lt?: string | Date;
+  lte?: string | Date;
+  not?: string | Date;
+  notIn?: string | Date | readonly (string | Date)[];
+};
+```
+
+Use ISO 8601 timestamps. A `Date` is normalized to an ISO 8601 string. Deleted records are excluded before conditions apply. Their creation and update timestamps are null, but their record timestamp is the deletion time.
+
+## Size conditions [#size-conditions]
+
+For `size`, a number or `bigint` means exact equality. The object form supports these conditions.
+
+```ts
+type SizeCondition = {
+  equals?: number | bigint;
+  gt?: number | bigint;
+  gte?: number | bigint;
+  in?: number | bigint | readonly (number | bigint)[];
+  lt?: number | bigint;
+  lte?: number | bigint;
+  not?: number | bigint | readonly (number | bigint)[];
+  notIn?: readonly (number | bigint)[];
+};
+```
+
+## Tag conditions [#tags-conditions]
+
+For `tags`, a string requires that tag. The object form supports these conditions.
+
+```ts
+type TagsCondition = {
+  equals?: readonly string[];
+  has?: string;
+  hasEvery?: readonly string[];
+  hasSome?: readonly string[];
+  isEmpty?: boolean;
+};
+```
+
+| Condition  | Meaning                                                                         |
+| ---------- | ------------------------------------------------------------------------------- |
+| `has`      | Contains the tag.                                                               |
+| `hasEvery` | Contains every listed tag.                                                      |
+| `hasSome`  | Contains any listed tag. An empty array matches nothing.                        |
+| `equals`   | The tag set matches exactly, regardless of order. An empty array means no tags. |
+| `isEmpty`  | `true` requires no tags; `false` requires at least one.                         |
+
+## Record type conditions [#record-type-conditions]
+
+`recordType` is `"CREATE"`, `"UPDATE_METADATA"`, or `"DELETE"`, or an object with these fields.
+
+```ts
+type RecordTypeCondition = {
+  in?: RecordType | readonly RecordType[];
+  not?: RecordType | readonly RecordType[];
+};
+```
+
+Deleted records are always excluded, so filtering by `"DELETE"` produces an empty result.
+
+## Full text [#full-text]
+
+`fullText` is a substring match against the description concatenated with the key.
+
+```ts
+await omnio.listObjects({
+  filter: { fullText: "sunset" },
+});
+```
+
+- It does not tokenize, stem, or rank.
+- An empty string is treated as no condition.
+- Case sensitivity depends on the database. SQLite ignores case for ASCII, and PostgreSQL uses `ILIKE`.
+
+## Example [#examples]
+
+```ts
+const filter: MetadataFilter = {
+  contentType: { startsWith: "image/" },
+  createdAt: { gte: new Date("2026-01-01T00:00:00Z") },
+  size: { lte: 10 * 1024 * 1024 },
+  tags: { hasEvery: ["public", "2026"] },
+  recordType: "CREATE",
+};
+```
+
+## Next steps [#next]
+
+- [Filter and paginate](/how-to/filter-and-paginate)
+- [Omnio class](/reference/omnio)

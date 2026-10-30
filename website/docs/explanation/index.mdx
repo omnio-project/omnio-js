@@ -1,0 +1,26 @@
+---
+title: 解説
+description: Omnio-js の設計と、一貫性・検索・削除の仕組みを説明します。
+---
+
+## 解説について [#about-explanation]
+
+解説は、Omnio-js がどのように動くのか、なぜその設計になっているのかを理解するための資料です。特定の作業手順は[ハウツーガイド](/how-to)、正確な仕様は[リファレンス](/reference)を参照してください。
+
+## 項目 [#sections]
+
+<CardGroup cols={2}>
+  <Card title="アーキテクチャ" href="/explanation/architecture" icon="blocks">
+    エンティティ、インデックス、埋め込み器の役割と処理の流れです。
+  </Card>
+  <Card
+    title="一貫性とライフサイクル"
+    href="/explanation/consistency-and-lifecycle"
+    icon="shield-check"
+  >
+    ロック、可視性、削除、クラッシュからの復旧です。
+  </Card>
+  <Card title="意味検索の仕組み" href="/explanation/semantic-search" icon="scan-search">
+    埋め込み、スコア、再インデックスの考え方です。
+  </Card>
+</CardGroup>

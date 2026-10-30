@@ -1,0 +1,99 @@
+---
+title: Persist data
+description: Keep entity storage and the index across restarts so objects can be read again.
+---
+
+## The two data locations [#concept]
+
+Omnio data lives in two places.
+
+- **Entities**: the object bytes, stored through unikvs.
+- **Index**: keys, metadata, embeddings, and purge reservations, stored in the `IObjectIndex` database.
+
+You need both to read an object. Back up, migrate, and restore them together.
+
+## Node.js files [#node]
+
+```ts
+import { SqliteNodeIndex } from "@omniojs/idx-sqlite.node";
+import { NodeFs } from "@unikvs/fs.node";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const entity = new unikvs.Builder<EntityMapping>().persist(new NodeFs("./data/entities"));
+const index = new SqliteNodeIndex({ location: "./data/index.sqlite3" });
+```
+
+`NodeFs` creates the root directory and stores one file per `entityId`. The `location` of `SqliteNodeIndex` is the SQLite database file.
+
+## Browser storage [#browser]
+
+```ts
+import { PGliteIndex } from "@omniojs/idx-pglite";
+import { Opfs } from "@unikvs/opfs";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const entity = new unikvs.Builder<EntityMapping>().persist(new Opfs("omnio-entities"));
+const index = new PGliteIndex({ location: "idb://omnio-index" });
+```
+
+OPFS and IndexedDB are scoped to a browser origin. Reloading the page keeps the data, but private browsing modes may discard it.
+
+## PostgreSQL [#postgresql]
+
+```ts
+import { PostgresqlIndex } from "@omniojs/idx-postgresql.node";
+
+const index = new PostgresqlIndex({
+  connectionString: process.env.DATABASE_URL!,
+});
+```
+
+PostgreSQL stores only the index. Entities still need a persistent store such as `NodeFs`.
+
+## In memory [#memory]
+
+For tests and prototypes, use `@unikvs/memory` and an in-memory index. The data is lost when the process exits.
+
+```ts
+import { SqliteWasmIndex } from "@omniojs/idx-sqlite.wasm";
+import { Memory } from "@unikvs/memory";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const entity = new unikvs.Builder<EntityMapping>().persist(new Memory());
+const index = new SqliteWasmIndex();
+```
+
+## Back up [#backup]
+
+1. Stop writes. Call `close()` if you need to release open connections.
+2. Copy both the index database and the entity root directory.
+3. Restore with the same configuration and call `open()`.
+
+Avoid copying a SQLite file while it is being written. For PostgreSQL, take a database backup and copy the entity directory at the same point in time.
+
+## Recovery after restart [#recovery]
+
+`open()` starts background work that:
+
+- physically deletes entities past the grace period;
+- drains purge reservations left by an interrupted operation or crash;
+- reindexes objects whose embedding model or dimensions changed.
+
+As a result, some incomplete work from a previous run is recovered on the next `open()`.
+
+## Caveats [#caveats]
+
+- Multiple processes writing to the same index and entity store are not coordinated by Omnio. You need database-level or application-level locking.
+- An `entityId` is immutable. Do not modify the bytes for an existing `entityId` outside Omnio.
+- Deleting the index without deleting entities leaves orphaned bytes. Treat both as a set.
+
+## Next steps [#next]
+
+- [Consistency and lifecycle](/explanation/consistency-and-lifecycle)
+- [How deletion and recovery work](/explanation/consistency-and-lifecycle#deletion)

@@ -1,0 +1,94 @@
+---
+title: Update, copy, rename, and delete
+description: Choose between metadata updates, copying, renaming, overwriting, and deleting objects.
+---
+
+## Choose an operation [#choose-operation]
+
+| Goal                         | Method                 | Entity behavior                               |
+| ---------------------------- | ---------------------- | --------------------------------------------- |
+| Change metadata only         | `updateObjectMetadata` | Unchanged.                                    |
+| Duplicate bytes and metadata | `copyObject`           | New `entityId`.                               |
+| Change the key               | `renameObject`         | Keeps the same `entityId`.                    |
+| Hide an object               | `deleteObject`         | Logical delete, then physical deletion later. |
+| Replace the contents         | `putObject`            | New `entityId`.                               |
+
+## Update metadata [#update-metadata]
+
+```ts
+const updated = await omnio.updateObjectMetadata({
+  key: "photos/sunset.jpg",
+  description: "Sunset over the beach (taken in 2026)",
+  tags: ["photo", "sunset", "2026"],
+  userMetadata: { takenBy: "Alice", license: "CC BY 4.0" },
+});
+```
+
+You can update `contentType`, `description`, `tags`, and `userMetadata`. Omitted fields are unchanged. An empty `tags` array removes every tag.
+
+Size, hash, creation time, `entityId`, and the embedding cannot be changed.
+
+:::warning
+Updating the description does not rebuild the embedding. Call `reindexObject` to make the new description searchable.
+:::
+
+```ts
+await omnio.updateObjectMetadata({
+  key: "photos/sunset.jpg",
+  description: "The beach at dusk",
+});
+
+await omnio.reindexObject("photos/sunset.jpg");
+```
+
+## Copy an object [#copy]
+
+```ts
+const copied = await omnio.copyObject("photos/sunset.jpg", "archive/sunset-2026.jpg");
+```
+
+The source bytes and metadata are copied, and the destination gets a new `entityId`. If the destination exists, it is overwritten and keeps its original creation time.
+
+The same key returns the original object. A missing source returns `null`.
+
+## Rename an object [#rename]
+
+```ts
+const renamed = await omnio.renameObject("notes/draft.txt", "notes/final.txt");
+```
+
+The bytes are not moved, and the same `entityId` is kept. If the destination exists, it is overwritten and its old entity is deleted in the background.
+
+The same key returns the original object. A missing source returns `null`.
+
+## Delete an object [#delete]
+
+```ts
+const deleted = await omnio.deleteObject("notes/final.txt");
+```
+
+Deletion is logical. The object disappears immediately from `getObject`, `headObject`, `listObjects`, and `searchObjects`.
+
+The bytes are physically deleted in the background after `purgeGracePeriodMs`. If a new object is saved under the same key during the grace period, the old bytes become unreferenced and are reclaimed through the purge reservation.
+
+`deleteObject` returns `true` when it marks the object deleted and `false` when the key does not exist.
+
+## Overwrite an object [#overwrite]
+
+Saving with `putObject` under an existing key replaces the metadata and bytes.
+
+```ts
+await omnio.putObject({
+  key: "notes/final.txt",
+  data: new TextEncoder().encode("Updated contents"),
+  contentType: "text/plain",
+  description: "Updated description",
+});
+```
+
+An overwrite creates a new entity instead of reusing the old `entityId`. The creation time is preserved. The old entity becomes unreferenced and is reclaimed.
+
+## Next steps [#next]
+
+- [Manage embeddings](/how-to/manage-embeddings)
+- [Omnio class reference](/reference/omnio)

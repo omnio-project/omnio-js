@@ -1,0 +1,119 @@
+---
+title: エラーと中断を扱う
+description: Omnio が投げる例外を分類し、AbortSignal で操作を安全に中断します。
+---
+
+## 入力の検証エラー [#validation-errors]
+
+公開メソッドの入力は valibot で検証されます。不正な値には `ValiError` が投げられます。
+
+```ts
+import * as v from "valibot";
+
+try {
+  await omnio.putObject({
+    key: "notes/a.txt",
+    data: bytes,
+    contentType: "text/plain",
+    tags: new Array(11).fill("tag"),
+  });
+} catch (error) {
+  if (error instanceof v.ValiError) {
+    console.error(error.issues);
+  }
+}
+```
+
+タグは最大 10 個、各タグは最大 128 文字かつ 128 バイトです。キーは最大 1024 文字かつ 1024 バイトです。
+
+## よくある例外 [#common-errors]
+
+| エラー                     | 発生する状況                                                           |
+| -------------------------- | ---------------------------------------------------------------------- |
+| `ValiError`                | 入力がスキーマに合わない。                                             |
+| `InvalidOmnioKeyError`     | キーが空、長すぎる、または不正な UTF-8 である。                        |
+| `DbNotOpenError`           | `open()` の前に操作した、または `close()` 後に操作した。               |
+| `OperationAbortedError`    | `close()` によって実行中の操作が中断された。                           |
+| `EntityMissingError`       | インデックスにレコードがあるが、オブジェクトのバイト列が見つからない。 |
+| `ChecksumMismatchError`    | 取得したバイト列の SHA-256 がインデックスのハッシュと一致しない。      |
+| `DbQueryError`             | インデックスのデータベース操作に失敗した。                             |
+| `ModelLoadError`           | 埋め込みモデルの読み込みに失敗した。                                   |
+| `EmbedFailedError`         | テキストまたは画像の埋め込みに失敗した。                               |
+| `UnsupportedModalityError` | 埋め込み器が対応しないモダリティーを要求した。                         |
+
+`error.name` は `OmnioInvalidKeyError` や `OmnioDbNotOpenError` という固有の名前です。クラスで判定できるときは `instanceof` を使ってください。
+
+## 中断シグナルを渡す [#abort-signal]
+
+各メソッドには、最後の引数か入力オブジェクトの `signal` で `AbortSignal` を渡せます。
+
+```ts
+const controller = new AbortController();
+
+const pending = omnio.searchObjects({
+  query: { text: "海辺" },
+  signal: controller.signal,
+});
+
+controller.abort();
+
+try {
+  await pending;
+} catch (error) {
+  if (controller.signal.aborted) {
+    console.log("検索を中断しました", controller.signal.reason);
+  }
+}
+```
+
+時間制限を設けたいときは `AbortSignal.timeout()` を使えます。
+
+```ts
+await omnio.putObject({
+  key: "large/file.bin",
+  data: stream,
+  contentType: "application/octet-stream",
+  signal: AbortSignal.timeout(30_000),
+});
+```
+
+## close による中断 [#close-aborts]
+
+`close()` は、実行中の操作に渡されたシグナルとライフサイクルシグナルをまとめたシグナルで中断します。中断された操作は `OperationAbortedError` で失敗します。
+
+```ts
+const operation = omnio.getObject("notes/a.txt");
+
+await omnio.close();
+
+await operation.catch((error) => {
+  if (error instanceof OperationAbortedError) {
+    // close による中断です。
+  }
+});
+```
+
+`open()` と `close()` は、シグナルを省略すると 30 秒でタイムアウトします。時間がかかりそうなときは、明示的なシグナルを渡してください。
+
+## 再試行する [#retry]
+
+一時的なデータベース障害は `DbQueryError` として現れます。再試行する前に、操作が冪等かどうかを確認してください。
+
+- `getObject`、`headObject`、`hasObject`、`listObjects`、`searchObjects` は読み取りなので、再試行しやすい操作です。
+- `putObject`、`copyObject`、`renameObject`、`deleteObject` は再試行すると新しいバイト列や削除予約が増えることがあります。
+- `updateObjectMetadata` は同じ内容であれば再試行しても結果は変わりません。
+
+## エラーメッセージを翻訳する [#localize]
+
+`@omniojs/core` は `setErrorMessage` を公開しています。アプリケーションの言語に合わせてメッセージを差し替えられます。
+
+```ts
+import { DbNotOpenError, setErrorMessage } from "@omniojs/core";
+
+setErrorMessage(DbNotOpenError, () => "データベースが開かれていません", "ja");
+```
+
+## 次に読む [#next]
+
+- [エラーのリファレンス](/reference/errors)
+- [一貫性とライフサイクル](/explanation/consistency-and-lifecycle)

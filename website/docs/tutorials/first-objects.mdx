@@ -1,0 +1,233 @@
+---
+title: 最初のオブジェクトを保存する
+description: Omnio を組み立て、オブジェクトの保存・取得・検索・削除を一通り試します。
+---
+
+## このチュートリアルで作るもの [#what-you-will-build]
+
+テキストをオブジェクトとして保存し、メタデータを取得して意味検索を試し、最後に削除する小さなプログラムを作ります。
+
+データを Node.js のファイルシステムと SQLite に保存するので、プログラムを終了しても内容が残ります。
+
+## 1. プロジェクトを用意する [#create-project]
+
+空のディレクトリーを作り、必要なパッケージをインストールします。
+
+```sh
+mkdir omnio-tutorial
+cd omnio-tutorial
+pnpm init
+pnpm add omnio @omniojs/idx-sqlite.node @omniojs/emb-gemma2 unikvs @unikvs/fs.node valibot @logtape/logtape
+pnpm add -D tsx typescript
+```
+
+`package.json` に `"type": "module"` を追加してください。
+
+```json
+{
+  "type": "module"
+}
+```
+
+## 2. Omnio を組み立てる [#construct-omnio]
+
+`src/main.ts` を作り、エンティティストレージ、インデックス、埋め込み器を指定します。
+
+```ts src/main.ts
+import { Gemma2Embedder } from "@omniojs/emb-gemma2";
+import { SqliteNodeIndex } from "@omniojs/idx-sqlite.node";
+import { NodeFs } from "@unikvs/fs.node";
+import { Omnio } from "omnio";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const omnio = new Omnio({
+  entity: new unikvs.Builder<EntityMapping>().persist(new NodeFs("./omnio-entities")),
+  index: new SqliteNodeIndex({ location: "./omnio.sqlite3" }),
+  embedder: new Gemma2Embedder(),
+});
+
+await omnio.open();
+
+try {
+  // ここに操作を書きます。
+} finally {
+  await omnio.close();
+}
+```
+
+`entity` はバイト列の保存先です。`unikvs` のビルダーに `persist()` まで構成したものを渡します。`Omnio` はコンストラクターで `build()` を実行します。
+
+`index` はメタデータと埋め込みベクトルのインデックスです。`SqliteNodeIndex` は開くときに必要なテーブルを自動で作成します。
+
+`embedder` は説明文を埋め込みベクトルに変換する部品です。`Gemma2Embedder` は初回の埋め込み時にモデルをダウンロードします。
+
+## 3. オブジェクトを保存する [#put-an-object]
+
+`try` ブロックに、オブジェクトを保存するコードを追加します。
+
+```ts
+const bytes = new TextEncoder().encode(
+  "Omnio は、オブジェクトにメタデータと埋め込みを付けられるライブラリです。",
+);
+
+const saved = await omnio.putObject({
+  key: "notes/first.txt",
+  data: bytes,
+  contentType: "text/plain",
+  description: "Omnio を初めて使うときのメモ",
+  tags: ["tutorial", "note"],
+  userMetadata: { language: "ja" },
+});
+
+console.log(saved.key.key); // notes/first.txt
+console.log(saved.size); // 保存したバイト数
+console.log(saved.tags); // ["tutorial", "note"]
+```
+
+`description` を指定すると、既定ではその説明文の埋め込みも生成されます。`key` は文字列または `OmnioKey` を受け付けます。
+
+## 4. メタデータとバイト列を取得する [#read-the-object]
+
+保存した内容を取得します。メタデータだけが必要な場合は `headObject`、バイト列が必要な場合は `getObject` を使います。
+
+```ts
+const head = await omnio.headObject("notes/first.txt", {
+  select: {
+    key: true,
+    size: true,
+    tags: true,
+    description: true,
+  },
+});
+
+console.log(head);
+
+const data = await omnio.getObject("notes/first.txt");
+console.log(data === null ? "見つかりません" : new TextDecoder().decode(data));
+```
+
+`headObject` の `select` を省略すると、すべてのメタデータを取得します。`getObject` は保存したバイト列をそのまま返します。
+
+## 5. 意味検索する [#search]
+
+説明文に近いオブジェクトを検索します。
+
+```ts
+const results = await omnio.searchObjects({
+  query: { text: "初めてのメモ" },
+  topK: 5,
+});
+
+for (const result of results) {
+  console.log(result.key.key, result.score);
+}
+```
+
+`searchObjects` はクエリーのテキストを埋め込み、保存済みの埋め込みと比較します。結果は類似度の高い順に並び、各結果に `score` が付きます。
+
+## 6. 一覧と削除 [#list-and-delete]
+
+タグで絞り込んで一覧を取得し、最後にオブジェクトを削除します。
+
+```ts
+const list = await omnio.listObjects({
+  filter: { tags: { has: "note" } },
+});
+
+console.log(list.items.map((item) => item.key.key));
+
+const deleted = await omnio.deleteObject("notes/first.txt");
+console.log(deleted); // true
+
+console.log(await omnio.hasObject("notes/first.txt")); // false
+console.log(await omnio.getObject("notes/first.txt")); // null
+```
+
+削除は論理削除です。取得や検索の結果からはすぐに見えなくなりますが、オブジェクトのバイト列は猶予期間の後にバックグラウンドで削除されます。
+
+## 7. 実行する [#run]
+
+```sh
+pnpm tsx src/main.ts
+```
+
+最初の実行では埋め込みモデルのダウンロードに時間がかかります。2 回目以降はキャッシュが使われます。
+
+## 完成したコード [#complete-code]
+
+```ts src/main.ts
+import { Gemma2Embedder } from "@omniojs/emb-gemma2";
+import { SqliteNodeIndex } from "@omniojs/idx-sqlite.node";
+import { NodeFs } from "@unikvs/fs.node";
+import { Omnio } from "omnio";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const omnio = new Omnio({
+  entity: new unikvs.Builder<EntityMapping>().persist(new NodeFs("./omnio-entities")),
+  index: new SqliteNodeIndex({ location: "./omnio.sqlite3" }),
+  embedder: new Gemma2Embedder(),
+});
+
+await omnio.open();
+
+try {
+  const bytes = new TextEncoder().encode(
+    "Omnio は、オブジェクトにメタデータと埋め込みを付けられるライブラリです。",
+  );
+
+  const saved = await omnio.putObject({
+    key: "notes/first.txt",
+    data: bytes,
+    contentType: "text/plain",
+    description: "Omnio を初めて使うときのメモ",
+    tags: ["tutorial", "note"],
+    userMetadata: { language: "ja" },
+  });
+
+  console.log(saved.key.key);
+  console.log(saved.tags);
+
+  const head = await omnio.headObject("notes/first.txt", {
+    select: {
+      key: true,
+      size: true,
+      tags: true,
+      description: true,
+    },
+  });
+
+  console.log(head);
+
+  const data = await omnio.getObject("notes/first.txt");
+  console.log(data === null ? "見つかりません" : new TextDecoder().decode(data));
+
+  const results = await omnio.searchObjects({
+    query: { text: "初めてのメモ" },
+    topK: 5,
+  });
+
+  for (const result of results) {
+    console.log(result.key.key, result.score);
+  }
+
+  const list = await omnio.listObjects({
+    filter: { tags: { has: "note" } },
+  });
+
+  console.log(list.items.map((item) => item.key.key));
+
+  console.log(await omnio.deleteObject("notes/first.txt"));
+  console.log(await omnio.hasObject("notes/first.txt"));
+  console.log(await omnio.getObject("notes/first.txt"));
+} finally {
+  await omnio.close();
+}
+```
+
+## 次に読む [#next]
+
+[意味検索を試す](/tutorials/semantic-search)では、複数のオブジェクトを保存し、絞り込みや画像検索を試します。実運用に向けた構成は[部品を選んで設定する](/how-to/configure-stack)を参照してください。

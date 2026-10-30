@@ -1,0 +1,187 @@
+---
+title: Errors
+description: Exception classes and conditions exposed by Omnio-js.
+---
+
+## Overview [#overview]
+
+Errors derive from `ErrorBase` and branch into `InvalidUsageErrorBase`, `UnexpectedErrorBase`, `DbErrorBase`, and `EmbErrorBase`.
+
+Import error classes and metadata types from `@omniojs/core`. `omnio` re-exports `ChecksumMismatchError`.
+
+```ts
+import {
+  DbNotOpenError,
+  EntityMissingError,
+  InvalidOmnioKeyError,
+  OperationAbortedError,
+} from "@omniojs/core";
+import { ChecksumMismatchError } from "omnio";
+```
+
+## Input and key errors [#input-errors]
+
+### `ValiError` [#vali-error]
+
+The valibot validation error. Import it from `valibot`, not from `@omniojs/core`.
+
+It is thrown when constructor or method input does not match the schema. `error.issues` contains details.
+
+### `InvalidOmnioKeyError` [#invalid-omnio-key-error]
+
+Thrown when a key is empty, exceeds 1024 characters or 1024 bytes, or is not valid UTF-8.
+
+```ts
+class InvalidOmnioKeyError extends InvalidUsageErrorBase<{
+  input: unknown;
+}> {}
+```
+
+`name` is `OmnioInvalidKeyError`.
+
+## Lifecycle errors [#lifecycle-errors]
+
+### `DbNotOpenError` [#db-not-open-error]
+
+Thrown when an operation runs before `open()` or after `close()`.
+
+```ts
+class DbNotOpenError extends DbErrorBase<{
+  operation: string;
+}> {}
+```
+
+`name` is `OmnioDbNotOpenError`.
+
+### `OperationAbortedError` [#operation-aborted-error]
+
+Used as the reason when `close()` aborts a running operation.
+
+```ts
+class OperationAbortedError extends ErrorBase<undefined> {}
+```
+
+`name` is `OmnioOperationAbortedError`.
+
+## Data errors [#data-errors]
+
+### `EntityMissingError` [#entity-missing-error]
+
+Thrown when the index has a record but the entity bytes are missing. It indicates data loss or inconsistency, not a race with deletion.
+
+```ts
+class EntityMissingError extends UnexpectedErrorBase<{
+  key: string;
+  entityId: string;
+  hash?: string;
+}> {}
+```
+
+`name` is `OmnioEntityMissingError`.
+
+### `ChecksumMismatchError` [#checksum-mismatch-error]
+
+Thrown when the SHA-256 of the retrieved bytes does not match the hash stored in the index. This is a `@unikvs/checksum` error re-exported from `omnio`.
+
+### `DbQueryError` [#db-query-error]
+
+Thrown when an index database operation fails.
+
+```ts
+class DbQueryError extends DbErrorBase<{
+  operation: string;
+  queryText?: string;
+}> {}
+```
+
+`name` is `OmnioDbQueryError`.
+
+### `VectorDimensionMismatchError` [#vector-dimension-mismatch-error]
+
+Thrown when a vector's dimensions do not match the index definition.
+
+```ts
+class VectorDimensionMismatchError extends DbErrorBase<{
+  actual: number;
+  expected: number;
+}> {}
+```
+
+`name` is `OmnioVectorDimensionMismatchError`.
+
+### `EmbeddingModelMismatchError` [#embedding-model-mismatch-error]
+
+An error for when an embedding model name does not match the expected value. The normal SQL index path does not use it, but a custom index can.
+
+```ts
+class EmbeddingModelMismatchError extends DbErrorBase<{
+  actual?: string;
+  expected: string;
+}> {}
+```
+
+`name` is `OmnioEmbeddingModelMismatchError`.
+
+## Embedding errors [#embedding-errors]
+
+### `ModelLoadError` [#model-load-error]
+
+Thrown when the embedding model cannot be loaded.
+
+```ts
+class ModelLoadError extends EmbErrorBase<{
+  model: string;
+}> {}
+```
+
+`name` is `OmnioModelLoadError`.
+
+### `EmbedFailedError` [#embed-failed-error]
+
+Thrown when text or image embedding fails.
+
+```ts
+class EmbedFailedError extends EmbErrorBase<{
+  kind: string;
+}> {}
+```
+
+`name` is `OmnioEmbedFailedError`.
+
+### `UnsupportedModalityError` [#unsupported-modality-error]
+
+Thrown when an embedder is asked for a modality it does not support.
+
+```ts
+class UnsupportedModalityError extends EmbErrorBase<{
+  actual: string;
+  supported: readonly string[];
+}> {}
+```
+
+`name` is `OmnioUnsupportedModalityError`.
+
+## Base classes [#base-classes]
+
+| Class                   | Purpose                    |
+| ----------------------- | -------------------------- |
+| `ErrorBase`             | Base for every error.      |
+| `InvalidUsageErrorBase` | Invalid usage.             |
+| `UnexpectedErrorBase`   | Unexpected failure.        |
+| `DbErrorBase`           | Index and database errors. |
+| `EmbErrorBase`          | Embedding errors.          |
+
+## Customize messages [#messages]
+
+Use `setErrorMessage` to set messages per language.
+
+```ts
+import { setErrorMessage, DbQueryError } from "@omniojs/core";
+
+setErrorMessage(DbQueryError, ({ operation }) => `Database error: ${operation}`, "en");
+```
+
+## Next steps [#next]
+
+- [Handle errors and cancellation](/how-to/handle-errors)
+- [Omnio class](/reference/omnio)

@@ -1,0 +1,94 @@
+---
+title: 更新・複製・移動・削除
+description: 保存済みオブジェクトのメタデータ更新、複製、キー変更、削除の使い分けを説明します。
+---
+
+## 操作の選び方 [#choose-operation]
+
+| やりたいこと           | メソッド               | バイト列の扱い                   |
+| ---------------------- | ---------------------- | -------------------------------- |
+| メタデータだけを変える | `updateObjectMetadata` | 変更しません。                   |
+| バイト列ごと複製する   | `copyObject`           | 新しい `entityId` で複製します。 |
+| キーを変える           | `renameObject`         | 同じ `entityId` を維持します。   |
+| 削除する（論理削除）   | `deleteObject`         | 論理削除し、後で物理削除します。 |
+| 内容を上書きする       | `putObject`            | 新しい `entityId` で保存します。 |
+
+## メタデータを更新する [#update-metadata]
+
+```ts
+const updated = await omnio.updateObjectMetadata({
+  key: "photos/sunset.jpg",
+  description: "海辺に沈む夕日（2026 年撮影）",
+  tags: ["photo", "sunset", "2026"],
+  userMetadata: { takenBy: "Alice", license: "CC BY 4.0" },
+});
+```
+
+`contentType`、`description`、`tags`、`userMetadata` を更新できます。省略した項目は変更しません。`tags` に空配列を渡すと、すべてのタグを削除します。
+
+サイズ、ハッシュ、作成時刻、`entityId`、埋め込みは更新できません。
+
+:::warning
+説明文を更新しても、埋め込みベクトルは自動では作り直されません。検索に反映するには `reindexObject` を呼び出してください。
+:::
+
+```ts
+await omnio.updateObjectMetadata({
+  key: "photos/sunset.jpg",
+  description: "夕暮れの海辺",
+});
+
+await omnio.reindexObject("photos/sunset.jpg");
+```
+
+## バイト列ごと複製する [#copy]
+
+```ts
+const copied = await omnio.copyObject("photos/sunset.jpg", "archive/sunset-2026.jpg");
+```
+
+複製元のバイト列とメタデータをコピーし、複製先には新しい `entityId` を割り当てます。複製先が存在すれば上書きし、作成時刻は引き継ぎます。
+
+同じキーを指定した場合は何もせず、元のオブジェクトを返します。複製元が存在しない場合は `null` を返します。
+
+## キーを変更する [#rename]
+
+```ts
+const renamed = await omnio.renameObject("notes/draft.txt", "notes/final.txt");
+```
+
+オブジェクトのバイト列は移動せず、同じ `entityId` を維持します。変更先が存在すれば上書きし、元の変更先が持っていたエンティティはバックグラウンドで削除されます。
+
+同じキーを指定した場合は元のオブジェクトを返します。変更元が存在しない場合は `null` を返します。
+
+## 削除する [#delete]
+
+```ts
+const deleted = await omnio.deleteObject("notes/final.txt");
+```
+
+削除は論理削除です。直後から `getObject`、`headObject`、`listObjects`、`searchObjects` の結果に現れなくなります。
+
+オブジェクトのバイト列は `purgeGracePeriodMs` の猶予期間が過ぎた後にバックグラウンドで削除されます。猶予期間中に同じキーで新しいオブジェクトを保存した場合、古いバイト列は参照されなくなり、予約に従って回収されます。
+
+`deleteObject` は削除フラグを立てたら `true`、キーが存在しなければ `false` を返します。
+
+## 上書きする [#overwrite]
+
+`putObject` で同じキーに保存すると、メタデータとバイト列を置き換えます。
+
+```ts
+await omnio.putObject({
+  key: "notes/final.txt",
+  data: new TextEncoder().encode("更新後の内容"),
+  contentType: "text/plain",
+  description: "更新後の説明",
+});
+```
+
+上書きすると、既存の `entityId` は使わずに新しいバイト列を保存します。作成時刻は引き継ぎます。古いバイト列は参照されなくなり、回収されます。
+
+## 次に読む [#next]
+
+- [埋め込みを管理する](/how-to/manage-embeddings)
+- [Omnio クラスのリファレンス](/reference/omnio)

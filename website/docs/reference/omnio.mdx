@@ -1,0 +1,281 @@
+---
+title: Omnio クラス
+description: Omnio のコンストラクター、プロパティ、公開メソッドのリファレンスです。
+---
+
+## 概要 [#overview]
+
+`Omnio` は、エンティティストレージ、インデックス、埋め込み器をまとめ、外部に API を提供するクラスです。
+
+```ts
+import { Omnio } from "omnio";
+
+const omnio = new Omnio({
+  entity,
+  index,
+  embedder,
+});
+
+await omnio.open();
+```
+
+すべてのメソッドには、入力オブジェクトの `signal` か最後の引数で `AbortSignal` を渡せます。`close()` はライフサイクルシグナルを通じて、実行中の操作を中断します。
+
+## コンストラクター [#constructor]
+
+```ts
+new Omnio(options: OmnioOptions)
+```
+
+| オプション           | 型                    | 必須   | 説明                                                              |
+| -------------------- | --------------------- | ------ | ----------------------------------------------------------------- |
+| `entity`             | `IOmnioEntityBuilder` | はい   | `persist()` まで構成した unikvs ビルダーです。                    |
+| `index`              | `IObjectIndex`        | はい   | メタデータとベクトルのインデックスです。                          |
+| `embedder`           | `IEmbedder`           | はい   | 埋め込みを生成する部品です。                                      |
+| `purgeGracePeriodMs` | `number`              | いいえ | バイト列を物理削除するまでの猶予時間です。既定値は `60000` です。 |
+
+コンストラクターは `entity.build()` を実行し、チェックサム用のミドルウェアを注入します。入力は valibot で検証され、不正な値には `ValiError` が投げられます。
+
+## プロパティ [#properties]
+
+### `isOpen` [#is-open]
+
+```ts
+readonly isOpen: boolean
+```
+
+エンティティストレージとインデックスの両方が開いているとき `true` です。
+
+## ライフサイクル [#lifecycle]
+
+### `open` [#open]
+
+```ts
+open(signal?: AbortSignal): Promise<void>
+```
+
+エンティティストレージとインデックスを開きます。インデックスを開くとマイグレーションが適用され、埋め込みモデルや次元数が変わったオブジェクトに dirty フラグが立ちます。
+
+すでに開いているときは何もしません。`signal` を省略すると 30 秒でタイムアウトします。
+
+### `close` [#close]
+
+```ts
+close(signal?: AbortSignal): Promise<void>
+```
+
+実行中の操作を中断し、バックグラウンド処理の完了を待ってから、インデックスとエンティティストレージを閉じます。
+
+`signal` を省略すると 30 秒でタイムアウトします。インデックスかエンティティストレージを閉じるのに失敗すると例外を投げますが、次回の `close()` で再試行できます。
+
+## オブジェクトの書き込み [#write]
+
+### `putObject` [#put-object]
+
+```ts
+putObject<TUserMetadata>(input: PutObjectInput<TUserMetadata>): Promise<OmnioObject<TUserMetadata>>
+```
+
+オブジェクトを保存します。同じキーが存在する場合は上書きします。
+
+| 入力           | 型                                                 | 必須   | 既定値 |
+| -------------- | -------------------------------------------------- | ------ | ------ |
+| `key`          | `string \| OmnioKey`                               | はい   | -      |
+| `data`         | `Uint8Array \| Blob \| ReadableStream<Uint8Array>` | はい   | -      |
+| `contentType`  | `string`                                           | はい   | -      |
+| `description`  | `string`                                           | いいえ | -      |
+| `tags`         | `readonly string[]`                                | いいえ | `[]`   |
+| `userMetadata` | `TUserMetadata`                                    | いいえ | `{}`   |
+| `embedding`    | `Float32Array`                                     | いいえ | -      |
+| `embed`        | `boolean`                                          | いいえ | `true` |
+| `signal`       | `AbortSignal`                                      | いいえ | -      |
+
+`description` があり、`embedding` がなく、`embed` が `false` でない場合、説明文の埋め込みを生成します。
+
+上書き時も新しい `entityId` を割り当てます。`createdAt` は既存の値を引き継ぎ、`updatedAt` は現在時刻に更新します。
+
+### `copyObject` [#copy-object]
+
+```ts
+copyObject<TUserMetadata>(
+  sourceKey: string | OmnioKey,
+  destinationKey: string | OmnioKey,
+  signal?: AbortSignal,
+): Promise<OmnioObject<TUserMetadata> | null>
+```
+
+バイト列とメタデータを複製します。複製先には新しい `entityId` を割り当てます。複製先が存在すれば上書きし、作成時刻は引き継ぎます。
+
+複製元が存在しない場合は `null` を返します。同じキーを指定した場合は元のオブジェクトを返します。
+
+### `renameObject` [#rename-object]
+
+```ts
+renameObject<TUserMetadata>(
+  sourceKey: string | OmnioKey,
+  destinationKey: string | OmnioKey,
+  signal?: AbortSignal,
+): Promise<OmnioObject<TUserMetadata> | null>
+```
+
+キーを変更します。オブジェクトのバイト列は移動せず、同じ `entityId` を維持します。変更先が存在すれば上書きし、元の変更先のバイト列はバックグラウンドで削除されます。
+
+変更元が存在しない場合は `null` を返します。同じキーを指定した場合は元のオブジェクトを返します。
+
+### `updateObjectMetadata` [#update-object-metadata]
+
+```ts
+updateObjectMetadata<TUserMetadata>(
+  input: UpdateObjectMetadataInput<TUserMetadata>,
+): Promise<OmnioObject<TUserMetadata> | null>
+```
+
+変更可能なメタデータだけを更新します。キーが存在しなければ `null` を返します。
+
+| 入力           | 型                   | 説明                                                   |
+| -------------- | -------------------- | ------------------------------------------------------ |
+| `key`          | `string \| OmnioKey` | 更新するキーです。                                     |
+| `contentType`  | `string`             | 省略時は変更しません。                                 |
+| `description`  | `string`             | 省略時は変更しません。                                 |
+| `tags`         | `readonly string[]`  | 省略時は変更しません。空配列を渡すとすべて削除します。 |
+| `userMetadata` | `TUserMetadata`      | 省略時は変更しません。                                 |
+| `signal`       | `AbortSignal`        | 中断シグナルです。                                     |
+
+サイズ、ハッシュ、作成時刻、`entityId`、埋め込みは更新できません。説明文を変更しても埋め込みは作り直されません。
+
+## オブジェクトの読み取り [#read]
+
+### `getObject` [#get-object]
+
+```ts
+getObject(key: string | OmnioKey, signal?: AbortSignal): Promise<Uint8Array | null>
+```
+
+オブジェクトのバイト列を返します。削除済みか存在しない場合は `null` を返します。
+
+インデックスに `hashAlgorithm: "sha256"` が記録されている場合は、返す前にチェックサムを検証します。インデックスにレコードがあるのにバイト列がない場合は `EntityMissingError` を投げます。
+
+### `streamObject` [#stream-object]
+
+```ts
+streamObject(
+  key: string | OmnioKey,
+  signal?: AbortSignal,
+): Promise<IValueStream<Uint8Array> | null>
+```
+
+オブジェクトをストリームで返します。削除済みか存在しない場合は `null` を返します。
+
+チェックサムはストリームの終端で検証されます。途中でキャンセルしたり、最後まで読み取らなかった場合は検証されません。取得したストリームは呼び出し側で破棄してください。
+
+### `headObject` [#head-object]
+
+```ts
+headObject<TUserMetadata>(
+  key: string | OmnioKey,
+  signal?: AbortSignal,
+): Promise<OmnioObject<TUserMetadata> | null>
+
+headObject<TUserMetadata, const TSelect extends HeadObjectSelect>(
+  key: string | OmnioKey,
+  options: HeadObjectOptions<TSelect>,
+): Promise<Pick<OmnioObject<TUserMetadata>, SelectedHeadObjectField<TSelect>> | null>
+```
+
+メタデータを返します。キーが存在しなければ `null` を返します。
+
+`select` を省略するとすべての項目を返します。指定すると、`true` にした項目だけを返します。
+
+```ts
+const head = await omnio.headObject("notes/a.txt", {
+  select: { key: true, size: true, tags: true },
+});
+```
+
+### `hasObject` [#has-object]
+
+```ts
+hasObject(key: string | OmnioKey, signal?: AbortSignal): Promise<boolean>
+```
+
+インデックスにメタデータが存在するかを返します。エンティティストレージは参照しません。削除済みの場合は `false` です。
+
+### `listObjects` [#list-objects]
+
+```ts
+listObjects<TUserMetadata>(
+  options?: {
+    limit?: number;
+    cursor?: string | null;
+    filter?: MetadataFilter;
+  },
+  signal?: AbortSignal,
+): Promise<IObjectIndex.ListResult<TUserMetadata>>
+```
+
+削除されていないオブジェクトをキーの昇順で返します。既定の件数は 100 件です。`nextCursor` が `null` でなければ、次の呼び出しに渡してください。
+
+```ts
+type ListResult<TUserMetadata> = {
+  items: readonly OmnioObject<TUserMetadata>[];
+  nextCursor: string | null;
+};
+```
+
+### `searchObjects` [#search-objects]
+
+```ts
+searchObjects<TUserMetadata>(
+  input: SearchObjectsInput,
+): Promise<IndexedObject<TUserMetadata>[]>
+```
+
+意味検索をして、結果をスコアの降順で返します。
+
+| 入力               | 型                                               | 既定値 |
+| ------------------ | ------------------------------------------------ | ------ |
+| `query`            | `{ text } \| { image, mimeType? } \| { vector }` | -      |
+| `topK`             | `number`                                         | `20`   |
+| `minScore`         | `number`                                         | -      |
+| `filter`           | `MetadataFilter`                                 | -      |
+| `includeEmbedding` | `boolean`                                        | `true` |
+| `signal`           | `AbortSignal`                                    | -      |
+
+`query.text` と `query.image` は現在の埋め込み器で埋め込みます。対象になるのは、`embedder.info.name` に一致する保存済みベクトルだけです。`query.vector` ではモデル名で絞り込みません。
+
+`searchObjects` はインデックスの既定の類似度計算を使うので、コサイン類似度で検索します。L2 距離を使うときは `IObjectIndex.search` を直接呼び出してください。
+
+### `deleteObject` [#delete-object]
+
+```ts
+deleteObject(key: string | OmnioKey, signal?: AbortSignal): Promise<boolean>
+```
+
+論理削除します。削除フラグを立てたら `true`、キーが存在しなければ `false` を返します。
+
+バイト列は `purgeGracePeriodMs` の後にバックグラウンドで物理削除されます。
+
+## 再インデックス [#reindex]
+
+### `reindexObject` [#reindex-object]
+
+```ts
+reindexObject<TUserMetadata>(
+  key: string | OmnioKey,
+  signal?: AbortSignal,
+): Promise<OmnioObject<TUserMetadata> | null>
+```
+
+現在の埋め込み器で説明文の埋め込みを作り直します。キーが存在しなければ `null` を返します。説明文がなければ何も変更せず、現在のオブジェクトを返します。
+
+## 中断とタイムアウト [#abort]
+
+- `open` と `close` は、シグナルを省略すると 30 秒でタイムアウトします。
+- それ以外のメソッドは、呼び出し側のシグナルと `close` 時のライフサイクルシグナルをまとめて使います。
+- 中断された操作は `OperationAbortedError` など、シグナルの理由で失敗します。
+
+## 次に読む [#next]
+
+- [オブジェクトモデル](/reference/object-model)
+- [メタデータフィルター](/reference/metadata-filter)
+- [エラー](/reference/errors)

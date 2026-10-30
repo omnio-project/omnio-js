@@ -1,0 +1,85 @@
+---
+title: 画像で検索する
+description: 画像クエリーを使った意味検索と、その前提条件を説明します。
+---
+
+## 画像クエリーの仕組み [#how-it-works]
+
+`Gemma2Embedder` はテキストと画像を同じ埋め込み空間に変換します。`searchObjects` に画像を渡すと、画像をベクトルに変換し、保存済みの説明文のベクトルと比較します。
+
+```ts
+import { readFile } from "node:fs/promises";
+
+const image = await readFile("./query.jpg");
+
+const results = await omnio.searchObjects({
+  query: {
+    image,
+    mimeType: "image/jpeg",
+  },
+  topK: 10,
+});
+```
+
+`mimeType` は省略できますが、指定すると画像の読み込みが安定します。`Uint8Array` と `Blob` のどちらも受け付けます。
+
+## 保存済みデータとの関係 [#stored-data]
+
+Omnio が自動で埋め込むのは、`putObject` の `description` です。保存したファイルのバイト列を画像として自動で埋め込むわけではありません。
+
+そのため、画像クエリーは「保存済みオブジェクトの説明文」との類似度を計算します。画像そのものを検索したいときは、画像の内容を説明するテキストを `description` に保存してください。
+
+```ts
+await omnio.putObject({
+  key: "photos/sunset.jpg",
+  data: imageBytes,
+  contentType: "image/jpeg",
+  description: "海辺に沈む夕日。空はオレンジ色で、波は静かです。",
+  tags: ["photo", "sunset"],
+});
+```
+
+## モデルを揃える [#same-model]
+
+テキスト検索と画像検索では、保存時と同じ埋め込みモデルを使います。`searchObjects` は現在の `embedder.info.name` で結果を絞り込みます。
+
+`Gemma2Embedder` の `model`、`dtype`、`dims` を変えた場合は、既存の埋め込みが再インデックスの対象です。詳細は[埋め込みを管理する](/how-to/manage-embeddings)を参照してください。
+
+## 絞り込みと件数 [#filter-and-limit]
+
+画像検索でも `filter`、`topK`、`minScore` を使えます。
+
+```ts
+const results = await omnio.searchObjects({
+  query: { image: imageBytes, mimeType: "image/png" },
+  topK: 5,
+  minScore: 0.4,
+  filter: {
+    contentType: { startsWith: "image/" },
+    tags: { has: "public" },
+  },
+});
+```
+
+## 結果の埋め込みを省く [#omit-embedding]
+
+```ts
+const results = await omnio.searchObjects({
+  query: { image: imageBytes },
+  topK: 5,
+  includeEmbedding: false,
+});
+```
+
+画像検索の結果にも、既定では `Float32Array` の埋め込みが含まれます。不要な場合は省いてください。
+
+## 注意点 [#caveats]
+
+- 画像の埋め込みには、モデルの画像処理機能が必要です。`Gemma2Embedder` は初回に追加のモデルファイルを読み込みます。
+- 画像の内容そのものをインデックスに保存したいときは、独自の `IObjectIndex` やベクトル登録の経路を検討してください。`putObject` の `embedding` はモデル名を記録しないため、通常のテキスト検索からは除外されます。
+- 画像の MIME タイプが実際のデータと違うと、読み込みに失敗して `EmbedFailedError` になることがあります。
+
+## 次に読む [#next]
+
+- [埋め込み器のリファレンス](/reference/embedders)
+- [意味検索の仕組み](/explanation/semantic-search)

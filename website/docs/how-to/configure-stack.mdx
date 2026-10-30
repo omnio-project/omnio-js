@@ -1,0 +1,122 @@
+---
+title: 部品を選んで設定する
+description: 実行環境に合わせてエンティティストレージ、インデックス、埋め込み器を選び、Omnio を組み立てます。
+---
+
+## 構成を決める [#choose-components]
+
+`Omnio` のコンストラクターには、次の 3 つが必須です。
+
+| 部品       | 役割                                     | 選択肢の例                                        |
+| ---------- | ---------------------------------------- | ------------------------------------------------- |
+| `entity`   | バイト列の保存先です。                   | unikvs のメモリー、Node.js ファイルシステム、OPFS |
+| `index`    | メタデータとベクトルのインデックスです。 | SQLite、PGlite、PostgreSQL                        |
+| `embedder` | テキストや画像の埋め込み器です。         | `Gemma2Embedder`、独自実装                        |
+
+実行環境ごとの組み合わせは次のとおりです。
+
+| 環境                       | エンティティ  | インデックス                           | 埋め込み         |
+| -------------------------- | ------------- | -------------------------------------- | ---------------- |
+| Node.js の単一プロセス     | `NodeFs`      | `SqliteNodeIndex`                      | `Gemma2Embedder` |
+| ブラウザー                 | `Opfs`        | `PGliteIndex` または `SqliteWasmIndex` | `Gemma2Embedder` |
+| サーバーと共有データベース | `NodeFs` など | `PostgresqlIndex`                      | `Gemma2Embedder` |
+
+## Node.js で構成する [#node]
+
+```ts
+import { Gemma2Embedder } from "@omniojs/emb-gemma2";
+import { SqliteNodeIndex } from "@omniojs/idx-sqlite.node";
+import { NodeFs } from "@unikvs/fs.node";
+import { Omnio } from "omnio";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const omnio = new Omnio({
+  entity: new unikvs.Builder<EntityMapping>().persist(new NodeFs("./data/entities")),
+  index: new SqliteNodeIndex({ location: "./data/index.sqlite3" }),
+  embedder: new Gemma2Embedder(),
+});
+
+await omnio.open();
+```
+
+## ブラウザーで構成する [#browser]
+
+OPFS はブラウザーの Origin Private File System です。PGlite の保存先には IndexedDB を指定できます。
+
+```ts
+import { Gemma2Embedder } from "@omniojs/emb-gemma2";
+import { PGliteIndex } from "@omniojs/idx-pglite";
+import { Opfs } from "@unikvs/opfs";
+import { Omnio } from "omnio";
+import * as unikvs from "unikvs";
+
+type EntityMapping = Record<string, unikvs.Value<Uint8Array>>;
+
+const omnio = new Omnio({
+  entity: new unikvs.Builder<EntityMapping>().persist(new Opfs("omnio-entities")),
+  index: new PGliteIndex({ location: "idb://omnio-index" }),
+  embedder: new Gemma2Embedder(),
+});
+
+await omnio.open();
+```
+
+## PostgreSQL を使う [#postgresql]
+
+複数のプロセスやサーバーから同じインデックスを参照するときは、`PostgresqlIndex` を使います。
+
+```ts
+import { PostgresqlIndex } from "@omniojs/idx-postgresql.node";
+
+const index = new PostgresqlIndex({
+  connectionString: process.env.DATABASE_URL!,
+  maxConnections: 10,
+});
+```
+
+接続先のデータベースで pgvector 拡張を作成できる権限が必要です。マイグレーション時に `CREATE EXTENSION IF NOT EXISTS vector` を実行します。
+
+## 削除の猶予期間を設定する [#purge-grace-period]
+
+`purgeGracePeriodMs` は、論理削除したオブジェクトのバイト列を物理削除するまでの猶予時間です。既定値は 60000 ミリ秒です。
+
+```ts
+const omnio = new Omnio({
+  entity,
+  index,
+  embedder,
+  purgeGracePeriodMs: 5 * 60 * 1000,
+});
+```
+
+読み取り中のストリームを守りたいときは長めに、テストや一時データですぐ消したいときは `0` を指定します。
+
+## 独自の部品を実装する [#custom-components]
+
+`index` は `IObjectIndex`、`embedder` は `IEmbedder`、`entity` は `IOmnioEntityBuilder` を満たす必要があります。インターフェースの詳細は[インデックス](/reference/indexes)、[埋め込み器](/reference/embedders)、[エンティティストレージ](/reference/storage)を参照してください。
+
+`entity` のビルダーでは、`build(options)` で受け取った `beforeAll` を unikvs の `build()` に渡してください。`Omnio` はチェックサム用のミドルウェアをこのオプションで注入します。
+
+## 設定値を検証する [#validation]
+
+コンストラクターと各メソッドの入力は valibot で検証されます。不正な値には `ValiError` が投げられます。
+
+```ts
+import * as v from "valibot";
+
+try {
+  new Omnio({ entity, index, embedder, purgeGracePeriodMs: -1 });
+} catch (error) {
+  if (error instanceof v.ValiError) {
+    console.error("設定が不正です", error.issues);
+  }
+}
+```
+
+## 次に読む [#next]
+
+- [データを永続化する](/how-to/persist-data)
+- [インデックスのリファレンス](/reference/indexes)
+- [エラーと中断を扱う](/how-to/handle-errors)

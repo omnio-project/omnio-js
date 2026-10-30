@@ -1,0 +1,147 @@
+---
+title: Manage embeddings
+description: Control embedding generation and reindex existing objects after changing the model.
+---
+
+## When embeddings are generated [#automatic-embedding]
+
+`putObject` generates an embedding from the description when all of these are true:
+
+- no `embedding` was provided;
+- `embed` is not `false`;
+- a `description` is present.
+
+```ts
+const saved = await omnio.putObject({
+  key: "notes/a.txt",
+  data: bytes,
+  contentType: "text/plain",
+  description: "Text that should be searchable",
+});
+```
+
+The generated embedding records the model name, dimensions, and source. `embeddingSource.kind` is `"description"`.
+
+## Disable generation [#disable-embedding]
+
+```ts
+await omnio.putObject({
+  key: "notes/b.txt",
+  data: bytes,
+  contentType: "text/plain",
+  description: "An embedding will be created later",
+  embed: false,
+});
+```
+
+The description is saved, but no embedding is created. Create one later with `reindexObject`.
+
+```ts
+await omnio.reindexObject("notes/b.txt");
+```
+
+## Provide a precomputed vector [#explicit-embedding]
+
+```ts
+await omnio.putObject({
+  key: "vectors/a",
+  data: bytes,
+  contentType: "application/octet-stream",
+  embedding: new Float32Array([0.1, 0.2, 0.3]),
+});
+```
+
+:::warning
+When you pass `embedding` to `putObject`, no model name or source is recorded. As a result, that object is excluded from text and image queries that filter by model name. Use manual vectors with `query: { vector }` or by calling the index directly.
+:::
+
+## Change a description [#change-description]
+
+`updateObjectMetadata` does not rebuild the embedding. Update the description and then call `reindexObject`.
+
+```ts
+await omnio.updateObjectMetadata({
+  key: "notes/a.txt",
+  description: "A new description",
+});
+
+await omnio.reindexObject("notes/a.txt");
+```
+
+If there is no description, `reindexObject` changes nothing and returns the current object.
+
+## Change the model [#change-model]
+
+`open()` marks objects whose saved embedding model or dimensions differ from the current `embedder.info`. It targets active objects that have a description and a recorded embedding model.
+
+It then reindexes them in the background.
+
+```ts
+// Previously indexed with model A.
+const omnio = new Omnio({
+  entity,
+  index,
+  embedder: new Gemma2Embedder({ dims: 256 }),
+});
+
+await omnio.open();
+```
+
+Until reindexing finishes, those objects are excluded from vector search. `headObject` and `listObjects` still return their latest metadata.
+
+`open()` does not wait for reindexing. Search results may take time to become complete.
+
+## Reindex manually [#manual-reindex]
+
+```ts
+const reindexed = await omnio.reindexObject("photos/sunset.jpg");
+```
+
+`reindexObject` embeds the description with the current `embedder` and updates `embedding`, `embeddingDims`, `embeddingModel`, `embeddingSource`, and `updatedAt`. A missing key returns `null`.
+
+## Use a custom embedder [#custom-embedder]
+
+Implement `IEmbedder` and set the dimensions, model name, and modalities in `info`.
+
+```ts
+import type { IEmbedder } from "@omniojs/core";
+
+class MyEmbedder implements IEmbedder {
+  readonly info = {
+    dims: 384,
+    name: "my-model-v1",
+    modalities: ["text"],
+    normalized: true,
+    multilingual: false,
+  };
+
+  async embed(c: IEmbedder.EmbedContext) {
+    // Convert the input to a 384-dimensional Float32Array.
+  }
+
+  async embedMany(c: IEmbedder.EmbedManyContext) {
+    return Promise.all(c.inputs.map((input) => this.#embedInput(input, c.signal)));
+  }
+
+  async embedText(c: IEmbedder.EmbedTextContext) {
+    return this.#embedInput({ kind: "text", text: c.text }, c.signal);
+  }
+
+  supports(c: IEmbedder.SupportsContext) {
+    return c.modality === "text";
+  }
+
+  async #embedInput(input: IEmbedder.EmbedContext["input"], signal: AbortSignal) {
+    signal.throwIfAborted();
+    // Implement the real embedding call here.
+    return new Float32Array(this.info.dims);
+  }
+}
+```
+
+Changing `info.name` treats existing embeddings as belonging to another model, and they are reindexed on the next `open()`. The same applies to `info.dims`.
+
+## Next steps [#next]
+
+- [How semantic search works](/explanation/semantic-search)
+- [Embedder reference](/reference/embedders)
