@@ -1,11 +1,10 @@
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite-pgvector";
-import { withMetadataFilter } from "@omniojs/idx-sql";
 import { sql, Kysely, PGliteDialect } from "kysely";
-import { type Migration, Migrator } from "kysely/migration";
+import type { Migration } from "kysely/migration";
 import { test, describe } from "vite-plus/test";
 
-import { MIGRATIONS, PGliteMigrationProvider } from "../src/migrations.js";
+import { MIGRATIONS } from "../src/migrations.js";
 import type { PGliteDatabase } from "../src/schema.js";
 
 /**
@@ -28,11 +27,7 @@ function requireMigration(name: string): Migration {
 describe("マイグレーション", () => {
   test("journal スキーマを作成し、タグを外部キーで連動させる", async ({ expect }) => {
     // 準備：
-    expect(Object.keys(MIGRATIONS).toSorted()).toStrictEqual([
-      "001_create_journal",
-      "002_normalize_journal_timestamps",
-      "003_create_pending_purge",
-    ]);
+    expect(Object.keys(MIGRATIONS).toSorted()).toStrictEqual(["001_create_journal"]);
 
     const migration = requireMigration("001_create_journal");
     const pglite = new PGlite({
@@ -151,81 +146,11 @@ describe("マイグレーション", () => {
       const tables = await sql<{ count: number }>`
         select count(*)::integer as count
         from information_schema.tables
-        where table_schema = 'public' and table_name in ('journal', 'object_tag')
+        where table_schema = 'public'
+          and table_name in ('journal', 'object_tag', 'pending_purge')
       `.execute(db);
       expect(tables.rows[0]?.count).toBe(0);
     } finally {
-      await db.destroy();
-    }
-  });
-
-  test("002 で旧形式の日時を正規化する", async ({ expect }) => {
-    // 準備：
-    const pglite = new PGlite({
-      extensions: {
-        vector,
-      },
-    });
-    const db = new Kysely<PGliteDatabase>({
-      dialect: new PGliteDialect({ pglite }),
-    });
-
-    try {
-      const migrator = new Migrator({
-        db,
-        provider: new PGliteMigrationProvider(),
-      });
-      const first = await migrator.migrateTo("001_create_journal");
-      expect(first.error).toBeUndefined();
-
-      await sql`
-        insert into journal (
-          key,
-          entity_id,
-          record_type,
-          record_timestamp,
-          created_at,
-          updated_at
-        )
-        values (
-          'legacy',
-          '00000000-0000-4000-8000-000000000001',
-          'CREATE',
-          '2026-01-03T09:00:00+0900',
-          '2026-01-01T09:00:00+0900',
-          '2026-01-02T09:00:00+09'
-        )
-      `.execute(db);
-      const before = await db
-        .selectFrom("journal")
-        .select(["created_at", "updated_at", "record_timestamp"])
-        .where("key", "=", "legacy")
-        .executeTakeFirstOrThrow();
-
-      // 実行：
-      const latest = await migrator.migrateToLatest();
-
-      // 検証：
-      expect(latest.error).toBeUndefined();
-      expect(before.created_at).toBe("2026-01-01T09:00:00+0900");
-      expect(before.updated_at).toBe("2026-01-02T09:00:00+09");
-      expect(before.record_timestamp).toBe("2026-01-03T09:00:00+0900");
-
-      const after = await db
-        .selectFrom("journal")
-        .select(["created_at", "updated_at", "record_timestamp"])
-        .where("key", "=", "legacy")
-        .executeTakeFirstOrThrow();
-      expect(after.created_at).toBe("2026-01-01T00:00:00.000Z");
-      expect(after.updated_at).toBe("2026-01-02T00:00:00.000Z");
-      expect(after.record_timestamp).toBe("2026-01-03T00:00:00.000Z");
-
-      const matched = await withMetadataFilter(db.selectFrom("journal").select("key"), {
-        createdAt: "2026-01-01T00:00:00.000Z",
-      }).execute();
-      expect(matched.map((row) => row.key)).toStrictEqual(["legacy"]);
-    } finally {
-      // 後始末：
       await db.destroy();
     }
   });
