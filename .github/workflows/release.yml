@@ -34,6 +34,21 @@ jobs:
   release:
     timeout-minutes: 60
     runs-on: ubuntu-latest
+    services:
+      # idx-postgresql.node のテストが使うデータベースです。
+      # ジョブのコンテナー内には docker がないため、テスト用の PostgreSQL は
+      # サービスコンテナーとして起動し、DATABASE_URL で接続先を渡します。
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: omnio
+        options: >-
+          --health-cmd "pg_isready -U postgres -d omnio"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     container:
       # pnpm-workspace.yaml の playwright と同じバージョンに合わせます。
       # ブラウザーとシステム依存関係が導入済みのため、Playwright 用の apt 処理は不要です。
@@ -135,6 +150,7 @@ jobs:
         env:
           # Firefox は HOME が現在のユーザー所有でないと起動できません。
           HOME: /root
+          DATABASE_URL: postgres://postgres:postgres@postgres:5432/omnio
         run: |
           dirs="$(jq -r '.workspaces[]' package.json)"
           while IFS= read -r dir; do
