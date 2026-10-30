@@ -19,6 +19,12 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
 
+    // テストファイルごとに専用のスキーマーを作り直します。
+    // しかし kysely のマイグレーターは接続先の全スキーマーを introspection します。
+    // 並行して別ファイルがスキーマーを削除すると "relation ... does not exist" で失敗します。
+    // そのため、テストファイルは直列に実行します。
+    fileParallelism: false,
+
     coverage: {
       include: ["src/**/*.ts"],
 
