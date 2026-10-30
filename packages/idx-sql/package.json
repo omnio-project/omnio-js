@@ -1,6 +1,6 @@
 {
   "name": "@omniojs/idx-sql",
-  "version": "0.0.0",
+  "version": "0.0.5",
   "description": "SQL データベースによる Omnio.js 用 ObjectIndex の共通実装です。",
   "homepage": "https://omnio-project.github.io/omnio-js/",
   "license": "MIT",
